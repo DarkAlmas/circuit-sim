@@ -31,8 +31,14 @@
   const GROUPS = ['Платы', 'Питание', 'Микросхемы', 'Индикация', 'Активные', 'Датчики', 'Пассивные', 'Полупроводники', 'Ввод/вывод'];
   function palette() {
     const q = $('#search').value.trim().toLowerCase();
-    $('#palette').innerHTML = GROUPS.map(g => { const items = Object.entries(P).filter(([k, d]) => d.group === g && (!q || d.name.toLowerCase().includes(q)));
-      return items.length ? `<div class="grp">${g}</div>` + items.map(([k, d]) => `<div class="item" draggable="true" data-type="${k}">${d.name}</div>`).join('') : ''; }).join('') || '<p class="muted">Ничего не найдено</p>';
+    // v12: built with DOM nodes (no innerHTML); each item has an icon badge for the phone 4-column grid
+    const pal = $('#palette'); pal.textContent = ''; const ICON = { 'Платы': '🧠', 'Питание': '🔋', 'Микросхемы': '▦', 'Индикация': '💡', 'Активные': '⚙', 'Датчики': '📡', 'Пассивные': '〰', 'Полупроводники': '▷', 'Ввод/вывод': '🔘' }; let any = false;
+    for (const g of GROUPS) { const items = Object.entries(P).filter(([k, d]) => d.group === g && (!q || d.name.toLowerCase().includes(q))); if (!items.length) continue; any = true;
+      const h = document.createElement('div'); h.className = 'grp'; h.textContent = g; pal.appendChild(h);
+      for (const [k, d] of items) { const it = document.createElement('div'); it.className = 'item'; it.draggable = true; it.dataset.type = k;
+        const ic = document.createElement('span'); ic.className = 'ico'; ic.textContent = ICON[g] || (d.prefix || k.slice(0, 2)).slice(0, 3); const nm = document.createElement('span'); nm.className = 'nm'; nm.textContent = d.name;
+        it.append(ic, nm); pal.appendChild(it); } }
+    if (!any) { const m = document.createElement('p'); m.className = 'muted'; m.textContent = 'Ничего не найдено'; pal.appendChild(m); }
   }
   $('#search').oninput = palette;
   $('#palette').addEventListener('dragstart', e => { const t = e.target.closest('.item'); if (t) e.dataTransfer.setData('text/part', t.dataset.type); });
@@ -429,7 +435,7 @@
   /* sketch worker lifecycle: a crashed/hung worker (exception, OOM, infinite loop) is torn down, a fresh idle
    * worker is created right away, the console explains what happened, and the next Run uses the fresh worker. */
   let spare = null, crashes = 0;
-  const newWorker = () => new Worker('worker.js?v=11');
+  const newWorker = () => new Worker('worker.js?v=12');
   function takeWorker() { const w = spare || newWorker(); spare = null; return w; }
   function crash(msg) { if (!worker) return; worker.onmessage = worker.onerror = null; try { worker.terminate(); } catch (e) {} worker = null; gpio = {}; prevV = null; crashes++;
     try { spare = newWorker(); } catch (e) { spare = null; }
@@ -555,5 +561,5 @@
   lastJ = JSON.stringify(strip(proj));
   layout(); palette(); projList(); $('#code').value = proj.code ?? DEFAULT_CODE; fit(); render(); props(); calc();
   window.addEventListener('resize', () => { if (!running) render(); });
-  window.__sim = { get proj() { return proj; }, get running() { return running; }, changed() { changed(); }, select(id) { sel = id && part(id) ? { part: id } : null; render(); props(); }, get sel() { return sel; }, get wireMode() { return wireMode; }, get armed() { return armed; }, get meas() { return meas; }, start, stop, undo, get gpio() { return gpio; }, get shorts() { return shorts; }, get crashes() { return crashes; }, get simTime() { return simTime; }, get hasWorker() { return !!worker; }, get worker() { return worker; }, get hasSpare() { return !!spare; }, get rf() { return rf; }, get extra() { return Object.keys(extra); }, codeFor: id => setCodeTarget(id), get cam() { return cam; }, render: () => render(), select: id => { sel = { part: id }; props(); calc(); render(); } };
+  window.__sim = { fit: () => { fit(); render(); }, del: () => del(), rotate: () => rotate(), get proj() { return proj; }, get running() { return running; }, changed() { changed(); }, select(id) { sel = id && part(id) ? { part: id } : null; render(); props(); }, get sel() { return sel; }, get wireMode() { return wireMode; }, get armed() { return armed; }, get meas() { return meas; }, start, stop, undo, get gpio() { return gpio; }, get shorts() { return shorts; }, get crashes() { return crashes; }, get simTime() { return simTime; }, get hasWorker() { return !!worker; }, get worker() { return worker; }, get hasSpare() { return !!spare; }, get rf() { return rf; }, get extra() { return Object.keys(extra); }, codeFor: id => setCodeTarget(id), get cam() { return cam; }, render: () => render(), select: id => { sel = { part: id }; props(); calc(); render(); } };
 })();

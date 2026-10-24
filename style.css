@@ -119,3 +119,67 @@ button.danger,.fbtn.danger{background:#7a2020;border-color:#b33}
 @media (max-width:899px){#rtabs button{min-height:44px}.rgrp button,.rgrp select{min-height:44px}.rhint{display:none}#rpane{padding-top:58px}}
 /* v10 */.rdir{display:inline-flex;gap:6px;align-items:center;color:#d8dee9;font-size:12px}.rdir[hidden]{display:none}.rdir input{width:64px}@media (max-width:899px){.rdir input{min-height:44px}}
 /* v11 */.rpid{display:inline-flex;gap:10px;align-items:center;color:#d8dee9;font-size:12px;flex-wrap:wrap}.rpid[hidden]{display:none}.rpid label{display:inline-flex;gap:4px;align-items:center}.rpid input{width:90px}.rpidv{min-width:26px}@media (max-width:899px){.rpid input{min-height:44px;width:110px}}
+/* v12: portrait phone UI (body.pm is set by mobile.js for ≤600px portrait); landscape/desktop keep the layout above */
+#pmPlay,#pmMore,#pmTabs,#pmMenu,#pmFit,#mDel,#pmSym,.pmHandle{display:none}
+#rsens{display:none}
+body.pm{font-size:14px;height:100dvh;overflow:hidden;padding:env(safe-area-inset-top) env(safe-area-inset-right) 0 env(safe-area-inset-left);box-sizing:border-box}
+body.pm header{height:48px;flex:0 0 48px;padding:2px 6px;gap:6px;position:relative;flex-wrap:nowrap;align-items:center;overflow:hidden}
+body.pm header>*:not(#projects):not(#pmPlay):not(#pmMore){display:none!important}
+body.pm #projects{display:block;flex:0 1 calc(50% - 40px);width:auto;min-width:0;max-width:calc(50% - 40px);min-height:44px;font-size:14px;font-weight:600;background:transparent;border:0;text-overflow:ellipsis}
+body.pm #pmPlay{display:block;position:absolute;left:50%;top:2px;transform:translateX(-50%);width:56px;min-height:44px;font-size:20px;padding:0}
+body.pm #pmMore{display:block;margin-left:auto;width:48px;min-height:44px;font-size:22px;padding:0}
+body.pm #pmMenu:not([hidden]){display:flex;flex-direction:column;position:fixed;top:calc(48px + env(safe-area-inset-top));right:calc(6px + env(safe-area-inset-right));z-index:80;background:#1a2030;border:1px solid #39435a;border-radius:12px;padding:6px;box-shadow:0 8px 28px #000c;min-width:220px}
+body.pm #pmMenu button{min-height:44px;font-size:15px;text-align:left;border:0;background:transparent;padding:6px 12px}
+body.pm #pmTabs{display:flex;flex:0 0 44px;background:#1a2030;border-bottom:1px solid #2a3242}
+body.pm #pmTabs button{flex:1;min-height:44px;font-size:14px;border:0;border-radius:0;background:transparent;border-bottom:3px solid transparent;padding:0 2px}
+body.pm #pmTabs button[hidden]{display:none}
+body.pm #pmTabs button.on{border-bottom-color:#3fb37f;color:#fff;font-weight:600}
+body.pm main{flex:1;min-height:0;display:flex;flex-direction:column;overflow:hidden}
+body.pm #center{flex:1;min-height:0}
+body.pm #rtabs{display:none!important}
+body.pm #pmFit{display:block;position:absolute;right:8px;bottom:12px;z-index:23;width:44px;height:44px;font-size:20px;padding:0}
+body.pm:not([data-ptab=schema]) #pmFit{display:none}
+/* schema bottom bar: Детали · Провод · Свойства · 🗑 */
+body.pm #mbar{display:flex;gap:4px;padding:4px 6px calc(4px + env(safe-area-inset-bottom));flex:0 0 auto}
+body.pm #mbar button{min-height:56px;font-size:14px}
+body.pm #mCode{display:none}
+body.pm #mDel{display:block;flex:0 0 56px}
+body.pm:not([data-ptab=schema]) #mbar{display:none}
+/* sheets */
+body.pm .pmHandle{display:flex;flex:0 0 28px;justify-content:center;align-items:center;height:28px;touch-action:none;cursor:grab;position:sticky;top:0;background:inherit;z-index:2}
+body.pm .pmHandle i{width:44px;height:5px;border-radius:3px;background:#5a6478}
+body.pm #left,body.pm #right{bottom:calc(64px + env(safe-area-inset-bottom));max-height:none!important;overflow:auto;padding-top:0;box-sizing:border-box}
+body.pm #left{height:var(--h-left,60vh)}body.pm #right{height:var(--h-right,40vh)}
+body.pm #search{min-height:44px;font-size:16px;width:100%;box-sizing:border-box}
+body.pm #palette{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px}
+body.pm #palette .grp,body.pm #palette .muted{grid-column:1/-1;font-size:14px}
+body.pm #palette .item{flex-direction:column;justify-content:center;gap:2px;min-height:72px;margin:0;padding:4px 2px;text-align:center;font-size:12px;line-height:1.15;overflow:hidden;word-break:break-word}
+body.pm #palette .item .ico{font-size:20px}
+body.pm #left .hint{display:none}
+body.pm #props .cards{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px}
+body.pm #props .card{min-width:0}
+body.pm #props input,body.pm #props select,body.pm #props button{min-height:44px;font-size:16px}
+/* code tab: full-screen editor, symbol strip above the keyboard, Serial as a collapsed sheet */
+body.pm[data-sheet=code] #codePane{position:fixed;left:env(safe-area-inset-left);right:env(safe-area-inset-right);top:calc(92px + env(safe-area-inset-top));bottom:calc(var(--kb,0px) + 48px + 72px + env(safe-area-inset-bottom));height:auto;display:flex;flex-direction:column}
+body.pm[data-sheet=code].kbopen #codePane{bottom:calc(var(--kb,0px) + 48px)}
+body.pm #code{flex:1;font-size:var(--codefs,14px);min-height:0}
+body.pm .codebar{font-size:14px}
+body.pm[data-sheet=code] #pmSym{display:flex;position:fixed;left:0;right:0;bottom:calc(var(--kb,0px) + 72px + env(safe-area-inset-bottom));z-index:60;gap:3px;padding:2px 4px;background:#1a2030;border-top:1px solid #2a3242;overflow-x:auto}
+body.pm[data-sheet=code].kbopen #pmSym{bottom:var(--kb,0px)}
+body.pm #pmSym button{flex:1 0 34px;min-height:44px;font:600 16px ui-monospace,monospace;padding:0}
+body.pm[data-sheet=code] footer#bottom{display:block;bottom:0;height:var(--h-bside,72px);padding-bottom:env(safe-area-inset-bottom);overflow:hidden}
+body.pm[data-sheet=code][data-ser=open] footer#bottom{height:var(--h-bside,45vh);z-index:70}
+body.pm[data-sheet=code].kbopen footer#bottom{display:none}
+body.pm #bside{display:flex;flex-direction:column;height:100%}body.pm #bside .tabs button{min-height:40px;font-size:14px}
+body.pm #bside .pane{flex:1;overflow:auto;font-size:14px}
+body.pm #codeDock{display:none}
+/* track tab: canvas full width, PID sliders + sensor values below */
+body.pm #rpane{padding-top:0}
+body.pm #rcanvas{order:1;flex:1 1 auto}
+body.pm #rsens{display:block;order:2;white-space:pre-wrap;font:14px ui-monospace,monospace;color:#d8dee9;padding:4px 8px;background:#161b27;max-height:76px;overflow:auto}
+body.pm #rpane .rbar{order:3;padding:4px 6px calc(4px + env(safe-area-inset-bottom));max-height:40vh;overflow:auto}
+body.pm[data-ptab=chassis] #rsens{display:none}
+body.pm .rpid{font-size:14px;width:100%}body.pm .rpid label{flex:1 1 100%}body.pm .rpid input{flex:1;width:auto;min-height:44px}
+body.pm .rgrp button,body.pm .rgrp select,body.pm .rgrp input[type=number]{min-height:44px;font-size:14px}
+body.pm .rspd,body.pm .rdir{font-size:14px}
+body.pm button,body.pm select,body.pm input{touch-action:manipulation}

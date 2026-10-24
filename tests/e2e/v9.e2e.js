@@ -7,7 +7,7 @@ const EX = 'ex:Пример: Робот-машинка на трассе (про
   /* ---- desktop 1920×1080 ---- */
   const pg = await (await b.newContext({ viewport: { width: 1920, height: 1080 } })).newPage(); watch(pg);
   await pg.goto(URL); await pg.waitForTimeout(300);
-  assert.ok(await pg.evaluate(() => [...document.scripts].filter(s => s.src).every(s => /\?v=(9|10|11)$/.test(s.src)) && !!window.Robot && !!window.RobotUI));
+  assert.ok(await pg.evaluate(() => [...document.scripts].filter(s => s.src).every(s => /\?v=(9|10|11|12)$/.test(s.src)) && !!window.Robot && !!window.RobotUI));
   assert.ok(await pg.evaluate(() => document.querySelector('#rtabs').hidden), 'tabs hidden for non-car projects');
   // new-project card exists
   await pg.click('#new'); assert.ok(await pg.isVisible('.ncard[data-kind="car"]')); await pg.click('#newClose');
@@ -44,7 +44,7 @@ const EX = 'ex:Пример: Робот-машинка на трассе (про
   const mc = await b.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, deviceScaleFactor: 2 }); const mp = await mc.newPage(); watch(mp);
   await mp.goto(URL); await mp.waitForTimeout(300); await mp.selectOption('#projects', EX); await mp.waitForTimeout(300);
   assert.equal(await mp.evaluate(() => RobotUI.tab), 'track');
-  const lay = await mp.evaluate(() => { const c = document.querySelector('#rcanvas').getBoundingClientRect(); return { w: c.width, h: c.height, sw: document.documentElement.scrollWidth, btn: [...document.querySelectorAll('#rTrBar button, #rtabs button')].map(x => x.getBoundingClientRect().height) }; });
+  const lay = await mp.evaluate(() => { const c = document.querySelector('#rcanvas').getBoundingClientRect(); return { w: c.width, h: c.height, sw: document.documentElement.scrollWidth, btn: [...document.querySelectorAll('#rTrBar button, #pmTabs button:not([hidden])')].map(x => x.getBoundingClientRect().height) }; });
   console.log('phone layout', JSON.stringify(lay)); assert.ok(lay.w >= 380 && lay.h > 350 && lay.sw <= 390 && lay.btn.every(h => h >= 44));
   // brush a stroke with a finger
   await mp.tap('#rBrush'); const n0 = await mp.evaluate(() => __sim.proj.robot.track.strokes.length);
@@ -54,7 +54,7 @@ const EX = 'ex:Пример: Робот-машинка на трассе (про
   const s2 = await mp.evaluate(() => { const s = __sim.proj.robot.track.strokes; return [s.length, s[s.length - 1].length]; }); console.log('brush stroke', s2); assert.ok(s2[0] === n0 + 1 && s2[1] >= 5);
   await mp.tap('#rBrush');
   // schematic & code as bottom sheets over the track
-  await mp.tap('#mCode'); assert.equal(await mp.evaluate(() => getComputedStyle(document.querySelector('#codePane')).display !== 'none' && document.body.dataset.sheet), 'code'); await mp.tap('#mCode');
+  await mp.tap('#pmTabs [data-ptab=code]'); assert.equal(await mp.evaluate(() => getComputedStyle(document.querySelector('#codePane')).display !== 'none' && document.body.dataset.sheet), 'code'); await mp.tap('#pmTabs [data-ptab=track]'); // v12: portrait tabs replace #mCode
   await mp.tap('#rPlay'); await mp.waitForTimeout(3000); const md = await mp.evaluate(() => RobotUI.run.dist); console.log('phone drive mm', Math.round(md)); assert.ok(md > 300);
   await mp.screenshot({ path: '/tmp/v9-phone.png' });
   // import sanitization of robot fields

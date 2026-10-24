@@ -10,8 +10,8 @@
   /* --- DOM --- */
   const center = $('#center'), tabs = el('div', { id: 'rtabs', hidden: true });
   const tb = {}; for (const [k, t] of [['schema', 'Схема'], ['chassis', 'Шасси'], ['track', 'Трасса']]) { tb[k] = el('button', { textContent: t }); tb[k].dataset.rtab = k; tb[k].onclick = () => show(k); tabs.append(tb[k]); }
-  const pane = el('div', { id: 'rpane', hidden: true }), bar = el('div', { className: 'rbar' }), cv = el('canvas', { id: 'rcanvas' }), sum = el('div', { id: 'rsum', hidden: true });
-  pane.append(bar, cv, sum); center.prepend(tabs); center.append(pane);
+  const pane = el('div', { id: 'rpane', hidden: true }), bar = el('div', { className: 'rbar' }), cv = el('canvas', { id: 'rcanvas' }), sum = el('div', { id: 'rsum', hidden: true }), sens = el('div', { id: 'rsens' });
+  pane.append(bar, cv, sens, sum); center.prepend(tabs); center.append(pane);
   const g = cv.getContext('2d');
   // chassis toolbar
   const opt = (s, list) => { for (const [v, t] of list) s.append(el('option', { value: v, textContent: t })); return s; };
@@ -60,7 +60,7 @@
   /* --- geometry --- */
   let W = 0, H = 0, dpr = 1;
   function resize() { const r = center.getBoundingClientRect(), b = bar.getBoundingClientRect(); dpr = Math.min(2, window.devicePixelRatio || 1);
-    W = Math.max(100, r.width); H = Math.max(100, r.height - b.height - (tabs.hidden ? 0 : tabs.getBoundingClientRect().height));
+    W = Math.max(100, r.width); H = Math.max(100, r.height - b.height - sens.getBoundingClientRect().height - (tabs.hidden ? 0 : tabs.getBoundingClientRect().height));
     cv.style.width = W + 'px'; cv.style.height = H + 'px'; cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr); draw(); }
   window.addEventListener('resize', () => { if (tab !== 'schema') resize(); });
   // chassis view: body x forward = screen up, body y left = screen left. scale k px/mm
@@ -118,6 +118,7 @@
       lines.push('⟳ L ' + Math.round(run.rpmL) + ' · R ' + Math.round(run.rpmR) + ' об/мин'); }
     const bat = proj().parts.find(q => q.type === 'liion'); if (bat) lines.push('🔋 ' + Math.round(100 * (bat._st && bat._st.soc != null ? bat._st.soc : bat.props.soc / 100)) + '%');
     if (run) lines.push('⏱ ' + run.t.toFixed(1) + ' с · сходов: ' + run.offs);
+    sens.textContent = lines.join('\n'); // v12: same values as text under the track (shown on portrait phones)
     g.font = '12px system-ui'; const tw = Math.max(...lines.map(t => g.measureText(t).width), 10), bx = Math.min(Math.max(4, cx - tw / 2 - 6), W - tw - 16), by = Math.max(4, cy - 120 * k - lines.length * 15 - 10);
     g.fillStyle = 'rgba(20,26,36,0.82)'; g.fillRect(bx, by, tw + 12, lines.length * 15 + 6); g.fillStyle = '#e8eef8'; g.textAlign = 'left';
     lines.forEach((t, i) => g.fillText(t, bx + 6, by + 15 + i * 15)); }

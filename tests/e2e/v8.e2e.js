@@ -6,7 +6,7 @@ const EX = 'ex:Пример: мигание светодиодом (ESP32)';
   const mc = await b.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, deviceScaleFactor: 2 }); const pg = await mc.newPage();
   pg.on('console', m => { if (m.type() === 'error') errs.push(m.text()); }); pg.on('pageerror', e => errs.push(e.message));
   await pg.goto(URL); await pg.waitForTimeout(300);
-  const v8 = await pg.evaluate(() => [...document.scripts].filter(s => s.src).every(s => /\?v=(8|9|10|11)$/.test(s.src))); console.log('scripts ?v=8', v8); assert.ok(v8);
+  const v8 = await pg.evaluate(() => [...document.scripts].filter(s => s.src).every(s => /\?v=(8|9|10|11|12)$/.test(s.src))); console.log('scripts ?v=8', v8); assert.ok(v8);
   const cdp = await mc.newCDPSession(pg);
   const load = async () => { await pg.selectOption('#projects', EX); await pg.waitForTimeout(250); };
   const mid = (id, f = 0.5) => pg.evaluate(([id, f]) => { const el = document.querySelector(`.whit[data-wire="${id}"]`), L = el.getTotalLength(), q = el.getPointAtLength(L * f), m = el.getScreenCTM(); return [q.x * m.a + m.e, q.y * m.d + m.f]; }, [id, f]);
@@ -14,7 +14,7 @@ const EX = 'ex:Пример: мигание светодиодом (ESP32)';
   const wires = () => pg.evaluate(() => window.__sim.proj.wires.map(w => w.id).join(','));
   const sel = () => pg.evaluate(() => window.__sim.sel && window.__sim.sel.wire);
   // layout: full-screen canvas + bottom bar with 44px buttons, sheets hidden
-  const lay = await pg.evaluate(() => { const s = document.querySelector('#svg').getBoundingClientRect(), bar = [...document.querySelectorAll('#mbar button')].map(x => x.getBoundingClientRect().height);
+  const lay = await pg.evaluate(() => { const s = document.querySelector('#svg').getBoundingClientRect(), bar = [...document.querySelectorAll('#mbar button')].map(x => x.getBoundingClientRect().height).filter(h => h > 0); // v12: portrait bar = Детали·Провод·Свойства·🗑
     return { w: s.width, h: s.height, bar, left: getComputedStyle(document.querySelector('#left')).display, sw: document.documentElement.scrollWidth }; });
   console.log('mobile layout', JSON.stringify(lay)); assert.ok(lay.w >= 380 && lay.h > 450 && lay.bar.length === 4 && lay.bar.every(h => h >= 44) && lay.left === 'none' && lay.sw <= 390);
   await pg.tap('#mParts'); assert.equal(await pg.evaluate(() => getComputedStyle(document.querySelector('#left')).display), 'block'); await pg.tap('#mParts');
@@ -31,7 +31,7 @@ const EX = 'ex:Пример: мигание светодиодом (ESP32)';
   let a = await pinXY('R1', 'a'), c = await pinXY('D1', 'a');
   await pg.touchscreen.tap(a[0] + 9, a[1] + 9); await pg.touchscreen.tap(c[0], c[1]); await pg.waitForTimeout(100);
   const s2 = await sel(), n1 = (await wires()).split(',').length; console.log('two end taps -> sel', s2, 'wires', n0, n1); assert.equal(s2, 'w2'); assert.equal(n1, n0);
-  await pg.tap('#mProps'); const pd = await pg.$('#props #del'); assert.ok(pd); await pd.tap(); await pg.waitForTimeout(100); await pg.tap('#mProps');
+  if (await pg.evaluate(() => document.body.dataset.sheet !== 'props')) await pg.tap('#mProps'); /* v12: selection auto-opens Свойства */ const pd = await pg.$('#props #del'); assert.ok(pd); await pd.tap(); await pg.waitForTimeout(100); await pg.tap('#mProps');
   console.log('props Удалить', await wires()); assert.ok(!(await wires()).split(',').includes('w2')); await pg.keyboard.press('Control+z'); await pg.waitForTimeout(100);
   // wire mode: empty-space tap adds a bend, then second pin finishes; Escape-free cancel button exists
   a = await pinXY('U1', '4'); await pg.touchscreen.tap(a[0], a[1]); assert.ok(await pg.evaluate(() => !document.querySelector('#wireCancel').hidden));
@@ -56,6 +56,7 @@ const EX = 'ex:Пример: мигание светодиодом (ESP32)';
     P.parts.push({ id: 'BB1', type: 'breadboard', x: 0, y: 120, rot: 0, props: {} }, { id: 'U1', type: 'esp32c3', x: 0, y: -120, rot: 0, props: {} });
     const pins = window.PARTS.breadboard.pins; P.wires.push(w('w1', 'U1', 'G5', 'BB1', pins[40].id), w('w2', 'U1', 'GND', 'BB1', pins[80].id)); window.__sim.render(); });
   [x, y] = await mid('w1'); console.log('bbat', x, y, await pg.evaluate(([x, y]) => document.elementsFromPoint(x, y).slice(0, 5).map(e => e.getAttribute('class') || e.tagName).join(','), [x + 6, y])); await pg.touchscreen.tap(x + 6, y); await pg.waitForTimeout(100); console.log('breadboard wire sel', await sel()); assert.equal(await sel(), 'w1');
+  if (await pg.evaluate(() => document.body.dataset.sheet === 'props')) await pg.tap('#mProps'); // v12: close the auto-opened Свойства sheet (it covers the wire end)
   const end = await pg.evaluate(() => { const e = document.querySelector('.wend[data-end="b"]').getBoundingClientRect(); return [e.x + e.width / 2, e.y + e.height / 2]; });
   const tgt = await pinXY('U1', 'G6');
   await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: end[0], y: end[1], id: 1 }] });
