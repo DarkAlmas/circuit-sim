@@ -331,18 +331,18 @@
     if (!w.pts || !w.pts.length) w.pts = Q.slice(1, -1).map(q => [q[0], q[1]]);
     const inner = w.pts.length === Q.length - 2 ? best : Math.min(best, w.pts.length); w.pts.splice(inner, 0, [snap(wx), snap(wy)]); sel = { wire: w.id }; changed(); }
   function dup() { const p = sel && part(sel.part); if (!p || locked()) return; const d = P[p.type]; addPart(p.type, p.x + 40, p.y + 40); const q = part(sel.part); q.props = clone(p.props); q.rot = p.rot; changed(); }
-  /* context menu (long press / right click) and floating buttons: DOM via createElement/textContent only */
+  /* context menu (long press / right click) and the cancel button while a wire is being drawn.
+     «Удалить провод» lives only in the «Свойства провода» sheet — the v8 floating #wireDel is not created.
+     DOM via createElement/textContent only. */
   const menu = document.createElement('div'); menu.id = 'ctxmenu'; menu.hidden = true; $('#center').appendChild(menu);
-  const fdel = document.createElement('button'); fdel.id = 'wireDel'; fdel.className = 'fbtn danger'; fdel.textContent = '🗑 Удалить провод'; fdel.hidden = true; $('#center').appendChild(fdel);
   const fcan = document.createElement('button'); fcan.id = 'wireCancel'; fcan.className = 'fbtn'; fcan.textContent = '✕ Отменить провод'; fcan.hidden = true; $('#center').appendChild(fcan);
-  fdel.addEventListener('pointerdown', e => e.stopPropagation()); fdel.onclick = () => { if (sel && sel.wire) del(); };
   fcan.addEventListener('pointerdown', e => e.stopPropagation()); fcan.onclick = cancelArm;
   menu.addEventListener('pointerdown', e => e.stopPropagation());
   function closeMenu() { menu.hidden = true; menu.textContent = ''; }
   function openMenu(cx, cy, t0) { if (locked()) return; const tg = t0 && t0.isConnected ? t0 : document.elementFromPoint(cx, cy); if (!tg || !tg.closest) return;
     const we = tg.closest('.whit, .wire') || wireNear(cx, cy, 9), pe = tg.closest('.part'), items = [];
     if (we) { const w = proj.wires.find(x => x.id === we.dataset.wire); if (!w) return; sel = { wire: w.id }; const [wx, wy] = toWorld(cx, cy);
-      items.push(['🗑 Удалить провод', del, 'danger'], ['↯ Добавить изгиб', () => addBend(w, wx, wy)]); }
+      items.push(['↯ Добавить изгиб', () => addBend(w, wx, wy)]); }
     else if (pe && part(pe.dataset.part)) { sel = { part: pe.dataset.part }; items.push(['🗑 Удалить', del, 'danger'], ['⟳ Повернуть', rotate], ['⧉ Дублировать', dup]); }
     else return;
     props(); calc(); render(); menu.textContent = '';
@@ -351,11 +351,7 @@
     menu.style.left = Math.max(4, Math.min(cx - r.left, r.width - menu.offsetWidth - 4)) + 'px'; menu.style.top = Math.max(4, Math.min(cy - r.top, r.height - menu.offsetHeight - 4)) + 'px'; }
   svg.addEventListener('contextmenu', e => { e.preventDefault(); if (!menu.hidden) return; cancelLong(); drag = null; openMenu(e.clientX, e.clientY); });
   document.addEventListener('pointerdown', e => { if (!menu.hidden && !menu.contains(e.target)) closeMenu(); }, true);
-  function placeFloat() { const w = sel && sel.wire && !locked() && proj.wires.find(x => x.id === sel.wire), el = w && wiresL.querySelector(`.whit[data-wire="${CSS.escape(w.id)}"]`);
-    if (el) { const L = el.getTotalLength(), q = el.getPointAtLength(L / 2), cw = $('#center').clientWidth; fdel.hidden = false;
-      fdel.style.left = Math.max(4, Math.min(cam.x + q.x * cam.s - fdel.offsetWidth / 2, cw - fdel.offsetWidth - 4)) + 'px'; fdel.style.top = Math.max(4, cam.y + q.y * cam.s - fdel.offsetHeight - 14) + 'px'; }
-    else fdel.hidden = true;
-    fcan.hidden = !armed; }
+  function placeFloat() { fcan.hidden = !armed; }
   /* mobile bottom bar: sheets for parts / properties / code, and wire mode */
   function sheet(k) { const cur = document.body.dataset.sheet || ''; const nx = cur === k ? '' : k; document.body.dataset.sheet = nx;
     for (const [id, v] of [['mParts', 'parts'], ['mProps', 'props']]) $('#' + id).classList.toggle('on', nx === v);
@@ -475,7 +471,7 @@
   /* sketch worker lifecycle: a crashed/hung worker (exception, OOM, infinite loop) is torn down, a fresh idle
    * worker is created right away, the console explains what happened, and the next Run uses the fresh worker. */
   let spare = null, crashes = 0;
-  const newWorker = () => new Worker('worker.js?v=14');
+  const newWorker = () => new Worker('worker.js?v=14.1');
   function takeWorker() { const w = spare || newWorker(); spare = null; return w; }
   function crash(msg) { if (!worker) return; worker.onmessage = worker.onerror = null; try { worker.terminate(); } catch (e) {} worker = null; gpio = {}; prevV = null; crashes++;
     try { spare = newWorker(); } catch (e) { spare = null; }
