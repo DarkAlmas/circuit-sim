@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Схемотехник — симулятор ESP32 / ESP8266</title><link rel="icon" href="data:,"><link rel="stylesheet" href="style.css"></head>
+<body>
+<header>
+  <b class="logo">⚡ Схемотехник</b>
+  <button id="run" class="go">▶ Запустить</button><button id="stop" disabled>■ Стоп</button>
+  <button id="codeTab">Код</button>
+  <span class="sep"></span>
+  <select id="projects" title="Проекты"></select>
+  <button id="save">Сохранить</button><button id="new">Новый</button>
+  <button id="export">Экспорт JSON</button><label class="btn">Импорт<input id="import" type="file" accept=".json,application/json" hidden></label>
+  <span id="status" class="status">Остановлено</span>
+</header>
+<main>
+  <aside id="left"><input id="search" placeholder="Поиск деталей…"><div id="palette"></div>
+    <p class="hint">Перетащи деталь на поле. Провод: щёлкни вывод, затем другой вывод. R — повернуть, Del — удалить, колесо — масштаб, тяни фон — сдвиг. Кнопки и переключатели нажимаются во время симуляции.</p></aside>
+  <section id="center">
+    <svg id="svg"><defs>
+      <pattern id="grid" width="10" height="10" patternUnits="userSpaceOnUse"><circle cx="0" cy="0" r="0.8" fill="#2a3242"/></pattern>
+      <filter id="glow" x="-1" y="-1" width="3" height="3"><feGaussianBlur stdDeviation="6"/></filter></defs>
+      <g id="view"><rect x="-5000" y="-5000" width="10000" height="10000" fill="url(#grid)" id="bg"/><g id="wires"></g><g id="partsL"></g><path id="temp" class="wire temp"/></g></svg>
+    <div id="tip" hidden></div>
+    <div id="codePane" hidden><div class="codebar">Скетч (упрощённый Arduino C). Плата: <b id="boardName">—</b></div><textarea id="code" spellcheck="false"></textarea></div>
+    <div id="alert" hidden></div>
+  </section>
+  <aside id="right"><h3>Свойства</h3><div id="props"><p class="muted">Выбери деталь или провод</p></div><h3>Измерения</h3><div id="live" class="live">—</div></aside>
+</main>
+<footer id="bottom">
+  <div class="tabs"><button data-tab="calc" class="on">Расчёт</button><button data-tab="console">Консоль</button><button id="collapse" title="Свернуть">▾</button></div>
+  <div id="calc" class="pane"></div><pre id="console" class="pane" hidden></pre>
+</footer>
+<script src="solver.js"></script><script src="parts.js"></script><script src="netlist.js"></script><script src="examples.js"></script><script src="app.js"></script>
+</body></html>
