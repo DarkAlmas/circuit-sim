@@ -246,11 +246,12 @@ void loop() {
 #define IN2 26
 #define IN3 27    // правый мотор
 #define IN4 14
-#define SPEED 90  // скорость по прямой (0..255)
-#define TURN 150  // внешнее колесо в повороте
-#define SLOW 20   // внутреннее колесо в повороте (медленно вперёд)
+#define SPEED 140 // скорость по прямой (0..255)
+#define TURN 200  // внешнее колесо в повороте
+#define SLOW 40   // внутреннее колесо: плавный поворот (один датчик съехал)
+#define BACK 120  // внутреннее колесо назад: резкий разворот (линия потеряна)
 // Датчики стоят ближе друг к другу, чем ширина линии: на линии оба видят чёрное.
-int last = 0;     // куда ушла линия в последний раз: -1 налево, 1 направо
+int last = 0;     // где линия была в последний раз: -1 слева, 1 справа, 0 по центру
 
 void motor(int a, int b, int sp) {   // sp: -255..255, знак = направление
   if (sp >= 0) { analogWrite(a, sp); analogWrite(b, 0); }
@@ -267,12 +268,12 @@ void setup() {
 void loop() {
   int l = digitalRead(SL);
   int r = digitalRead(SR);
-  if (l && !r) last = -1;               // правый съехал — линия слева
-  else if (!l && r) last = 1;           // левый съехал — линия справа
-  else if (l && r) last = 0;            // оба на линии (и на перекрёстке) — прямо
-  if (last < 0)      { motor(IN1, IN2, SLOW); motor(IN3, IN4, TURN); }   // налево
-  else if (last > 0) { motor(IN1, IN2, TURN); motor(IN3, IN4, SLOW); }   // направо
-  else               { motor(IN1, IN2, SPEED); motor(IN3, IN4, SPEED); }  // прямо
+  if (l && r)        { last = 0;  motor(IN1, IN2, SPEED); motor(IN3, IN4, SPEED); }  // оба на линии (и перекрёсток) — прямо
+  else if (l)        { last = -1; motor(IN1, IN2, SLOW);  motor(IN3, IN4, TURN); }   // линия уходит влево — плавно налево
+  else if (r)        { last = 1;  motor(IN1, IN2, TURN);  motor(IN3, IN4, SLOW); }   // линия уходит вправо — плавно направо
+  else if (last < 0) { motor(IN1, IN2, -BACK); motor(IN3, IN4, TURN); }  // потеряли слева — разворот на месте
+  else if (last > 0) { motor(IN1, IN2, TURN); motor(IN3, IN4, -BACK); }  // потеряли справа
+  else               { motor(IN1, IN2, SPEED); motor(IN3, IN4, SPEED); }  // ещё не видели линию — вперёд
   delay(5);
 }` };
   const nrfWires = (u, r, k) => [W(k + '1', r, 'GND', u, 'GND'), W(k + '2', r, 'VCC', u, '3V3'), W(k + '3', r, 'CE', u, 'G2'), W(k + '4', r, 'CSN', u, 'G7'),

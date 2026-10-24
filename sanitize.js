@@ -53,7 +53,10 @@
     const seen = new Set();
     for (const m of Array.isArray(r.mounts) ? r.mounts.slice(0, RL.mounts) : []) {
       if (!m || typeof m.part !== 'string' || !byId.has(m.part) || seen.has(m.part)) continue; seen.add(m.part);
-      o.mounts.push({ part: m.part, x: Math.round(num(m.x, -150, 150, 0)), y: Math.round(num(m.y, -150, 150, 0)) }); }
+      const mm = { part: m.part, x: Math.round(num(m.x, -150, 150, 0)), y: Math.round(num(m.y, -150, 150, 0)) };
+      // v10: direction of a distance sensor, radians relative to the body (0 forward, +π/2 left)
+      const dir = Math.round(num(m.dir, -Math.PI, Math.PI, 0) * 100) / 100; if (dir) mm.dir = dir;
+      o.mounts.push(mm); }
     const t = r.track && typeof r.track === 'object' ? r.track : {}, PR = ['oval', 'eight', 'zigzag', 'cross', ''];
     o.track.preset = typeof t.preset === 'string' && PR.includes(t.preset) ? t.preset : '';
     o.track.w = Math.round(num(t.w, 10, 40, 20)); o.track.strokes = []; let total = 0;

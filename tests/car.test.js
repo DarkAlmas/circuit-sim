@@ -5,3 +5,7 @@ c=D.car();for(let i=0;i<300;i++)c.step(-60,60,0.01);
 a(Math.abs(c.x)<0.01&&Math.abs(c.th)>1,'spin');
 c=D.car();c.step(0,0,0.01,(x,y)=>x>0.05?0.05:0.9);a(c.vals[0].refl<0.1,'sensor');
 console.log('car ok');
+let q=D.car({rangers:[{x:0.08,y:0,dir:Math.PI/2,max:2}]});
+q.step(0,0,0.01,null,(x,y,dx,dy,m)=>dy>0.9?0.5:Infinity);a(q.dist[0].hit&&q.dist[0].d===0.5,'ranger left');
+for(let i=0;i<50;i++)q.step(100,80,0.01);q.reset();a(q.x===0&&q.v===0,'reset');
+console.log('car ext ok');

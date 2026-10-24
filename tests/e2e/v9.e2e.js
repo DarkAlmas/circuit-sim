@@ -7,7 +7,7 @@ const EX = 'ex:Пример: Робот-машинка на трассе (ESP32 
   /* ---- desktop 1920×1080 ---- */
   const pg = await (await b.newContext({ viewport: { width: 1920, height: 1080 } })).newPage(); watch(pg);
   await pg.goto(URL); await pg.waitForTimeout(300);
-  assert.ok(await pg.evaluate(() => [...document.scripts].filter(s => s.src).every(s => /\?v=9$/.test(s.src)) && !!window.Robot && !!window.RobotUI));
+  assert.ok(await pg.evaluate(() => [...document.scripts].filter(s => s.src).every(s => /\?v=(9|10)$/.test(s.src)) && !!window.Robot && !!window.RobotUI));
   assert.ok(await pg.evaluate(() => document.querySelector('#rtabs').hidden), 'tabs hidden for non-car projects');
   // new-project card exists
   await pg.click('#new'); assert.ok(await pg.isVisible('.ncard[data-kind="car"]')); await pg.click('#newClose');

@@ -18,7 +18,10 @@
   const selBody = opt(el('select', { id: 'rBody', title: 'Корпус' }), [['rect', '▭ Прямоугольная'], ['round', '◯ Круглая']]);
   const selMat = opt(el('select', { id: 'rMat', title: 'Материал' }), [['acrylic', 'Акрил'], ['black', 'Чёрный пластик']]);
   const bCaster = el('button', { id: 'rCaster', textContent: '◉ Шаровая опора' }), chHint = el('span', { className: 'rhint', textContent: 'Перетаскивай детали по платформе. Выделение связано со «Схемой».' });
-  const chBar = el('div', { className: 'rgrp', id: 'rChBar' }, [selBody, selMat, bCaster, chHint]);
+  const inDir = el('input', { id: 'rDir', type: 'number', min: '-180', max: '180', step: '15', title: 'Направление датчика расстояния, ° (0 — вперёд, 90 — влево, −90 — вправо)' });
+  const dirW = el('label', { className: 'rdir', hidden: true }, [el('span', { textContent: '📏 Направление, °' }), inDir]);
+  const chBar = el('div', { className: 'rgrp', id: 'rChBar' }, [selBody, selMat, bCaster, dirW, chHint]);
+  const selDist = () => { const r = proj().robot, id = sim().sel && sim().sel.part; return r && id ? r.mounts.find(m => m.part === id && roleOf(m.part) === 'dist') : null; };
   // track toolbar
   const selPre = opt(el('select', { id: 'rPreset', title: 'Готовая трасса' }), [['', 'Трасса…'], ...Object.entries(R.PRESETS)]);
   const bBrush = el('button', { id: 'rBrush', textContent: '🖌 Кисть' }), bBox = el('button', { id: 'rBox', textContent: '📦 Коробка' }), bClear = el('button', { id: 'rClear', textContent: '🧽 Очистить' });
@@ -43,7 +46,8 @@
     if (k !== 'schema') { ensure(); syncBar(); resize(); } loop(); }
   function syncBar() { const r = proj().robot; if (!r) return; selBody.value = r.body; selMat.value = r.mat; bCaster.classList.toggle('on', r.caster); selPre.value = r.track.preset || '';
     spd.value = String(r.speed); spdL.textContent = '×' + r.speed; bBrush.classList.toggle('on', mode === 'brush'); bBox.classList.toggle('on', mode === 'box');
-    bPlay.disabled = !paused && sim().running; bPause.disabled = paused; }
+    bPlay.disabled = !paused && sim().running; bPause.disabled = paused;
+    const dm = selDist(); dirW.hidden = !dm; if (dm && document.activeElement !== inDir) inDir.value = String(Math.round((dm.dir || 0) * 180 / Math.PI)); }
   function onOpen() { const p = proj(); run = null; paused = true; sum.hidden = true; grid = null; gridSig = '';
     tabs.hidden = !isCar(p); document.body.classList.toggle('carproj', isCar(p)); if (isCar(p)) { ensure(); show(window.innerWidth < 900 ? 'track' : 'chassis'); } else show('schema'); }
   /* --- geometry --- */
@@ -61,12 +65,15 @@
   const roleOf = id => { const p = proj().parts.find(q => q.id === id); return p ? R.roleOf(P, p.type) : null; };
   /* --- drawing --- */
   const SIZE = { wheel: [66, 26], line: [22, 16], dist: [18, 46], bat: [36, 18], board: [52, 28] };
-  function drawCarBody(r, hl) { const mat = r.mat === 'black' ? ['#1d1f24', '#40444d'] : ['rgba(190,225,255,0.35)', '#9fd0ff'];
+  const ROT_R = 60; // v10: rotate handle of a distance sensor, mm from its mount along dir
+  function drawCarBody(r, hl, rays) { const mat = r.mat === 'black' ? ['#1d1f24', '#40444d'] : ['rgba(190,225,255,0.35)', '#9fd0ff'];
     g.fillStyle = mat[0]; g.strokeStyle = mat[1]; g.lineWidth = 2; g.beginPath();
     if (r.body === 'round') g.arc(0, 0, 90, 0, Math.PI * 2); else g.roundRect ? g.roundRect(-95, -70, 190, 140, 10) : g.rect(-95, -70, 190, 140);
     g.fill(); g.stroke();
     if (r.caster) { g.fillStyle = '#c9ced6'; g.beginPath(); g.arc(-72, 0, 9, 0, Math.PI * 2); g.fill(); g.strokeStyle = '#6a7078'; g.stroke(); }
     for (const m of r.mounts) { const ro = roleOf(m.part); if (!ro) continue; g.save(); g.translate(m.x, m.y); const on = hl === m.part;
+      if (ro === 'dist') { g.rotate(m.dir || 0); if (rays) { g.strokeStyle = 'rgba(255,170,0,0.6)'; g.lineWidth = 2; g.setLineDash([6, 4]); g.beginPath(); g.moveTo(10, 0); g.lineTo(ROT_R, 0); g.stroke(); g.setLineDash([]);
+        g.fillStyle = '#ffaa00'; g.beginPath(); g.arc(ROT_R, 0, 7, 0, 7); g.fill(); } }
       if (ro === 'line') { g.fillStyle = 'rgba(255,60,60,0.18)'; g.beginPath(); g.moveTo(-4, -5); g.lineTo(18, -9); g.lineTo(18, 9); g.lineTo(-4, 5); g.fill();
         g.fillStyle = 'rgba(255,60,60,0.35)'; g.beginPath(); g.arc(18, 0, 5, 0, Math.PI * 2); g.fill(); }
       const [a, b] = SIZE[ro] || [20, 20];
@@ -78,7 +85,7 @@
       g.restore(); } }
   function drawChassis() { const r = proj().robot, k = chK(); g.fillStyle = '#12161f'; g.fillRect(0, 0, W, H);
     g.save(); g.translate(W / 2, H / 2); g.scale(k, k); g.rotate(-Math.PI / 2); g.scale(1, -1); // body x→up, y→left
-    const sl = sim().sel && sim().sel.part; drawCarBody(r, sl); g.restore();
+    const sl = sim().sel && sim().sel.part; drawCarBody(r, sl, true); g.restore();
     g.fillStyle = '#d8dee9'; g.font = '12px system-ui'; g.textAlign = 'center';
     for (const m of r.mounts) { const ro = roleOf(m.part); if (!ro) continue; const [sx, sy] = chToS(m.x, m.y); g.fillText(m.part + (ro === 'wheel' ? (m.y > 0 ? ' (лев.)' : ' (прав.)') : ''), sx, sy + (ro === 'wheel' ? (m.y > 0 ? 0 : 0) : 4)); }
     g.fillStyle = '#8a94a8'; g.fillText('▲ вперёд', W / 2, 16); }
@@ -94,9 +101,13 @@
       g.strokeStyle = b[2] ? '#1fa3ff' : '#ff3030'; g.beginPath(); g.moveTo(...trToS(a[0], a[1])); g.lineTo(...trToS(b[0], b[1])); g.stroke(); } }
     const c = run ? run.car : { x: st.x / 1000, y: st.y / 1000, th: st.th }, [cx, cy] = trToS(c.x * 1000, c.y * 1000);
     g.save(); g.translate(cx, cy); g.scale(k, k); g.scale(1, -1); g.rotate(c.th); drawCarBody(r, sim().sel && sim().sel.part); g.restore();
+    // v10: ray of every distance sensor (from Devices.car rangers): orange — free, red — hits a box/wall
+    if (run) for (const d of run.car.dist || []) { const [ax, ay] = trToS(d.x * 1000, d.y * 1000), [bx2, by2] = trToS((d.x + Math.cos(d.dir) * d.d) * 1000, (d.y + Math.sin(d.dir) * d.d) * 1000);
+      g.strokeStyle = d.hit ? 'rgba(230,40,40,0.85)' : 'rgba(255,160,0,0.6)'; g.lineWidth = 2; g.setLineDash(d.hit ? [] : [5, 4]); g.beginPath(); g.moveTo(ax, ay); g.lineTo(bx2, by2); g.stroke(); g.setLineDash([]);
+      if (d.hit) { g.fillStyle = '#e62828'; g.beginPath(); g.arc(bx2, by2, 4, 0, 7); g.fill(); } }
     // labels over the car
     const lines = []; if (run) { const ls = run.lines.map((m, i) => m.part + ' ' + (run.car.vals[i] ? run.car.vals[i].refl.toFixed(2) : '—')).join('  '); if (ls) lines.push('👁 ' + ls);
-      for (const m of run.dists) lines.push('📏 ' + m.part + ' ' + Math.round(run.dvals[m.part] || 0) + ' мм');
+      for (const m of run.dists) lines.push('📏 ' + m.part + ' ' + Math.round(run.dvals[m.part] || 0) + ' мм' + (m.dir ? ' (' + Math.round(m.dir * 180 / Math.PI) + '°)' : ''));
       lines.push('⟳ L ' + Math.round(run.rpmL) + ' · R ' + Math.round(run.rpmR) + ' об/мин'); }
     const bat = proj().parts.find(q => q.type === 'liion'); if (bat) lines.push('🔋 ' + Math.round(100 * (bat._st && bat._st.soc != null ? bat._st.soc : bat.props.soc / 100)) + '%');
     if (run) lines.push('⏱ ' + run.t.toFixed(1) + ' с · сходов: ' + run.offs);
@@ -123,11 +134,15 @@
   bClear.onclick = () => { const r = proj().robot; r.track.strokes = []; r.track.preset = ''; r.obstacles = []; save(); reset(); };
   bPlay.onclick = () => { if (!run) reset(); paused = false; sum.hidden = true; if (!sim().running) sim().start(); syncBar(); };
   bPause.onclick = () => { onStop(); syncBar(); };
-  bReset.onclick = () => { paused = true; reset(); syncBar(); };
+  bReset.onclick = () => { paused = true; if (run) { run.reset(); sum.hidden = true; draw(); } else reset(); syncBar(); }; // v10: Devices.car.reset()
+  inDir.onchange = () => { const m = selDist(); if (!m) return; const d = Math.max(-180, Math.min(180, Math.round(+inDir.value || 0)));
+    m.dir = Math.round(d * Math.PI / 180 * 100) / 100; if (!m.dir) delete m.dir; run = null; save(); draw(); };
   spd.oninput = () => { proj().robot.speed = +spd.value; spdL.textContent = '×' + spd.value; save(); };
   const pos = e => { const b = cv.getBoundingClientRect(); return [e.clientX - b.left, e.clientY - b.top]; };
   cv.addEventListener('pointerdown', e => { const r = proj().robot; if (!r) return; const [sx, sy] = pos(e); cv.setPointerCapture(e.pointerId);
     if (tab === 'chassis') { const [bx, by] = chToB(sx, sy); let best = null, bd = 30;
+      for (const m of r.mounts) { if (roleOf(m.part) !== 'dist') continue; const a = m.dir || 0;
+        if (Math.hypot(m.x + Math.cos(a) * ROT_R - bx, m.y + Math.sin(a) * ROT_R - by) < 14) { dragM = { m, rot: true }; sim().select(m.part); draw(); return; } }
       for (const m of r.mounts) { const d = Math.hypot(m.x - bx, m.y - by); if (d < bd) { bd = d; best = m; } }
       if (best) { dragM = { m: best, dx: best.x - bx, dy: best.y - by }; sim().select(best.part); } else sim().select(null); draw(); return; }
     const [fx, fy] = trToF(sx, sy);
@@ -136,11 +151,17 @@
       if (i >= 0) r.obstacles.splice(i, 1); else if (r.obstacles.length < (window.ROBOT_LIMITS ? window.ROBOT_LIMITS.boxes : 30)) r.obstacles.push({ x: Math.round(fx), y: Math.round(fy), w: 100, h: 100 }); save(); return; }
     if (paused) { dragM = { start: true }; } });
   cv.addEventListener('pointermove', e => { const r = proj().robot; if (!r) return; const [sx, sy] = pos(e);
-    if (dragM && dragM.m) { const [bx, by] = chToB(sx, sy); dragM.m.x = Math.max(-150, Math.min(150, Math.round(bx + dragM.dx))); dragM.m.y = Math.max(-150, Math.min(150, Math.round(by + dragM.dy))); draw(); }
-    else if (dragM && dragM.start) { const [fx, fy] = trToF(sx, sy); r.track.start.x = Math.round(Math.max(0, Math.min(2000, fx))); r.track.start.y = Math.round(Math.max(0, Math.min(1400, fy))); run = null; draw(); }
+    if (dragM && dragM.rot) { const [bx, by] = chToB(sx, sy); let a = Math.atan2(by - dragM.m.y, bx - dragM.m.x);
+      for (const q of [0, Math.PI / 2, -Math.PI / 2, Math.PI, -Math.PI]) if (Math.abs(a - q) < 0.09) a = q; // snap to forward / sides / back
+      dragM.m.dir = Math.round(a * 100) / 100; if (!dragM.m.dir) delete dragM.m.dir; draw(); }
+    else if (dragM && dragM.m) { const [bx, by] = chToB(sx, sy); dragM.m.x = Math.max(-150, Math.min(150, Math.round(bx + dragM.dx))); dragM.m.y = Math.max(-150, Math.min(150, Math.round(by + dragM.dy))); draw(); }
+    else if (dragM && dragM.start) { const [fx, fy] = trToF(sx, sy); const pose = { x: Math.round(Math.max(60, Math.min(1940, fx))), y: Math.round(Math.max(60, Math.min(1340, fy))), th: run ? run.car.th : r.track.start.th };
+      r.track.start.x = pose.x; r.track.start.y = pose.y; r.track.start.th = pose.th; if (run) run.reset(pose); dragM.moved = true; sum.hidden = true; draw(); }
     else if (brush) { const [fx, fy] = trToF(sx, sy), l = brush[brush.length - 1], total = r.track.strokes.reduce((a, s) => a + s.length, 0);
       if (Math.hypot(fx - l[0], fy - l[1]) > 8 && total < (window.ROBOT_LIMITS ? window.ROBOT_LIMITS.pts : 4000)) { brush.push([Math.round(Math.max(0, Math.min(2000, fx))), Math.round(Math.max(0, Math.min(1400, fy)))]); grid = null; draw(); } } });
-  const up = () => { if (dragM || brush) { if (dragM && dragM.m) run = null; dragM = null; brush = null; grid = null; save(); if (!sim().running || paused) reset(); } };
+  const up = () => { if (dragM || brush) { if (dragM && dragM.m) run = null; const keep = dragM && dragM.start; dragM = null;
+      if (keep) { save(); return; } // car stays where it was put (Devices.car remembers it as the new start)
+      brush = null; grid = null; save(); if (!sim().running || paused) reset(); } };
   cv.addEventListener('pointerup', up); cv.addEventListener('pointercancel', up);
   window.RobotUI = { onOpen, onTick, onStop, show, get run() { return run; }, get paused() { return paused; }, get tab() { return tab; }, reset };
   if (window.__sim) onOpen();

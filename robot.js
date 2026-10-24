@@ -53,19 +53,20 @@
     const role = m => roleOf(P, m.p.type), wheels = ms.filter(m => role(m) === 'wheel'), lines = ms.filter(m => role(m) === 'line'), dists = ms.filter(m => role(m) === 'dist');
     const wl = wheels.slice().sort((a, b) => b.y - a.y), L = wl[0], Rw = wl.length > 1 ? wl[wl.length - 1] : null;
     const track = L && Rw ? Math.max(0.04, Math.abs(L.y - Rw.y) / 1000) : 0.13, st = R.track.start;
-    const car = Devices.car({ track, wheelR: 0.033, mass: 0.35 + 0.05 * ms.length, x: st.x / 1000, y: st.y / 1000, th: st.th, sensors: lines.map(m => ({ x: m.x / 1000, y: m.y / 1000 })) });
+    const rangeOf = m => m.p.type === 'vl53l0x' ? 2 : 4; // VL53L0X ≈ 2 м, HC-SR04 ≈ 4 м
+    const car = Devices.car({ track, wheelR: 0.033, mass: 0.35 + 0.05 * ms.length, x: st.x / 1000, y: st.y / 1000, th: st.th, sensors: lines.map(m => ({ x: m.x / 1000, y: m.y / 1000 })),
+      rangers: dists.map(m => ({ x: m.x / 1000, y: m.y / 1000, dir: m.dir || 0, max: rangeOf(m) })) });
+    const hit = hitter(R.obstacles);
     const grid = raster(R.track), sample = sampler(grid);
     const run = { car, grid, sample, lines, dists, L, R: Rw, track, t: 0, dist: 0, offs: 0, off: false, trail: [], lap: null, laps: [], wasFar: false, rpmL: 0, rpmR: 0, dvals: {},
       step(dt) { const rl = L && L.p._st ? L.p._st.rpm || 0 : 0, rr = Rw && Rw.p._st ? Rw.p._st.rpm || 0 : 0; run.rpmL = rl; run.rpmR = rr;
         const n = Math.max(1, Math.ceil(dt / 0.01)), h = dt / n, x0 = car.x, y0 = car.y;
-        for (let i = 0; i < n; i++) { car.step(rl, rr, h, sample);
+        for (let i = 0; i < n; i++) { car.step(rl, rr, h, sample, hit);
           // field border is a wall: the car stops at it (keeps turning in place) instead of driving off into the void
           const m = 0.06; car.x = Math.max(m, Math.min(FIELD.w / 1000 - m, car.x)); car.y = Math.max(m, Math.min(FIELD.h / 1000 - m, car.y)); }
+        car.step(rl, rr, 0, sample, hit); // dt=0: no motion, just re-read the sensors at the final (wall-clamped) pose
         run.t += dt; run.dist += Math.hypot(car.x - x0, car.y - y0) * 1000;
-        lines.forEach((m, i) => { const v = car.vals[i]; if (v) m.p.props.refl = Math.max(0, Math.min(1, v.refl)); });
-        const c = Math.cos(car.th), s = Math.sin(car.th);
-        for (const m of dists) { const x = car.x * 1000 + m.x * c - m.y * s, y = car.y * 1000 + m.x * s + m.y * c, d = raycast(x, y, car.th, R.obstacles);
-          run.dvals[m.part] = d; if (m.p.type === 'vl53l0x') m.p.props.mm = Math.max(30, Math.min(2000, Math.round(d))); else m.p.props.dist = Math.max(2, Math.min(400, Math.round(d / 10))); }
+        run.sense();
         const raw = lines.length ? car.vals.some(v => v.refl < 0.5) || sample(car.x, car.y) < 0.5 : sample(car.x, car.y) < 0.5;
         // a short wiggle between the sensors is normal line following; "off the line" = no black under any sensor for > 0.25 s
         run.lost = raw ? 0 : (run.lost || 0) + dt; const onLine = run.lost <= 0.25;
@@ -73,9 +74,32 @@
         const X = Math.round(car.x * 1000), Y = Math.round(car.y * 1000), lt = run.trail[run.trail.length - 1];
         if (!lt || Math.hypot(lt[0] - X, lt[1] - Y) > 4) { run.trail.push([X, Y, onLine ? 1 : 0]); if (run.trail.length > 6000) run.trail.splice(0, 1000); }
         const far = Math.hypot(X - st.x, Y - st.y); if (far > 300) run.wasFar = true;
-        if (run.wasFar && far < 70 && run.dist > 1000) { run.wasFar = false; const lap = { time: run.t - (run.lapStart || 0), offs: run.offs - (run.lapOffs || 0) }; run.laps.push(lap); run.lap = lap; run.lapStart = run.t; run.lapOffs = run.offs; }
-        return run; } };
+        const dth = Math.abs(((car.th - st.th) % (2 * Math.PI) + 3 * Math.PI) % (2 * Math.PI) - Math.PI); // lap = back at the start AND heading the same way (the eight crosses its start twice)
+        if (run.wasFar && far < 70 && run.dist > 1000 && dth < Math.PI / 3) { run.wasFar = false; const lap = { time: run.t - (run.lapStart || 0), offs: run.offs - (run.lapOffs || 0) }; run.laps.push(lap); run.lap = lap; run.lapStart = run.t; run.lapOffs = run.offs; }
+        return run; },
+      // v10: sensors are computed by Devices.car after the step, so the schematic sees them in this very frame (no lag).
+      // TCRT D0 comparator is pre-set from the same formula as parts3.js (a0 = U·Rpt/(Rpt+10k) < thr·U), so the sketch reads it now, not next frame.
+      sense() { lines.forEach((m, i) => { const v = car.vals[i]; if (!v) return; const refl = Math.max(0, Math.min(1, v.refl)); m.p.props.refl = refl;
+          const rpt = Math.max(200, 1 / Math.max(1e-7, Devices.tcrtCurrent ? Devices.tcrtCurrent(refl) : 1e-3 * refl)), low = rpt / (rpt + 10000) < +(m.p.props.thr ?? 0.5);
+          if (m.p._low !== undefined || low) m.p._low = low; });
+        dists.forEach((m, i) => { const r = car.dist[i]; if (!r) return; const d = r.d * 1000; run.dvals[m.part] = d;
+          if (m.p.type === 'vl53l0x') m.p.props.mm = Math.max(30, Math.min(2000, Math.round(d))); else m.p.props.dist = Math.max(2, Math.min(400, Math.round(d / 10))); }); },
+      // «На старт» / drag on pause: Devices.car.reset() (with a pose it also becomes the new start)
+      reset(pose) { if (pose) { car.reset({ x: pose.x / 1000, y: pose.y / 1000, th: pose.th }); st.x = pose.x; st.y = pose.y; st.th = pose.th; } else car.reset();
+        Object.assign(run, { t: 0, dist: 0, offs: 0, off: false, lost: 0, trail: [], lap: null, laps: [], wasFar: false, lapStart: 0, lapOffs: 0, _shown: false, _nl: 0 });
+        car.step(0, 0, 0, sample, hit); run.sense(); return run; } };
+    car.step(0, 0, 0, sample, hit); run.sense();
     return run; }
-  const api = { FIELD, CELL, GW, GH, PRESETS, preset, raster, sampler, raycast, roleOf, defaultMounts, create, chaikin };
+  /* ray vs boxes (mm) and field walls, in metres for Devices.car: hit(x,y,dx,dy,max) -> distance or Infinity */
+  function hitter(obstacles) { const bx = (obstacles || []).map(o => [(o.x - o.w / 2) / 1000, (o.y - o.h / 2) / 1000, (o.x + o.w / 2) / 1000, (o.y + o.h / 2) / 1000]);
+    bx.push([-1, -1, 0, FIELD.h / 1000 + 1], [FIELD.w / 1000, -1, FIELD.w / 1000 + 1, FIELD.h / 1000 + 1], [-1, -1, FIELD.w / 1000 + 1, 0], [-1, FIELD.h / 1000, FIELD.w / 1000 + 1, FIELD.h / 1000 + 1]);
+    return (x, y, dx, dy, max) => { let best = Infinity;
+      for (const [x0, y0, x1, y1] of bx) { let t0 = 0, t1 = max, ok = true;
+        for (const [p, d, lo, hi] of [[x, dx, x0, x1], [y, dy, y0, y1]]) {
+          if (Math.abs(d) < 1e-12) { if (p < lo || p > hi) { ok = false; break; } continue; }
+          let a = (lo - p) / d, b = (hi - p) / d; if (a > b) [a, b] = [b, a]; t0 = Math.max(t0, a); t1 = Math.min(t1, b); if (t0 > t1) { ok = false; break; } }
+        if (ok && t0 < best) best = t0; }
+      return best; }; }
+  const api = { FIELD, CELL, GW, GH, PRESETS, preset, raster, sampler, raycast, hitter, roleOf, defaultMounts, create, chaikin };
   if (typeof module !== 'undefined' && module.exports) module.exports = api; else root.Robot = api;
 })(typeof window !== 'undefined' ? window : globalThis);

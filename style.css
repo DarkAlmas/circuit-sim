@@ -117,3 +117,4 @@ button.danger,.fbtn.danger{background:#7a2020;border-color:#b33}
 #rcanvas{display:block;touch-action:none;flex:1}
 #rsum{position:absolute;left:50%;bottom:14px;transform:translateX(-50%);background:#1a2030f0;border:1px solid #3fb37f;border-radius:10px;padding:10px 16px;font-size:15px;z-index:23;max-width:94%;text-align:center}
 @media (max-width:899px){#rtabs button{min-height:44px}.rgrp button,.rgrp select{min-height:44px}.rhint{display:none}#rpane{padding-top:58px}}
+/* v10 */.rdir{display:inline-flex;gap:6px;align-items:center;color:#d8dee9;font-size:12px}.rdir[hidden]{display:none}.rdir input{width:64px}@media (max-width:899px){.rdir input{min-height:44px}}

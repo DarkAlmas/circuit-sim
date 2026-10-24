@@ -78,3 +78,29 @@
     return c;
   };
 })();
+
+// ---- car extensions: reset + directional distance sensors ----
+(function(){
+  var api=(typeof module!=='undefined'&&module.exports)?module.exports:window.Devices;
+  var base=api.car;
+  api.car=function(opts){
+    opts=opts||{}; var c=base(opts), st={x:c.x,y:c.y,th:c.th};
+    c.rangers=opts.rangers||[]; // [{x,y,dir(rad, body), max(m)}]
+    c.dist=[];
+    c.reset=function(p){p=p||st;c.x=p.x;c.y=p.y;c.th=p.th||0;c.v=0;c.w=0;c.vals=[];c.dist=[];
+      if(p!==st){st={x:c.x,y:c.y,th:c.th};}return c;};
+    var s0=c.step;
+    // hit(x,y,dx,dy,max) -> distance or Infinity (from the UI's obstacle map)
+    c.step=function(l,r,dt,sample,hit){
+      s0(l,r,dt,sample);
+      var s=Math.sin(c.th),co=Math.cos(c.th);
+      c.dist=c.rangers.map(function(g){
+        var wx=c.x+g.x*co-g.y*s, wy=c.y+g.x*s+g.y*co, a=c.th+(g.dir||0), mx=g.max||2;
+        var d=hit?hit(wx,wy,Math.cos(a),Math.sin(a),mx):Infinity;
+        return {x:wx,y:wy,dir:a,d:Math.min(d,mx),hit:d<mx};
+      });
+      return c;
+    };
+    return c;
+  };
+})();
