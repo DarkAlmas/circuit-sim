@@ -1,7 +1,7 @@
 /* Strict validation of untrusted project data (import, localStorage, examples). */
 (function () {
   const ID = /^[A-Za-z0-9_-]{1,32}$/;
-  const NUM = { V: [0, 1000], R: [0.001, 1e9], Pmax: [0.001, 1000], pos: [0, 1], Vf: [0.1, 10], Imax: [0.0001, 10], beta: [1, 2000] };
+  const NUM = { V: [0, 1000], R: [0.001, 1e9], Pmax: [0.001, 1000], pos: [0, 1], Vf: [0.1, 10], Imax: [0.0001, 10], beta: [1, 2000], rInt: [0.001, 100] };
   const num = (v, lo, hi, d) => { const n = Number(v); return Number.isFinite(n) ? Math.min(hi, Math.max(lo, n)) : d; };
   function sanitizeProject(raw) {
     const P = window.PARTS, out = { parts: [], wires: [], code: '' };
