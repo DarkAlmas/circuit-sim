@@ -257,7 +257,13 @@
   /* ---------- simulation ---------- */
   function tick() {
     const b = Netlist.build(proj, gpio);
-    const sol = Solver.solve(b.circuit, { guess: prevV && prevV.length === b.circuit.nodeCount ? prevV : null });
+    // transient step: real time between frames (clamped), state re-keyed by owner part + ordinal so it survives netlist changes
+    const now = performance.now(), dt = Math.min(0.05, Math.max(1e-4, lastT ? (now - lastT) / 1000 : 1 / 60)); lastT = now;
+    const keys = elKeys(b.owners), st = { vC: {}, iL: {} };
+    keys.forEach((k, i) => { if (k in simState.vC) st.vC[i] = simState.vC[k]; if (k in simState.iL) st.iL[i] = simState.iL[k]; });
+    const sol = Solver.solve(b.circuit, { guess: prevV && prevV.length === b.circuit.nodeCount ? prevV : null, dt, state: st });
+    if (sol.state) { simState = { vC: {}, iL: {} }; for (const i in sol.state.vC) simState.vC[keys[i]] = sol.state.vC[i]; for (const i in sol.state.iL) simState.iL[keys[i]] = sol.state.iL[i]; }
+    simTime += dt;
     prevV = sol.v; const ctx = { ...b.ctx, v: (p, pin) => sol.v[b.ctx.n(p, pin)], supplyMax: () => Netlist.supplyMax(proj), dirty: () => { prevV = null; } };
     sim = { sol, nets: b.nets, ctx };
     let alert = sol.ok ? null : { level: 'burn', msg: sol.error };
@@ -268,7 +274,7 @@
     for (const w of proj.wires) { const ia = -pinI(w.a), ib = pinI(w.b), da = deg[w.a.part + ':' + w.a.pin], db = deg[w.b.part + ':' + w.b.pin];
       w.I = db === 1 ? ib : da === 1 ? ia : (Math.abs(ia) < Math.abs(ib) ? ia : ib);
       const sp = Math.sign(w.I) * Math.min(6, Math.sqrt(Math.abs(w.I) * 1000) * 1.5); flowOff[w.id] = ((flowOff[w.id] || 0) + sp) % 1600; }
-    shorts = detectShorts({ proj, meas, sol }); shortSet = new Set(shorts.flatMap(z => z.path));
+    shorts = Array.isArray(sol.shortCircuits) ? mapShorts(sol.shortCircuits, b.owners) : detectShorts({ proj, meas, sol }); shortSet = new Set(shorts.flatMap(z => z.path));
     const sig = shorts.map(z => z.source + ':' + z.path.join(',')).join('|');
     if (sig !== shortSig) { shortSig = sig; $('#shortMsg').textContent = shorts.length ? shortMessage(shorts[0], proj) : ''; $('#simText').hidden = !!shorts.length; $('#shortBox').hidden = !shorts.length; }
     if (shorts.length) { alert = { level: 'burn', msg: shortMessage(shorts[0], proj) };
@@ -285,10 +291,19 @@
     const a = $('#alert'); const txt = alert ? alert.msg : '';
     if (txt !== lastAlert) { lastAlert = txt; a.hidden = !alert; if (alert) { a.textContent = (shorts.length ? '' : alert.level === 'burn' ? '🔥 ' : '⚠ ') + alert.msg; a.className = alert.level; } }
     if (sel && sel.part && part(sel.part) && !!part(sel.part).burned !== !!$('#fix')) props();
-    $('#status').textContent = shorts.length ? 'Пауза: короткое замыкание' : `Симуляция · ${b.circuit.nodeCount} узлов · ${sol.iter} итер. Ньютона`;
+    $('#status').textContent = shorts.length ? 'Пауза: короткое замыкание' : `Симуляция · t=${simTime.toFixed(2)} с · ${b.circuit.nodeCount} узлов · ${sol.iter} итер. Ньютона`;
     render(); live(); calc();
     raf = requestAnimationFrame(tick);
   }
+  let simState = { vC: {}, iL: {} }, simTime = 0, lastT = 0;
+  const elKeys = owners => { const c = {}; return owners.map(o => { c[o] = (c[o] || 0) + 1; return o + '#' + c[o]; }); };
+  /* solver shortCircuits use element indices -> map to part ids (+ wires carrying the short current) */
+  function mapShorts(list, owners) { const out = [];
+    for (const z of list) { const src = owners[z.source]; const sp = src && part(src); if (!sp || !(P[sp.type].source || P[sp.type].mcu)) continue;
+      const path = [...new Set(z.path.map(j => owners[j]).filter(id => id && id !== src && part(id) && !P[part(id).type].source && !P[part(id).type].mcu))];
+      for (const w of proj.wires) if (Math.abs(w.I || 0) > 0.5 * Math.abs(z.current)) path.push(w.id);
+      if (!out.some(o => o.source === src)) out.push({ source: src, path, current: Math.abs(z.current) }); }
+    return out; }
   /* display/sensor modules: need power and a data pin on the same net as some MCU pin (protocol itself is not simulated) */
   let links = {}, imgs = {}, animT = {};
   function linkState(p, mcu, nets, m) {
@@ -320,22 +335,34 @@
     else if (m.k === 'lcd' && Array.isArray(m.lines)) { target._mod = {}; lcdImage(m.lines.map(String)); } }
   const con = $('#console');
   function log(s, cls) { const span = document.createElement('span'); if (cls) span.className = cls; span.textContent = s; con.appendChild(span); if (con.textContent.length > 20000) con.textContent = con.textContent.slice(-10000); con.scrollTop = 1e9; }
+  /* sketch worker lifecycle: a crashed/hung worker (exception, OOM, infinite loop) is torn down, a fresh idle
+   * worker is created right away, the console explains what happened, and the next Run uses the fresh worker. */
+  let spare = null, crashes = 0;
+  const newWorker = () => new Worker('worker.js?v=6');
+  function takeWorker() { const w = spare || newWorker(); spare = null; return w; }
+  function crash(msg) { if (!worker) return; worker.onmessage = worker.onerror = null; try { worker.terminate(); } catch (e) {} worker = null; gpio = {}; prevV = null; crashes++;
+    try { spare = newWorker(); } catch (e) { spare = null; }
+    log(msg + '\nВоркер перезапущен. Исправь код и нажми «Стоп» → «Запустить».\n', 'err'); showTab('console'); $('#status').textContent = 'Скетч упал — воркер перезапущен'; }
+  function runSketch(mcu) {
+    worker = takeWorker(); lastHb = performance.now();
+    worker.onmessage = e => { const m = e.data; lastHb = performance.now();
+      if (m.t === 'pin') { const s = gpio[m.pin] || (gpio[m.pin] = { mode: 'INPUT', val: 0 }); if (m.mode) s.mode = m.mode; if (m.val != null) s.val = m.val; }
+      else if (m.t === 'mod') onMod(m); else if (m.t === 'frame' && (m.k === 'oled' || m.k === 'hdmi') && m.bmp) onFrame(m.k, m.bmp);
+      else if (m.t === 'log') log(m.s); else if (m.t === 'err') { log(m.s + '\n', 'err'); showTab('console'); } };
+    worker.onerror = e => { e.preventDefault && e.preventDefault(); const t = String(e.message || '');
+      crash(/memory|allocation|Invalid array length|Invalid typed array length|buffer/i.test(t) ? 'Скетч упал: не хватило памяти (слишком большой массив?).' : 'Скетч упал: ' + (t || 'неизвестная ошибка') + '.'); };
+    worker.onmessageerror = () => crash('Скетч упал: повреждённое сообщение.');
+    const mods = {}; for (const p of proj.parts) { const d = P[p.type]; if (d.display === 'strip') mods.strip = Math.max(mods.strip || 0, d.n || 0); else if (d.display) mods[d.display] = 1; }
+    worker.postMessage({ t: 'start', code: proj.code, board: P[mcu.type].mcu, mods });
+    clearInterval(wd); wd = setInterval(() => { if (worker && performance.now() - lastHb > 2000) crash('Скетч остановлен: нет ответа 2 с (бесконечный цикл без delay или нехватка памяти).'); }, 500);
+  }
   function start() {
     if (running) return; proj.code = $('#code').value; autosave();
-    proj.parts.forEach(p => { delete p.burned; delete p.on; delete p._mod; }); gpio = {}; imgs = {}; links = {}; prevV = null; lastAlert = null; con.textContent = '';
+    proj.parts.forEach(p => { delete p.burned; delete p.on; delete p._mod; }); gpio = {}; imgs = {}; links = {}; prevV = null; simState = { vC: {}, iL: {} }; simTime = 0; lastT = 0; lastAlert = null; con.textContent = '';
     running = true; $('#run').disabled = true; $('#stop').disabled = false;
     const mcu = proj.parts.find(p => P[p.type].mcu);
     if (mcu && proj.code.trim()) {
-      worker = new Worker('worker.js?v=5'); lastHb = performance.now();
-      worker.onmessage = e => { const m = e.data; lastHb = performance.now();
-        if (m.t === 'pin') { const s = gpio[m.pin] || (gpio[m.pin] = { mode: 'INPUT', val: 0 }); if (m.mode) s.mode = m.mode; if (m.val != null) { s.val = m.val; if (s.mode !== 'OUTPUT' && m.val != null && !m.mode) s.mode = s.mode; } }
-        else if (m.t === 'mod') onMod(m); else if (m.t === 'frame' && (m.k === 'oled' || m.k === 'hdmi') && m.bmp) onFrame(m.k, m.bmp);
-        else if (m.t === 'log') log(m.s); else if (m.t === 'err') { log(m.s + '\n', 'err'); showTab('console'); } };
-      worker.onerror = e => { log('Ошибка скетча: ' + e.message + '\n', 'err'); showTab('console'); };
-      const mods = {}; for (const p of proj.parts) { const d = P[p.type]; if (d.display === 'strip') mods.strip = Math.max(mods.strip || 0, d.n || 0); else if (d.display) mods[d.display] = 1; }
-      worker.postMessage({ t: 'start', code: proj.code, board: P[mcu.type].mcu, mods });
-      wd = setInterval(() => { if (worker && performance.now() - lastHb > 2000) { worker.terminate(); worker = null; gpio = {}; prevV = null;
-        log('Скетч остановлен: нет ответа 2 с (бесконечный цикл без delay?).\n', 'err'); showTab('console'); } }, 500);
+      runSketch(mcu);
     }
     if (!desktop()) { $('#codePane').hidden = true; $('#codeTab').classList.remove('on'); }
     tick();
@@ -404,5 +431,5 @@
   lastJ = JSON.stringify(strip(proj));
   layout(); palette(); projList(); $('#code').value = proj.code ?? DEFAULT_CODE; fit(); render(); props(); calc();
   window.addEventListener('resize', () => { if (!running) render(); });
-  window.__sim = { get proj() { return proj; }, get meas() { return meas; }, start, stop, undo, get gpio() { return gpio; }, get shorts() { return shorts; }, get cam() { return cam; }, select: id => { sel = { part: id }; props(); calc(); render(); } };
+  window.__sim = { get proj() { return proj; }, get meas() { return meas; }, start, stop, undo, get gpio() { return gpio; }, get shorts() { return shorts; }, get crashes() { return crashes; }, get simTime() { return simTime; }, get hasWorker() { return !!worker; }, get worker() { return worker; }, get hasSpare() { return !!spare; }, get cam() { return cam; }, select: id => { sel = { part: id }; props(); calc(); render(); } };
 })();

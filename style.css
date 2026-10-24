@@ -81,3 +81,4 @@ h4{margin:10px 0 4px;font-size:12px;color:#8a94a8;text-transform:uppercase}
 .hbox{width:min(96vw,calc(88vh * 16 / 9));background:#000;border-radius:8px;padding:8px}.hbox canvas{width:100%;height:auto;display:block;background:#000}
 .pix{image-rendering:pixelated}.warnt{fill:#ffb020}
 input[type=range]{width:100%}
+.capv{fill:#7fe0a8;font-size:11px}

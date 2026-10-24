@@ -28,16 +28,16 @@
     return { find, node, count: n, groundRoots, plusRoots, bbIds, netOf: (pid, pin) => find(key(pid, pin)) };
   }
   function build(project, gpio = {}, hooks = {}) {
-    const P = window.PARTS, N = nets(project), elements = [];
+    const P = window.PARTS, N = nets(project), elements = [], owners = []; let cur = null;
     let count = N.count;
     const ctx = {
       n: (p, pin) => N.node.get(N.find(key(p.id, pin))),
       node: () => count++,
-      add: el => elements.push(el) - 1,
+      add: el => { owners.push(cur); return elements.push(el) - 1; },
       gpio: g => gpio[g],
     };
-    for (const p of project.parts) P[p.type].stamp(p, ctx);
-    return { circuit: { nodeCount: count, elements }, nets: N, ctx };
+    for (const p of project.parts) { cur = p.id; P[p.type].stamp(p, ctx); }
+    return { circuit: { nodeCount: count, elements }, nets: N, ctx, owners };
   }
   function supplyMax(project) {
     let m = 0; for (const p of project.parts) { if (p.type === 'dc') m = Math.max(m, +p.props.V); if (p.type === 'battery') m = Math.max(m, 9); if (window.PARTS[p.type].mcu) m = Math.max(m, window.PARTS[p.type].vio || 3.3); }

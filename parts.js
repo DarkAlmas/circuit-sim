@@ -15,11 +15,10 @@
     const mul = e >= 0 && e <= 9 ? BAND[e] : e === -1 ? '#d4af37' : '#c0c0c0'; return [BAND[Math.floor(d / 10)], BAND[d % 10], mul, '#d4af37']; }
   const r2 = (p, ctx, R) => ctx.add({ type: 'R', a: ctx.n(p, 'a'), b: ctx.n(p, 'b'), R });
   const meas2 = (p, sol, ctx, I) => { const U = ctx.v(p, 'a') - ctx.v(p, 'b'); return { U, I, P: Math.abs(U * I), pinI: { a: I, b: -I } }; };
-  // source with internal resistance: + pin -> R -> internal node -> V -> - pin
+  // source with internal resistance rInt (handled inside the solver's V element)
   function source(p, ctx, plus, minus, V, Rint) {
-    const m = ctx.node();
-    p._r = ctx.add({ type: 'R', a: m, b: ctx.n(p, plus), R: Rint });
-    p._v = ctx.add({ type: 'V', p: m, n: ctx.n(p, minus), V });
+    // solver-native internal resistance + short-circuit limit (sol.shortCircuits)
+    p._r = p._v = ctx.add({ type: 'V', p: ctx.n(p, plus), n: ctx.n(p, minus), V, rInt: Rint, iShort: window.SHORT_LIMIT_A || 1 });
   }
 
   function board(kind) {

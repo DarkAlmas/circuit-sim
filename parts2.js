@@ -161,14 +161,17 @@
 
   /* ---------- active: MOSFET, relay, motor, servo, buzzer ---------- */
   const sw = (p, ctx, a, b, on) => ctx.add({ type: 'R', a: ctx.n(p, a), b: ctx.n(p, b), R: on ? 0.03 : 1e9 });
-  P.mosfet = { name: 'MOSFET IRLZ44N (N-канал)', group: 'Активные', prefix: 'Q', box: [-44, -44, 88, 88],
-    pins: [{ id: 'd', x: 20, y: -40, label: 'D', hint: 'Сток (к нагрузке)' }, { id: 'g', x: -40, y: 0, label: 'G', hint: 'Затвор (к выводу платы)' }, { id: 's', x: 20, y: 40, label: 'S', hint: 'Исток (к GND)' }],
-    draw: p => `<path d="M-40 0 H-14" class="leg"/><path d="M20 -40 V-22 H6" class="leg"/><path d="M20 40 V22 H6" class="leg"/><rect x="-14" y="-26" width="28" height="44" rx="2" fill="#151515" stroke="#444"/><rect x="-16" y="-34" width="32" height="10" fill="#bfc4ca"/><circle cy="-29" r="3" fill="#777"/>
-      <text x="0" y="-4" class="tiny lightt">IRLZ</text><text x="0" y="6" class="tiny lightt">44N</text>${p._on ? '<circle cx="0" cy="12" r="2" fill="#4f4"/>' : ''}<text x="28" y="-30" class="plabel">D</text><text x="-38" y="-6" class="plabel">G</text><text x="28" y="36" class="plabel">S</text>`,
-    stamp(p, ctx) { p._g = ctx.add({ type: 'R', a: ctx.n(p, 'g'), b: ctx.n(p, 's'), R: 1e7 }); p._e = sw(p, ctx, 'd', 's', p._on); },
-    measure(p, sol, ctx) { const vgs = vdiff(p, ctx, 'g', 's'), on = vgs > 2.0; if (on !== !!p._on) { p._on = on; ctx.dirty(); } const I = sol.currents[p._e], U = vdiff(p, ctx, 'd', 's');
-      return { U, I, P: Math.abs(U * I), pinI: { d: I, g: sol.currents[p._g], s: -I - sol.currents[p._g] }, extra: { Vgs: vgs } }; },
-    check: (p, m) => m.P > 2 ? { level: 'warn', msg: `MOSFET греется: ${fU(m.P, 'Вт')} — нужен радиатор` } : null };
+  const mos = (pch) => ({ name: pch ? 'MOSFET IRF9540 (P-канал)' : 'MOSFET IRLZ44N (N-канал)', group: 'Активные', prefix: 'Q', box: [-44, -44, 88, 88],
+    props: pch ? { K: 1, Vth: 2, lambda: 0.01 } : { K: 2, Vth: 1.8, lambda: 0.01 }, p: pch,
+    pins: [{ id: 'd', x: 20, y: -40, label: 'D', hint: pch ? 'Сток (к нагрузке)' : 'Сток (к нагрузке)' }, { id: 'g', x: -40, y: 0, label: 'G', hint: pch ? 'Затвор (0 В = открыт)' : 'Затвор (к выводу платы)' }, { id: 's', x: 20, y: 40, label: 'S', hint: pch ? 'Исток (к плюсу питания)' : 'Исток (к GND)' }],
+    draw: (p, st) => `<path d="M-40 0 H-14" class="leg"/><path d="M20 -40 V-22 H6" class="leg"/><path d="M20 40 V22 H6" class="leg"/><rect x="-14" y="-26" width="28" height="44" rx="2" fill="#151515" stroke="#444"/><rect x="-16" y="-34" width="32" height="10" fill="#bfc4ca"/><circle cy="-29" r="3" fill="#777"/>
+      <text x="0" y="-4" class="tiny lightt">${pch ? 'IRF' : 'IRLZ'}</text><text x="0" y="6" class="tiny lightt">${pch ? '9540' : '44N'}</text>${st && st.m && Math.abs(st.m.I) > 1e-3 ? '<circle cx="0" cy="12" r="2" fill="#4f4"/>' : ''}<text x="28" y="-30" class="plabel">D</text><text x="-38" y="-6" class="plabel">G</text><text x="28" y="36" class="plabel">S</text>`,
+    stamp(p, ctx) { const pr = p.props || {}; p._g = ctx.add({ type: 'R', a: ctx.n(p, 'g'), b: ctx.n(p, 's'), R: 1e7 });
+      p._e = ctx.add({ type: 'M', d: ctx.n(p, 'd'), g: ctx.n(p, 'g'), s: ctx.n(p, 's'), K: +pr.K || 1, Vth: +pr.Vth || 2, lambda: +pr.lambda || 0, p: pch }); },
+    measure(p, sol, ctx) { const c = sol.currents[p._e] || { id: 0, ig: 0, is: 0 }, ig = sol.currents[p._g] || 0, I = c.id, U = vdiff(p, ctx, 'd', 's'), vgs = vdiff(p, ctx, 'g', 's');
+      return { U, I, P: Math.abs(U * I), pinI: { d: I, g: c.ig + ig, s: c.is - ig }, extra: { Vgs: vgs } }; },
+    check: (p, m) => m.P > 2 ? { level: 'warn', msg: `MOSFET греется: ${fU(m.P, 'Вт')} — нужен радиатор` } : null });
+  P.mosfet = mos(false); P.pmosfet = mos(true);
   P.relay = { name: 'Реле 5 В', group: 'Активные', prefix: 'K', box: [-44, -44, 88, 88],
     pins: [{ id: 'c1', x: -40, y: -20, label: 'IN+', hint: 'катушка +' }, { id: 'c2', x: -40, y: 20, label: 'IN−', hint: 'катушка −' }, { id: 'com', x: 40, y: 0, label: 'COM', hint: 'общий контакт' }, { id: 'no', x: 40, y: -30, label: 'NO', hint: 'нормально разомкнутый' }, { id: 'nc', x: 40, y: 30, label: 'NC', hint: 'нормально замкнутый' }],
     draw: p => `<path d="M-40 -20 H-30 M-40 20 H-30 M30 0 H40 M30 -30 H40 M30 30 H40" class="leg"/><rect x="-30" y="-38" width="60" height="76" rx="3" fill="#1d4fd0" stroke="#0e2a78"/><text x="0" y="-22" class="tiny lightt">SRD-05VDC</text>
@@ -238,16 +241,18 @@
   P.lm7805 = reg('LM7805 стабилизатор 5 В', 5, 2);
   P.ams1117 = reg('AMS1117 стабилизатор 3,3 В', 3.3, 1.1);
 
-  /* ---------- passives (DC: capacitors are open, inductor is a wire) ---------- */
+  /* ---------- passives: real C / L with transients (solver state carried between frames) ---------- */
+  const capM = (p, sol, ctx) => { const m = meas2(p, sol, ctx, sol.currents[p._e] || 0); m.extra = { Q: (+p.props.C || 0) * m.U }; return m; };
   P.cap = { name: 'Конденсатор керамический', group: 'Пассивные', prefix: 'C', props: { C: 1e-7 }, pins: two('1', '2'),
-    draw: p => `<path d="M-40 0 H-5 M40 0 H5" class="leg"/><ellipse rx="10" ry="12" fill="#d9a23a" stroke="#8a6010"/><text x="0" y="-16" class="lbl">${fU(p.props.C, 'Ф')}</text>`,
-    stamp: (p, ctx) => { p._e = r2(p, ctx, 1e9); }, measure: (p, sol, ctx) => meas2(p, sol, ctx, sol.currents[p._e]) };
-  P.ecap = { name: 'Конденсатор электролитический', group: 'Пассивные', prefix: 'C', props: { C: 1e-4 }, pins: [{ id: 'a', x: -40, y: 0, label: '+', hint: 'плюс' }, { id: 'b', x: 40, y: 0, label: '−', hint: 'минус (полоса)' }], box: [-44, -40, 88, 54],
-    draw: p => `<path d="M-40 0 H-8 V-8 M40 0 H8 V-8" class="leg"/><rect x="-12" y="-36" width="24" height="30" rx="4" fill="#1a3a9a" stroke="#0a1a5a"/><rect x="5" y="-36" width="6" height="30" fill="#c8d0e0"/><text x="0" y="-38" class="lbl">${fU(p.props.C, 'Ф')}</text>`,
-    stamp: (p, ctx) => { p._e = r2(p, ctx, 1e9); }, measure: (p, sol, ctx) => meas2(p, sol, ctx, sol.currents[p._e]),
+    draw: (p, st) => `<path d="M-40 0 H-5 M40 0 H5" class="leg"/><ellipse rx="10" ry="12" fill="#d9a23a" stroke="#8a6010"/><text x="0" y="-16" class="lbl">${fU(p.props.C, 'Ф')}</text>${st && st.m && st.running ? `<text x="0" y="26" class="lbl capv">${fU(st.m.U, 'В')}</text>` : ''}`,
+    stamp: (p, ctx) => { p._e = ctx.add({ type: 'C', a: ctx.n(p, 'a'), b: ctx.n(p, 'b'), C: +p.props.C || 1e-9 }); }, measure: capM };
+  P.ecap = { name: 'Конденсатор электролитический', group: 'Пассивные', prefix: 'C', props: { C: 1e-4 }, pins: [{ id: 'a', x: -40, y: 0, label: '+', hint: 'плюс' }, { id: 'b', x: 40, y: 0, label: '−', hint: 'минус (полоса)' }], box: [-44, -40, 88, 68],
+    draw: (p, st) => { const vmax = 16, f = st && st.m && st.running ? Math.max(0, Math.min(1, st.m.U / vmax)) : 0;
+      return `<path d="M-40 0 H-8 V-8 M40 0 H8 V-8" class="leg"/><rect x="-12" y="-36" width="24" height="30" rx="4" fill="#1a3a9a" stroke="#0a1a5a"/><rect x="5" y="-36" width="6" height="30" fill="#c8d0e0"/>${f > 0 ? `<rect x="-10" y="${-8 - 26 * f}" width="14" height="${26 * f}" fill="#3fb37f" opacity=".6"/>` : ''}<text x="0" y="-38" class="lbl">${fU(p.props.C, 'Ф')}</text>${st && st.m && st.running ? `<text x="0" y="22" class="lbl capv">${fU(st.m.U, 'В')}</text>` : ''}`; },
+    stamp: (p, ctx) => { p._e = ctx.add({ type: 'C', a: ctx.n(p, 'a'), b: ctx.n(p, 'b'), C: +p.props.C || 1e-9 }); }, measure: capM,
     check: (p, m) => m.U < -0.5 ? { level: 'warn', msg: 'Электролитический конденсатор включён наоборот — может вздуться' } : null };
   P.inductor = { name: 'Катушка индуктивности', group: 'Пассивные', prefix: 'L', props: { L: 1e-4 }, pins: two('1', '2'),
     draw: p => `${lead}<path d="M-20 0 q5 -12 10 0 q5 -12 10 0 q5 -12 10 0 q5 -12 10 0" stroke="#c87533" stroke-width="3" fill="none"/><text x="0" y="-16" class="lbl">${fU(p.props.L, 'Гн')}</text>`,
-    stamp: (p, ctx) => { p._e = r2(p, ctx, 0.05); }, measure: (p, sol, ctx) => meas2(p, sol, ctx, sol.currents[p._e]) };
+    stamp: (p, ctx) => { p._e = ctx.add({ type: 'L', a: ctx.n(p, 'a'), b: ctx.n(p, 'b'), L: +p.props.L || 1e-6 }); }, measure: (p, sol, ctx) => meas2(p, sol, ctx, sol.currents[p._e] || 0) };
   P.pot.group = 'Пассивные'; P.button.group = 'Ввод/вывод';
 })();

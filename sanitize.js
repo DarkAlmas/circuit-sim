@@ -2,7 +2,8 @@
 (function () {
   const ID = /^[A-Za-z0-9_-]{1,32}$/;
   const NUM = { V: [0, 1000], R: [0.001, 1e9], Pmax: [0.001, 1000], pos: [0, 1], Vf: [0.1, 10], Imax: [0.0001, 10], beta: [1, 2000], rInt: [0.001, 100],
-    C: [1e-12, 1], L: [1e-9, 10], lux: [0, 100000], temp: [-40, 125], hum: [0, 100], dist: [2, 400] };
+    C: [1e-12, 1], L: [1e-9, 10], lux: [0, 100000], temp: [-40, 125], hum: [0, 100], dist: [2, 400], K: [0.001, 100], Vth: [0.1, 10], lambda: [0, 1] };
+  const BOOL = new Set(['p']);
   const KINDS = ['esp32', 'esp8266', 'uno', 'attiny', 'pico', 'opi', 'analog', 'empty'];
   const LIMITS = { parts: 500, wires: 2000, pts: 50, code: 100000, importBytes: 2 * 1024 * 1024 };
   const num = (v, lo, hi, d) => { const n = Number(v); return Number.isFinite(n) ? Math.min(hi, Math.max(lo, n)) : d; };
@@ -17,6 +18,7 @@
       for (const [k, def] of Object.entries(d.props || {})) {
         const v = p.props && typeof p.props === 'object' ? p.props[k] : undefined;
         if (k === 'color') props.color = typeof v === 'string' && Object.prototype.hasOwnProperty.call(window.LED_COLORS, v) ? v : def;
+        else if (BOOL.has(k)) props[k] = typeof v === 'boolean' ? v : !!def;
         else props[k] = NUM[k] ? num(v, NUM[k][0], NUM[k][1], def) : def;
       }
       ids.add(p.id);

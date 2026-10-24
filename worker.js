@@ -1,8 +1,8 @@
 /* Runs the user's sketch in isolation. Network APIs are removed before user code runs. */
-importScripts('transpile.js');
+importScripts('transpile.js?v=6', 'memcap.js?v=6');
 /* Whitelist sandbox: capture what we need, then strip every other global from self and its prototype chain,
  * so even (()=>{}).constructor('return this')() sees no network, storage, workers or navigator. */
-const transpile = Transpile.transpile, pyT = Transpile.py;
+const transpile = Transpile.transpile, pyT = Transpile.py, memInstall = MemCap.install;
 const post = self.postMessage.bind(self);
 const now = performance.now.bind(performance);
 const _setTimeout = setTimeout.bind(self);
@@ -41,10 +41,9 @@ const BOARDS = {
 };
 const CAP = 100000;
 const tooBig = n => { if (typeof n === 'number' && n > CAP) throw new RangeError('массив больше ' + CAP + ' элементов запрещён'); };
-const SafeArray = function (...a) { if (a.length === 1) tooBig(a[0]); return new _Array(...a); };
-SafeArray.from = (x, f) => { tooBig(x && x.length); return _Array.from(x, f); }; SafeArray.of = (...a) => _Array.of(...a); SafeArray.isArray = _Array.isArray;
-const safeTyped = _typed.map(T => { const F = function (n, ...r) { tooBig(typeof n === 'number' ? n : n && n.length); return new T(n, ...r); }; F.from = (x, f) => { tooBig(x && x.length); return T.from(x, f); }; F.of = (...a) => T.of(...a); return F; });
-const typedNames = ['Int8Array', 'Uint8Array', 'Uint8ClampedArray', 'Int16Array', 'Uint16Array', 'Int32Array', 'Uint32Array', 'Float32Array', 'Float64Array'];
+/* replace Array / TypedArrays / ArrayBuffer globals (and .constructor) with capped wrappers */
+const CAPPED = memInstall(self, CAP);
+const SafeArray = CAPPED.Array;
 
 /* displays: everything is drawn to buffers here, posted at most 30 fps */
 const makeDisplays = function (mods) {
@@ -150,7 +149,7 @@ const start = function (code, board, mods) {
     __lib: (cls) => LIB[cls] ? LIB[cls]() : (() => { throw new Error('неизвестная библиотека ' + cls); })(),
     Array: SafeArray,
   };
-  typedNames.forEach((n, i) => { rt[n] = safeTyped[i]; });
+  for (const n of Object.keys(CAPPED)) rt[n] = CAPPED[n];
   const isPy = board === 'opi';
   if (isPy) {
     const P = { IN: 'INPUT', OUT: 'OUTPUT', HIGH: 1, LOW: 0, BCM: 0, BOARD: 1, PUD_UP: 'UP', PUD_DOWN: 'DOWN',
