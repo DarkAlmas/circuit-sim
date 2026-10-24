@@ -32,7 +32,7 @@
       if (!w || typeof w.id !== 'string' || !ID.test(w.id) || wids.has(w.id)) continue;
       const a = end(w.a), b = end(w.b); if (!a || !b) continue;
       const pts = Array.isArray(w.pts) ? w.pts.slice(0, LIMITS.pts).filter(q => Array.isArray(q) && q.length === 2 && q.every(Number.isFinite)).map(q => [q[0], q[1]]) : [];
-      wids.add(w.id); out.wires.push({ id: w.id, a, b, pts });
+      wids.add(w.id); const row = { id: w.id, a, b, pts }; if (typeof w.color === 'string' && Object.prototype.hasOwnProperty.call(WIRE_COLORS, w.color)) row.color = w.color; out.wires.push(row);
     }
     out.code = typeof raw.code === 'string' ? raw.code.slice(0, LIMITS.code) : '';
     // v7: per-MCU sketches for extra boards (keys must be existing MCU part ids)
@@ -83,6 +83,7 @@
     if (!d || !Array.isArray(d.parts) || !Array.isArray(d.wires)) throw new Error('неизвестный формат');
     return sanitizeProject(d);
   }
+  const WIRE_COLORS = { 'красный': '#e5484d', 'чёрный': '#1a1d24', 'синий': '#4c7dff', 'зелёный': '#3fb37f', 'жёлтый': '#f0c430', 'белый': '#f2f5f8' };
   const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-  window.sanitizeProject = sanitizeProject; window.parseProjectText = parseProjectText; window.SANITIZE_LIMITS = LIMITS; window.ROBOT_LIMITS = RL; window.PROJECT_KINDS = KINDS; window.esc = esc; window.ID_RE = ID;
+  window.sanitizeProject = sanitizeProject; window.parseProjectText = parseProjectText; window.SANITIZE_LIMITS = LIMITS; window.ROBOT_LIMITS = RL; window.PROJECT_KINDS = KINDS; window.esc = esc; window.ID_RE = ID; window.WIRE_COLORS = WIRE_COLORS;
 })();

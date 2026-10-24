@@ -13,7 +13,7 @@
   function autosave() { const j = JSON.stringify(strip(proj)); if (lastJ !== null && j !== lastJ) { hist.push(lastJ); if (hist.length > 100) hist.shift(); } lastJ = j; localStorage.setItem(AUTO, j); }
   function undo() { if (!hist.length) return; const j = hist.pop(); lastJ = j; proj = sanitizeProject(JSON.parse(j)); proj.code = proj.code || $('#code').value; sel = null; prevV = null; localStorage.setItem(AUTO, j); render(); props(); calc(); }
   const locked = () => running && !shorts.length;
-  function strip(p) { return { parts: p.parts.map(({ id, type, x, y, rot, props }) => ({ id, type, x, y, rot, props })), wires: p.wires.map(({ id, a, b, pts }) => ({ id, a, b, pts })), code: p.code, codes: p.codes, name: p.name, kind: p.kind, robot: p.robot }; }
+  function strip(p) { return { parts: p.parts.map(({ id, type, x, y, rot, props }) => ({ id, type, x, y, rot, props })), wires: p.wires.map(({ id, a, b, pts, color }) => { const w = { id, a, b, pts }; if (color) w.color = color; return w; }), code: p.code, codes: p.codes, name: p.name, kind: p.kind, robot: p.robot }; }
   const uid = pre => { let i = 1; const ids = new Set([...proj.parts, ...proj.wires].map(o => o.id)); while (ids.has(pre + i)) i++; return pre + i; };
   const part = id => proj.parts.find(p => p.id === id);
   const rotPt = (x, y, r) => { for (let i = 0; i < (r || 0) % 4; i++) [x, y] = [-y, x]; return [x, y]; };
@@ -22,6 +22,26 @@
     if (P[type].mcu) { x0 = -72; x1 = 72; y0 = Math.min(y0 - 32, -60); y1 = Math.max(y1 + 22, 60); }
     if (x1 - x0 < 50) { x0 = Math.min(x0, -25); x1 = Math.max(x1, 25); } if (y1 - y0 < 40) { y0 = Math.min(y0, -22); y1 = Math.max(y1, 22); }
     return [x0 - 4, y0 - 4, x1 - x0 + 8, y1 - y0 + 8]; }
+  /* Catalog thumb: the part's own draw(), with pin-name labels removed. Same SVG the canvas uses. */
+  function partPreview(type) {
+    const d = P[type]; if (!d || typeof d.draw !== 'function') return null;
+    const p = { id: 'pv', type, x: 0, y: 0, rot: 0, props: clone(d.props || {}), on: false };
+    const st = { I: 0.012, m: { U: 0, I: 0.012 }, burned: false, running: false, led2: false, on: false, why: '', anim: 0, mod: null, img: null };
+    let inner = ''; try { inner = d.draw(p, st) || ''; } catch (e) { inner = ''; }
+    inner = window.stripPinTexts(inner, d.pins);
+    const [bx, by, bw, bh] = bbox(type);
+    return { viewBox: bx + ' ' + by + ' ' + bw + ' ' + bh, inner };
+  }
+  function thumbSvg(type) {
+    const prev = partPreview(type), ns = 'http://www.w3.org/2000/svg';
+    const blank = () => { const s = document.createElementNS(ns, 'svg'); s.setAttribute('class', 'thumb'); s.setAttribute('width', '56'); s.setAttribute('height', '56'); return s; };
+    if (!prev) return blank();
+    const doc = new DOMParser().parseFromString(`<svg xmlns="${ns}" class="thumb" width="56" height="56" viewBox="${prev.viewBox}">${prev.inner}</svg>`, 'image/svg+xml');
+    const node = doc.documentElement;
+    if (!node || node.localName !== 'svg') return blank();
+    return document.importNode(node, true);
+  }
+  window.partPreview = partPreview;
   const toWorld = (cx, cy) => { const r = svg.getBoundingClientRect(); return [(cx - r.left - cam.x) / cam.s, (cy - r.top - cam.y) / cam.s]; };
   const snap = v => Math.round(v / 10) * 10;
   const fU = (x, u) => fmtUnit(x, u);
@@ -31,13 +51,14 @@
   const GROUPS = ['Платы', 'Питание', 'Микросхемы', 'Индикация', 'Активные', 'Датчики', 'Пассивные', 'Полупроводники', 'Ввод/вывод'];
   function palette() {
     const q = $('#search').value.trim().toLowerCase();
-    // v12: built with DOM nodes (no innerHTML); each item has an icon badge for the phone 4-column grid
-    const pal = $('#palette'); pal.textContent = ''; const ICON = { 'Платы': '🧠', 'Питание': '🔋', 'Микросхемы': '▦', 'Индикация': '💡', 'Активные': '⚙', 'Датчики': '📡', 'Пассивные': '〰', 'Полупроводники': '▷', 'Ввод/вывод': '🔘' }; let any = false;
-    for (const g of GROUPS) { const items = Object.entries(P).filter(([k, d]) => d.group === g && (!q || d.name.toLowerCase().includes(q))); if (!items.length) continue; any = true;
+    // v14: each row is a 56×56 thumb from that part's own draw. No shared group icon.
+    const pal = $('#palette'); pal.textContent = ''; let any = false;
+    const groups = [...GROUPS, ...[...new Set(Object.values(P).map(d => d.group))].filter(g => !GROUPS.includes(g))];
+    for (const g of groups) { const items = Object.entries(P).filter(([k, d]) => d.group === g && (!q || d.name.toLowerCase().includes(q))); if (!items.length) continue; any = true;
       const h = document.createElement('div'); h.className = 'grp'; h.textContent = g; pal.appendChild(h);
       for (const [k, d] of items) { const it = document.createElement('div'); it.className = 'item'; it.draggable = true; it.dataset.type = k;
-        const ic = document.createElement('span'); ic.className = 'ico'; ic.textContent = ICON[g] || (d.prefix || k.slice(0, 2)).slice(0, 3); const nm = document.createElement('span'); nm.className = 'nm'; nm.textContent = d.name;
-        it.append(ic, nm); pal.appendChild(it); } }
+        const nm = document.createElement('span'); nm.className = 'nm'; nm.textContent = d.name;
+        it.append(thumbSvg(k), nm); pal.appendChild(it); } }
     if (!any) { const m = document.createElement('p'); m.className = 'muted'; m.textContent = 'Ничего не найдено'; pal.appendChild(m); }
   }
   $('#search').oninput = palette;
@@ -65,9 +86,10 @@
     proj.wires = proj.wires.filter(w => part(w.a.part) && part(w.b.part));
     const N = Netlist.nets(proj);
     const blink = Math.floor(performance.now() / 500) % 2 === 0;
-    wiresL.innerHTML = proj.wires.map(w => { const d = wirePath(w), c = wireColor(w, N), isSel = sel && sel.wire === w.id, sh = shortSet.has(w.id);
-      const black = N.groundRoots.has(N.netOf(w.a.part, w.a.pin));
-      return (isSel ? `<path d="${d}" class="wsel"/>` : '') + `<path d="${d}" class="wire${black ? ' gndw' : ''}${sh ? ' short' + (blink ? ' on' : '') : ''}${isSel ? ' sel' : ''}" data-wire="${esc(w.id)}" stroke="${black ? '#0b0d12' : c}"/>` +
+    wiresL.innerHTML = proj.wires.map(w => { const d = wirePath(w), named = w.color && window.WIRE_COLORS[w.color], c = named || wireColor(w, N), isSel = sel && sel.wire === w.id, sh = shortSet.has(w.id);
+      const black = !named && N.groundRoots.has(N.netOf(w.a.part, w.a.pin));
+      const ink = named === '#1a1d24' ? ' ink' : '';
+      return (isSel ? `<path d="${d}" class="wsel"/>` : '') + `<path d="${d}" class="wire${black ? ' gndw' : ''}${ink}${sh ? ' short' + (blink ? ' on' : '') : ''}${isSel ? ' sel' : ''}" data-wire="${esc(w.id)}" stroke="${black ? '#0b0d12' : c}"/>` +
         (running && !shorts.length && Math.abs(w.I || 0) > 1e-6 ? `<path d="${d}" class="flow" stroke-dashoffset="${-(flowOff[w.id] || 0)}"/>` : '') +
         `<path d="${d}" class="whit" data-wire="${esc(w.id)}"/>` +
         (isSel && !locked() ? (w.pts || []).map((q, i) => `<circle class="bend" data-wire="${esc(w.id)}" data-i="${i}" cx="${q[0]}" cy="${q[1]}" r="5"/>`).join('') +
@@ -108,7 +130,21 @@
   function commitProp() { prevV = null; autosave(); if (!running) render(); live(); calc(); }
   function props() {
     const el = $('#props');
-    if (sel && sel.wire) { el.innerHTML = `<div class="phead"><b>Провод ${esc(sel.wire)}</b><button id="del" class="danger">Удалить</button></div><p class="muted">Двойной щелчок по проводу добавляет точку изгиба, по точке удаляет её. Точки можно перетаскивать.</p>`; $('#del').onclick = del; return; }
+    if (sel && sel.wire) { const w = proj.wires.find(x => x.id === sel.wire); el.textContent = '';
+      const head = document.createElement('div'); head.className = 'phead'; head.id = 'wireSheet';
+      const title = document.createElement('b'); title.id = 'wireTitle'; title.textContent = 'Свойства провода';
+      const delb = document.createElement('button'); delb.id = 'del'; delb.className = 'danger'; delb.textContent = 'Удалить провод'; delb.onclick = del;
+      head.append(title, delb);
+      const colors = document.createElement('div'); colors.className = 'wcolors';
+      for (const [name, hex] of Object.entries(window.WIRE_COLORS)) { const b = document.createElement('button'); b.type = 'button'; b.dataset.wcolor = name; b.className = 'wsw' + (w && w.color === name ? ' on' : ''); b.style.background = hex; b.setAttribute('aria-label', name); b.title = name;
+        b.onclick = () => { if (!w) return; w.color = name; changed(); }; colors.appendChild(b); }
+      const bh = document.createElement('h4'); bh.textContent = 'Точки изгиба';
+      const list = document.createElement('div'); list.id = 'bends';
+      const pts = w && w.pts || [];
+      if (!pts.length) { const m = document.createElement('p'); m.className = 'muted'; m.textContent = 'Нет изгибов. Двойной щелчок по проводу добавляет точку, по точке — убирает.'; list.appendChild(m); }
+      pts.forEach((q, i) => { const row = document.createElement('div'); row.className = 'bendrow'; const lab = document.createElement('span'); lab.textContent = 'Изгиб ' + (i + 1) + ': ' + q[0] + ', ' + q[1];
+        const rb = document.createElement('button'); rb.type = 'button'; rb.textContent = 'Убрать изгиб'; rb.onclick = () => { if (w && w.pts) { w.pts.splice(i, 1); changed(); } }; row.append(lab, rb); list.appendChild(row); });
+      el.append(head, colors, bh, list); return; }
     const p = sel && part(sel.part); if (!p) { el.innerHTML = '<p class="muted">Выбери деталь или провод. Провод: коснитесь линии (или правый клик / долгое нажатие — меню).</p>'; return; }
     const d = P[p.type], pr = p.props || {};
     let h = `<div class="phead">${icon(p)}<div class="pname"><b>${esc(p.id)}</b><span>${d.name}</span></div><button id="del" class="danger">Удалить</button></div>`;
@@ -369,7 +405,8 @@
     if (shorts.length) { alert = { level: 'burn', msg: shortMessage(shorts[0], proj) };
       for (const z of shorts) for (const id of [z.source, ...z.path]) if (meas[id]) meas[id] = { ...meas[id], U: NaN, I: NaN, P: NaN, short: true }; }
     else for (const p of proj.parts) { const d = P[p.type], m = meas[p.id];
-      if (m && d.check) { const c = d.check(p, m, ctx); checks[p.id] = c || null; if (c && (!alert || c.level === 'burn')) alert = c; } }
+      if (m && d.check) { const c = d.check(p, m, ctx); checks[p.id] = c || null; if (c && (!alert || c.level === 'burn')) alert = c;
+        if (c && c.level === 'burn' && p.type === 'esp32c3' && c.msg && p._burnLogged !== c.msg) { p._burnLogged = c.msg; log(c.msg, 'err'); showTab('console'); } } }
     // inputs for the sketch
     const mcu = mcus[0];
     links = {}; for (const p of proj.parts) { const d = P[p.type]; if (!d.display && !d.sensor) continue;
@@ -378,8 +415,10 @@
       if (d.motor && p._st) { p._st.ang = (((p._st.ang || 0) + Math.max(-50, Math.min(50, (p._st.rpm || 0) * 6 * dt))) % 360 + 360) % 360; animT[p.id] = p._st.ang; } }
     const rfMods = proj.parts.filter(p => P[p.type].sensor === 'nrf' && links[p.id] && links[p.id].on);
     const sendIn = (w, m) => { const v = {}; for (const q of P[m.type].pins) { const g = P[m.type].gpioOf(q.id); if (g != null) v[g] = ctx.v(m, q.id); }
-      const s = {}; for (const p of proj.parts) { const d = P[p.type], l = links[p.id]; if (!d.sensor || !l || !l.on || (l.mcu && l.mcu !== m.id)) continue; const pr = p.props;
-        if (d.sensor === 'dht') { s.temp = pr.temp; s.hum = pr.hum; } else if (d.sensor === 'sonar') s.dist = pr.dist; else if (d.sensor === 'vl53') s.mm = pr.mm;
+      const s = {}; for (const p of proj.parts) { const d = P[p.type], l = links[p.id]; if (!d.sensor || !l) continue;
+        if (d.sensor === 'sonar') { if (l.on && (!l.mcu || l.mcu === m.id)) { s.dist = p.props.dist; delete s.sonarWhy; } else if (l.why && s.dist == null) s.sonarWhy = l.why; continue; }
+        if (!l.on || (l.mcu && l.mcu !== m.id)) continue; const pr = p.props;
+        if (d.sensor === 'dht') { s.temp = pr.temp; s.hum = pr.hum; } else if (d.sensor === 'vl53') s.mm = pr.mm;
         else if (d.sensor === 'imu') s.imu = { pitch: pr.pitch, roll: pr.roll, acc: pr.acc, gz: pr.gz }; else if (d.sensor === 'nrf') { s.nrf = true; s.rfPeer = rfMods.some(o => o !== p); } }
       const tu = proj.robot && proj.robot.tune; if (tu) { const c = (v, hi) => Number.isFinite(+v) ? Math.max(0, Math.min(hi, +v)) : null; s.tune = { kp: c(tu.kp, 300), kd: c(tu.kd, 300), base: c(tu.base, 255) }; } // v11: PID sliders, clamped again (live edits)
       w.postMessage({ t: 'in', v, s }); };
@@ -405,6 +444,7 @@
   let links = {}, imgs = {}, animT = {};
   function linkState(p, mcu, nets, m) {
     const d = P[p.type], data = d.dataPin || (d.pins.find(q => /^(DIN|DI|SDA|SIG|DATA|IN|TRIG|HDMI)$/.test(q.id)) || {}).id;
+    if (typeof d.link === 'function') return d.link(p, mcu, nets, m);
     if (!mcu) return { on: false, why: 'нет платы' };
     if (d.display === 'hdmi') { const a = nets.netOf ? nets.netOf(p.id, 'HDMI') : null, mb = P[mcu.type].pins.some(q => q.id === 'HDMI') && nets.netOf ? nets.netOf(mcu.id, 'HDMI') : null;
       return a != null && a === mb ? { on: true } : { on: false, why: 'Нет сигнала' }; }
@@ -435,7 +475,7 @@
   /* sketch worker lifecycle: a crashed/hung worker (exception, OOM, infinite loop) is torn down, a fresh idle
    * worker is created right away, the console explains what happened, and the next Run uses the fresh worker. */
   let spare = null, crashes = 0;
-  const newWorker = () => new Worker('worker.js?v=13');
+  const newWorker = () => new Worker('worker.js?v=14');
   function takeWorker() { const w = spare || newWorker(); spare = null; return w; }
   function crash(msg) { if (!worker) return; worker.onmessage = worker.onerror = null; try { worker.terminate(); } catch (e) {} worker = null; gpio = {}; prevV = null; crashes++;
     try { spare = newWorker(); } catch (e) { spare = null; }
@@ -475,7 +515,7 @@
   }
   function start() {
     if (running) return; saveEditor(); autosave();
-    proj.parts.forEach(p => { delete p.burned; delete p.on; delete p._mod; }); gpio = {}; imgs = {}; links = {}; prevV = null; simState = { vC: {}, iL: {} }; simTime = 0; lastT = 0; lastAlert = null; con.textContent = '';
+    proj.parts.forEach(p => { delete p.burned; delete p.on; delete p._mod; delete p._burnMsg; delete p._burnLogged; }); gpio = {}; imgs = {}; links = {}; prevV = null; simState = { vC: {}, iL: {} }; simTime = 0; lastT = 0; lastAlert = null; con.textContent = '';
     running = true; $('#run').disabled = true; $('#stop').disabled = false;
     proj.parts.forEach(p => { delete p._st; delete p._txT; delete p._low; delete p._duty; delete p._acc; delete p._vs; }); extra = {}; rf = { sent: 0, delivered: 0, last: null };
     const mcus = proj.parts.filter(p => P[p.type].mcu), mcu = mcus[0];
@@ -488,7 +528,7 @@
   }
   function stop() {
     running = false; shorts = []; shortSet = new Set(); shortSig = ''; $('#shortBox').hidden = true; $('#simText').hidden = false; cancelAnimationFrame(raf); clearInterval(wd); if (worker) worker.terminate(); worker = null; gpio = {}; sim = null; for (const k in extra) try { extra[k].w.terminate(); } catch (e) {} extra = {};
-    for (const k in meas) delete meas[k]; for (const k in checks) delete checks[k]; proj.parts.forEach(p => { delete p.burned; delete p._mod; }); links = {}; imgs = {};
+    for (const k in meas) delete meas[k]; for (const k in checks) delete checks[k]; proj.parts.forEach(p => { delete p.burned; delete p._mod; delete p._burnMsg; delete p._burnLogged; }); links = {}; imgs = {};
     $('#run').disabled = false; $('#stop').disabled = true; $('#status').textContent = 'Остановлено'; $('#alert').hidden = true;
     render(); live(); calc(); if (window.RobotUI) RobotUI.onStop();
   }

@@ -111,15 +111,19 @@
         const U = ctx.v(p, 'a') - ctx.v(p, 'b'); const P = Math.abs((ctx.v(p, 'a') - ctx.v(p, 'w')) * i1) + Math.abs((ctx.v(p, 'w') - ctx.v(p, 'b')) * i2);
         return { U, I: i1, P, pinI: { a: i1, w: i2 - i1, b: -i2 } }; } },
     led: { name: 'Светодиод', group: 'Индикация', props: { color: 'красный', Vf: 1.8, Imax: 0.02 }, pins: [{ id: 'a', x: -40, y: 0, label: 'A', hint: 'Анод +' }, { id: 'b', x: 40, y: 0, label: 'K', hint: 'Катод −' }],
-      box: [-44, -46, 88, 70],
-      draw: (p, st) => { const c = LED_COLORS[p.props.color]?.[0] || '#f33', b = st.burned ? 0 : Math.min(1, (st.I || 0) / 0.015);
+      box: [-44, -50, 88, 96],
+      /* glow only on forward current; reverse bias stays dark and shows a warning (draw only — solver polarity is unchanged) */
+      draw: (p, st) => { const c = LED_COLORS[p.props.color]?.[0] || '#f33', I = +st.I || 0, lit = !st.burned && I > 0.001, b = lit ? Math.min(1, I / 0.015) : 0;
+        const lens = lit ? c : '#2a2426', fo = lit ? (0.35 + 0.6 * b).toFixed(2) : '0.12';
+        const rev = !!(st.running && st.m && st.m.U < -0.05 && I <= 0);
         return `<path d="M-40 0 H-5 V-12" class="leg"/><path d="M40 0 H5 V-12" class="leg"/>
-          ${b > 0.01 ? `<circle cx="0" cy="-26" r="${18 + 14 * b}" fill="${c}" opacity="${0.55 * b}" filter="url(#glow)"/>` : ''}
-          <rect x="-13" y="-14" width="26" height="5" rx="1.5" fill="${c}" fill-opacity=".55" stroke="${c}" stroke-opacity=".8"/>
-          <path d="M-11 -14 V-32 A11 11 0 0 1 11 -32 V-14 Z" fill="${c}" fill-opacity="${0.28 + 0.6 * b}" stroke="${c}" stroke-opacity=".9" stroke-width="1.2"/>
+          ${lit ? `<circle cx="0" cy="-26" r="${(18 + 14 * b).toFixed(1)}" fill="${c}" opacity="${(0.55 * b).toFixed(2)}" filter="url(#glow)"/>` : ''}
+          <rect x="-13" y="-14" width="26" height="5" rx="1.5" fill="${lens}" fill-opacity="${lit ? '0.55' : '0.12'}" stroke="${lens}" stroke-opacity=".8"/>
+          <path d="M-11 -14 V-32 A11 11 0 0 1 11 -32 V-14 Z" fill="${lens}" fill-opacity="${fo}" stroke="${lens}" stroke-opacity=".9" stroke-width="1.2"/>
           <path d="M-5 -14 V-24 L-1 -27 M5 -14 V-22 L1 -24" stroke="#cfd6df" stroke-width="1.2" fill="none" opacity=".6"/>
-          <path d="M-7 -33 A7 7 0 0 1 -2 -39" stroke="#fff" stroke-width="2" fill="none" opacity="${0.35 + 0.5 * b}"/>
-          <text x="-30" y="12" class="plabel">+</text><text x="26" y="12" class="plabel">−</text>`; },
+          <path d="M-7 -33 A7 7 0 0 1 -2 -39" stroke="#fff" stroke-width="2" fill="none" opacity="${lit ? (0.35 + 0.5 * b).toFixed(2) : '0.15'}"/>
+          <text x="-30" y="12" class="plabel">+</text><text x="26" y="12" class="plabel">−</text>
+          ${rev ? '<text x="0" y="28" class="lbl warnt">обратное включение</text>' : ''}`; },
       stamp: (p, ctx) => { p._e = p.burned ? r2(p, ctx, 1e9) : ctx.add({ type: 'D', a: ctx.n(p, 'a'), b: ctx.n(p, 'b'), Is: S.ledIs(+p.props.Vf), n: 2 }); },
       measure: (p, sol, ctx) => { const I = p.burned ? 0 : (p.burned ? 0 : sol.currents[p._e]); return meas2(p, sol, ctx, I); },
       check(p, m, ctx) {
@@ -176,6 +180,18 @@
     for (const [k, s] of pre) if (a >= k * 0.9995) { const v = x / k; return fmtNum(v, Math.abs(v) >= 100 ? 0 : Math.abs(v) >= 10 ? 1 : 2) + ' ' + s + u; }
     return fmtNum(x / 1e-9, 1) + ' н' + u;
   }
-  window.PartsLib = { two, lead, r2, meas2, source, bands, LED_COLORS };
-  window.PARTS = PARTS; window.resistorBands = bands; window.LED_COLORS = LED_COLORS; window.fmtUnit = fmtUnit; window.fmtNum = fmtNum; window.e12up = e12up;
+  /* Drop pin-name labels from a part drawing so a 56×56 catalog thumb stays readable. Body marks (class lbl, away from the pins) stay. */
+  function stripPinTexts(svg, pins) {
+    const list = pins || [];
+    return String(svg || '').replace(/<text\b([^>]*)>([^<]*)<\/text>/g, (full, attrs, text) => {
+      const cls = /class="([^"]*)"/.exec(attrs), classes = cls ? cls[1].split(/\s+/) : [];
+      if (classes.includes('plabel') || classes.includes('blbl')) return '';
+      const t = text.trim(), xm = /\bx="([^"]+)"/.exec(attrs), ym = /\by="([^"]+)"/.exec(attrs);
+      const x = xm ? +xm[1] : NaN, y = ym ? +ym[1] : NaN;
+      if (list.some(q => (t === String(q.label) || t === String(q.id)) && Number.isFinite(x) && Number.isFinite(y) && Math.hypot(x - q.x, y - q.y) < 18)) return '';
+      return full;
+    });
+  }
+  window.PartsLib = { two, lead, r2, meas2, source, bands, LED_COLORS, stripPinTexts };
+  window.PARTS = PARTS; window.resistorBands = bands; window.LED_COLORS = LED_COLORS; window.fmtUnit = fmtUnit; window.fmtNum = fmtNum; window.e12up = e12up; window.stripPinTexts = stripPinTexts;
 })();

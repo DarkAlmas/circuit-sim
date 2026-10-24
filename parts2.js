@@ -214,9 +214,19 @@
     draw: p => `<path d="M-20 40 V30 M0 40 V30 M20 40 V30" class="leg"/><rect x="-28" y="-42" width="56" height="72" rx="4" fill="#f0f0f0" stroke="#aaa"/>${[0, 1, 2, 3, 4].map(k => `<rect x="-20" y="${-34 + k * 9}" width="40" height="5" rx="2" fill="#bbb"/>`).join('')}<text x="0" y="16" class="tiny">${fN(p.props.temp, 1)}°C ${fN(p.props.hum, 0)}%</text>`,
     stamp: pw3, measure: pw3m };
   P.hcsr04 = { name: 'Дальномер HC-SR04', group: 'Датчики', prefix: 'U', sensor: 'sonar', dataPin: 'ECHO', props: { dist: 50 }, box: [-54, -36, 108, 72],
-    pins: [{ id: 'VCC', x: -30, y: 30, label: 'VCC', hint: 'VCC +5 В' }, { id: 'TRIG', x: -10, y: 30, label: 'TRIG', hint: 'TRIG: к выводу платы' }, { id: 'ECHO', x: 10, y: 30, label: 'ECHO', hint: 'ECHO: к выводу платы (sonar.distanceCm())' }, { id: 'GND', x: 30, y: 30, label: 'GND', hint: 'GND' }],
-    draw: p => `<path d="M-30 30 V20 M-10 30 V20 M10 30 V20 M30 30 V20" class="leg"/><rect x="-50" y="-30" width="100" height="50" rx="3" fill="#1d4fd0" stroke="#0e2a78"/><circle cx="-26" cy="-6" r="16" fill="#ccc" stroke="#888"/><circle cx="26" cy="-6" r="16" fill="#ccc" stroke="#888"/><circle cx="-26" cy="-6" r="10" fill="#333"/><circle cx="26" cy="-6" r="10" fill="#333"/><text x="0" y="-34" class="lbl">${fN(p.props.dist, 0)} см</text>`,
-    stamp: pw3, measure: pw3m };
+    pins: [{ id: 'VCC', x: -30, y: 30, label: 'Vcc', hint: 'Vcc +5 В' }, { id: 'TRIG', x: -10, y: 30, label: 'Trig', hint: 'Trig: к выводу платы' }, { id: 'ECHO', x: 10, y: 30, label: 'Echo', hint: 'Echo: к выводу платы (sonar.distanceCm())' }, { id: 'GND', x: 30, y: 30, label: 'Gnd', hint: 'Gnd' }],
+    draw: p => `<path d="M-30 30 V20 M-10 30 V20 M10 30 V20 M30 30 V20" class="leg"/><rect x="-50" y="-30" width="100" height="50" rx="3" fill="#1d4fd0" stroke="#0e2a78"/><circle cx="-26" cy="-6" r="16" fill="#ccc" stroke="#888"/><circle cx="26" cy="-6" r="16" fill="#ccc" stroke="#888"/><circle cx="-26" cy="-6" r="10" fill="#333"/><circle cx="26" cy="-6" r="10" fill="#333"/><text x="0" y="-34" class="lbl">${fN(p.props.dist, 0)} см</text>
+      <text x="-30" y="16" class="plabel" text-anchor="middle">Vcc</text><text x="-10" y="16" class="plabel" text-anchor="middle">Trig</text><text x="10" y="16" class="plabel" text-anchor="middle">Echo</text><text x="30" y="16" class="plabel" text-anchor="middle">Gnd</text>`,
+    stamp: pw3, measure: pw3m,
+    /* TRIG and ECHO must each land on an MCU GPIO; power is Vcc−Gnd above 2.7 V (ESP32 3V3 robots still count). */
+    link(p, mcu, nets, m) {
+      if (!mcu) return { on: false, why: 'HC-SR04 не подключён: нет платы' };
+      if (!m || m.powered === false || !(m.U > 2.7)) return { on: false, why: 'HC-SR04 не подключён: нет питания (Vcc и Gnd)' };
+      const onGpio = pin => { const n = nets.netOf(p.id, pin); return P[mcu.type].pins.some(q => P[mcu.type].gpioOf(q.id) != null && nets.netOf(mcu.id, q.id) === n); };
+      if (!onGpio('TRIG')) return { on: false, why: 'HC-SR04 не подключён: Trig не на выводе платы' };
+      if (!onGpio('ECHO')) return { on: false, why: 'HC-SR04 не подключён: Echo не на выводе платы' };
+      return { on: true };
+    } };
 
   /* ---------- ICs ---------- */
   function vis(name, top, bot, chip, note) {
@@ -256,4 +266,18 @@
     draw: p => `${lead}<path d="M-20 0 q5 -12 10 0 q5 -12 10 0 q5 -12 10 0 q5 -12 10 0" stroke="#c87533" stroke-width="3" fill="none"/><text x="0" y="-16" class="lbl">${fU(p.props.L, 'Гн')}</text>`,
     stamp: (p, ctx) => { p._e = ctx.add({ type: 'L', a: ctx.n(p, 'a'), b: ctx.n(p, 'b'), L: +p.props.L || 1e-6 }); }, measure: (p, sol, ctx) => meas2(p, sol, ctx, sol.currents[p._e] || 0) };
   P.pot.group = 'Пассивные'; P.button.group = 'Ввод/вывод';
+
+  /* USB-UART / power breakout: 5 V and 3.3 V rails plus TX/RX labels. Two sources; the second must not overwrite the first current id. */
+  P.usbuart = { name: 'USB-UART (5V, 3V3, TX, RX)', group: 'Питание', prefix: 'U', source: { plus: '5V', minus: 'GND' }, supplies: { '5V': 5, '3V3': 3.3 },
+    ground: id => id === 'GND', box: [-48, -40, 96, 80],
+    pins: [{ id: '5V', x: -40, y: -16, label: '5V', hint: '5 В' }, { id: '3V3', x: -40, y: 0, label: '3V3', hint: '3,3 В' }, { id: 'GND', x: -40, y: 16, label: 'GND', hint: 'GND' },
+      { id: 'TX', x: 40, y: -8, label: 'TX', hint: 'TX' }, { id: 'RX', x: 40, y: 8, label: 'RX', hint: 'RX' }],
+    draw: () => `<rect x="-34" y="-28" width="68" height="56" rx="4" fill="#243044" stroke="#121820"/>
+      <rect x="-12" y="-34" width="24" height="12" rx="2" fill="#c0c4c9" stroke="#80868d"/><rect x="-7" y="-31" width="14" height="6" rx="1" fill="#3a3a3a"/>
+      <text x="0" y="2" class="tiny lightt">USB-UART</text>
+      <text x="-28" y="-12" class="plabel">5V</text><text x="-28" y="4" class="plabel">3V3</text><text x="-28" y="20" class="plabel">GND</text>
+      <text x="18" y="-4" class="plabel">TX</text><text x="18" y="12" class="plabel">RX</text>`,
+    stamp(p, ctx) { source(p, ctx, '5V', 'GND', 5, 0.1); const r5 = p._r; source(p, ctx, '3V3', 'GND', 3.3, 0.1); p._r5 = r5; p._r3 = p._r; },
+    measure(p, sol, ctx) { const i5 = sol.currents[p._r5] || 0, i3 = sol.currents[p._r3] || 0, U = vdiff(p, ctx, '5V', 'GND');
+      return { U, I: i5 + i3, P: Math.abs(U * i5) + Math.abs((ctx.v(p, '3V3') - ctx.v(p, 'GND')) * i3), pinI: { '5V': i5, '3V3': i3, GND: -(i5 + i3), TX: 0, RX: 0 }, out: true, srcI: Math.abs(i5) + Math.abs(i3) }; } };
 })();

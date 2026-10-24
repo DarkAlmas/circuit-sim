@@ -20,6 +20,7 @@
       for (const q of d.pins) { const k = find(key(p.id, q.id));
         if (d.ground && d.ground(q.id)) groundRoots.add(k);
         if (d.source && q.id === d.source.plus) plusRoots.add(k);
+        if (d.supplies && Object.prototype.hasOwnProperty.call(d.supplies, q.id)) plusRoots.add(k);
         if (d.mcu && (d.supplies ? Object.prototype.hasOwnProperty.call(d.supplies, q.id) : /^(3V3|VIN)/.test(q.id))) plusRoots.add(k); } }
     if (!groundRoots.size) { const s = project.parts.find(p => P[p.type].source); if (s) groundRoots.add(find(key(s.id, P[s.type].source.minus))); }
     const node = new Map(); let n = 1;
