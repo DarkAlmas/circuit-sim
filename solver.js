@@ -7,24 +7,29 @@
   const EXPMAX = 40;
 
   // exp with linear continuation above EXPMAX to avoid overflow
-  function lexp(x) {
+  // xmax is chosen per device so the exponential stays exact up to ~100 A
+  // (fixed cap broke LEDs with tiny Is, e.g. Vf=3 V: exp argument ~58 > 40)
+  function lexp(x, xmax = EXPMAX) {
+    const EXPMAX = xmax;
     if (x <= EXPMAX) { const e = Math.exp(x); return [e, e]; }
     const e = Math.exp(EXPMAX); return [e * (1 + x - EXPMAX), e];
   }
+
+  function xcap(Is) { return Math.min(700, Math.max(EXPMAX, Math.log(100 / Is))); }
 
   // Nonlinear device models: return {f: currents INTO device per terminal, J: df/dv}
   const models = {
     D(el, v) { // terminals [a, b]
       const n = el.n || 1, Is = el.Is || 1e-14, nvt = n * VT;
       const vd = v[0] - v[1];
-      const [e, de] = lexp(vd / nvt);
+      const [e, de] = lexp(vd / nvt, xcap(Is));
       const id = Is * (e - 1) + GMIN * vd, g = Is * de / nvt + GMIN;
       return { f: [id, -id], J: [[g, -g], [-g, g]] };
     },
     Q(el, v) { // NPN, terminals [c, b, e]
       const Is = el.Is || 1e-14, bf = el.bf || 100, br = el.br || 1;
       const vbe = v[1] - v[2], vbc = v[1] - v[0];
-      const [ebe, debe] = lexp(vbe / VT), [ebc, debc] = lexp(vbc / VT);
+      const xc = xcap(Is), [ebe, debe] = lexp(vbe / VT, xc), [ebc, debc] = lexp(vbc / VT, xc);
       const gbe = Is * debe / VT + GMIN, gbc = Is * debc / VT + GMIN;
       const ic = Is * (ebe - ebc) - Is / br * (ebc - 1) - GMIN * vbc;
       const ib = Is / bf * (ebe - 1) + Is / br * (ebc - 1) + GMIN * (vbe + vbc);

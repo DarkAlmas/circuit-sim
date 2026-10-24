@@ -61,3 +61,6 @@ h4{margin:10px 0 4px;font-size:12px;color:#8a94a8;text-transform:uppercase}
 .burnt{display:flex;justify-content:space-between;align-items:center;background:#3a1a1a;border:1px solid #a33;border-radius:8px;padding:6px 10px;margin-bottom:6px;color:#ff9a9a}
 .link{color:#6cb0ff;align-self:center;font-size:13px}
 @media (max-width:760px){main{flex-direction:column}#left{width:auto;max-height:110px;border-right:0}#right{width:auto;max-height:40vh;border-left:0}#center{min-height:50vh}}
+/* v4: keep the project dropdown inside narrow screens */
+#projects{max-width:100%;min-width:0;box-sizing:border-box}
+@media (max-width:760px){#projects{width:100%;flex:1 1 100%}}

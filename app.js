@@ -286,7 +286,7 @@
     running = true; $('#run').disabled = true; $('#stop').disabled = false;
     const mcu = proj.parts.find(p => P[p.type].mcu);
     if (mcu && proj.code.trim()) {
-      worker = new Worker('worker.js?v=3'); lastHb = performance.now();
+      worker = new Worker('worker.js?v=4'); lastHb = performance.now();
       worker.onmessage = e => { const m = e.data; lastHb = performance.now();
         if (m.t === 'pin') { const s = gpio[m.pin] || (gpio[m.pin] = { mode: 'INPUT', val: 0 }); if (m.mode) s.mode = m.mode; if (m.val != null) { s.val = m.val; if (s.mode !== 'OUTPUT' && m.val != null && !m.mode) s.mode = s.mode; } }
         else if (m.t === 'log') log(m.s); else if (m.t === 'err') { log(m.s + '\n', 'err'); showTab('console'); } };
