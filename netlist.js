@@ -25,22 +25,25 @@
     const node = new Map(); let n = 1;
     for (const k of parent.keys()) { if (bbIds.has(k.slice(0, k.indexOf(':')))) continue; const r = find(k); if (!node.has(r)) node.set(r, groundRoots.has(r) ? 0 : n++); }
     for (const k of parent.keys()) { const r = find(k); if (!node.has(r)) node.set(r, groundRoots.has(r) ? 0 : -1); }
-    return { find, node, count: n, groundRoots, plusRoots, bbIds, netOf: (pid, pin) => find(key(pid, pin)) };
+    return { find, node, allKeys: parent.keys(), count: n, groundRoots, plusRoots, bbIds, netOf: (pid, pin) => find(key(pid, pin)) };
   }
   function build(project, gpio = {}, hooks = {}) {
-    const P = window.PARTS, N = nets(project), elements = [], owners = []; let cur = null;
+    const P = window.PARTS, N = nets(project), elements = [], owners = [], devs = []; let cur = null;
     let count = N.count;
     const ctx = {
       n: (p, pin) => N.node.get(N.find(key(p.id, pin))),
       node: () => count++,
       add: el => { owners.push(cur); return elements.push(el) - 1; },
-      gpio: g => gpio[g],
+      gpio: (g, id) => ((hooks.gpioBy && id && hooks.gpioBy[id]) || gpio)[g],
+      dev: d => { if (d) devs.push(d); return d; },
+      vio: hooks.vio || 3.3,
+      wired: (p, pin) => { if (!N.sz) { N.sz = new Map(); for (const k of [...N.allKeys]) { const r = N.find(k); N.sz.set(r, (N.sz.get(r) || 0) + 1); } } return (N.sz.get(N.find(key(p.id, pin))) || 0) > 1; },
     };
     for (const p of project.parts) { cur = p.id; P[p.type].stamp(p, ctx); }
-    return { circuit: { nodeCount: count, elements }, nets: N, ctx, owners };
+    return { circuit: { nodeCount: count, elements }, nets: N, ctx, owners, devs };
   }
   function supplyMax(project) {
-    let m = 0; for (const p of project.parts) { if (p.type === 'dc') m = Math.max(m, +p.props.V); if (p.type === 'battery') m = Math.max(m, 9); if (window.PARTS[p.type].mcu) m = Math.max(m, window.PARTS[p.type].vio || 3.3); }
+    let m = 0; for (const p of project.parts) { if (p.type === 'dc') m = Math.max(m, +p.props.V); if (p.type === 'battery') m = Math.max(m, 9); if (window.PARTS[p.type].mcu) m = Math.max(m, window.PARTS[p.type].vio || 3.3); const vm = window.PARTS[p.type].vmax; if (vm) m = Math.max(m, typeof vm === 'function' ? vm(p) : vm); }
     return m || 5;
   }
   window.Netlist = { build, nets, supplyMax };

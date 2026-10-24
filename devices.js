@@ -1,0 +1,55 @@
+/* Составные детали поверх solver.js: каждая даёт примитивы (R, V, I) и шаг состояния.
+ * build(ctx) -> элементы; после solve вызвать step(sol, dt). Работает в браузере (window.Devices) и Node. */
+(function (root) {
+  'use strict';
+  const MOTORS = { // R обмотки (Ом), kE (В·с/рад), J (кг·м²), трение b, Imax, Uном
+    m130:  { R: 2.5, kE: 0.0045, J: 2e-6,  b: 2e-7, Unom: 3,   name: 'Мотор 130' },
+    tt:    { R: 7.5, kE: 0.25,   J: 5e-4,  b: 2e-4, Unom: 6,   name: 'Мотор TT с редуктором' },
+    m8520: { R: 0.6, kE: 0.0011, J: 3e-7,  b: 1e-7, Unom: 3.7, name: 'Мотор 8520 с винтом', prop: 1e-9 }
+  };
+  // мотор: a —R— m —(ЭДС kE·ω)— b. ω в рад/с, rpm в state
+  function motor(ctx, a, b, kind = 'm130', st = { w: 0 }) {
+    const p = MOTORS[kind] || MOTORS.m130, m = ctx.node();
+    const r = ctx.add({ type: 'R', a, b: m, R: p.R });
+    ctx.add({ type: 'V', p: m, n: b, V: p.kE * st.w });
+    return { st, kind, step(sol, dt) { const I = sol.currents[r];
+      const load = p.b * st.w + (p.prop || 0) * st.w * Math.abs(st.w);
+      st.w += dt * (p.kE * I - load) / p.J; st.I = I; st.rpm = st.w * 60 / (2 * Math.PI); } };
+  }
+  // Li-ion 103450: ЭДС по заряду 3.0…4.2 В, rInt 0.1 Ом, 2000 мА·ч
+  const ocv = s => 3.0 + 1.2 * Math.max(0, Math.min(1, s)) - 0.15 * Math.exp(-20 * s);
+  function liion(ctx, p, n, st = { soc: 1 }, capAh = 2.0) {
+    const k = ctx.add({ type: 'V', p, n, V: ocv(st.soc), rInt: 0.1, iShort: 4 });
+    return { st, step(sol, dt) { const I = sol.currents[k]; st.soc = Math.max(0, st.soc - I * dt / (capAh * 3600)); st.I = I; st.V = ocv(st.soc) - 0.1 * I; st.empty = st.soc <= 0; } };
+  }
+  // повышающий преобразователь (MT3608/XL6009): вход 2–24 В, выход задаётся, КПД 0.9
+  function boost(ctx, inP, inN, outP, outN, Vout = 12, st = { Iin: 0 }) {
+    const iin = ctx.add({ type: 'I', a: inP, b: inN, I: st.Iin || 0 });
+    const vo = ctx.add({ type: 'V', p: outP, n: outN, V: st.on === false ? 0 : Vout, rInt: 0.05, iShort: 3 });
+    return { st, step(sol) { const Vin = sol.v[inP] - sol.v[inN], Io = sol.currents[vo];
+      st.on = Vin >= 2 && Vin <= 24; const P = st.on ? Math.max(0, Vout * Io) : 0;
+      st.Iin = st.on ? P / (0.9 * Math.max(Vin, 0.5)) : 0; st.Pout = P; } };
+  }
+  // H-мост: L298N (падение ~1 В на ключ, 2 А) и DRV8833 (0.36 Ом на ключ, 1.5 А)
+  const HB = { l298n: { ron: 0.5, vdrop: 1.0, imax: 2 }, drv8833: { ron: 0.36, vdrop: 0, imax: 1.5 } };
+  function hhalf(ctx, vs, out, level, kind) { // level: 1 = к питанию, 0 = к земле, null = отключено
+    const h = HB[kind]; if (level == null) return null;
+    const m = ctx.node();
+    if (level) { ctx.add({ type: 'V', p: vs, n: m, V: h.vdrop }); return ctx.add({ type: 'R', a: m, b: out, R: h.ron }); }
+    ctx.add({ type: 'V', p: m, n: 0, V: 0 }); ctx.add({ type: 'V', p: out, n: m, V: h.vdrop }); return null;
+  }
+  function hbridge(ctx, vs, outA, outB, in1, in2, kind = 'l298n') {
+    hhalf(ctx, vs, outA, in1 ? 1 : 0, kind); hhalf(ctx, vs, outB, in2 ? 1 : 0, kind);
+    return { imax: HB[kind].imax };
+  }
+  // простые потребители для модулей (средний ток, А)
+  const LOADS = { esp32c3: 0.08, mpu6050: 0.004, nrf24pa_tx: 0.115, nrf24pa_rx: 0.045, tcrt5000: 0.02, vl53l0x: 0.019, hcsr04: 0.015 };
+  function load(ctx, p, n, kind, Vmin = 1.9) { // ток-потребитель, отключается при низком питании
+    const R = 3.3 / (LOADS[kind] || 0.01); return ctx.add({ type: 'R', a: p, b: n, R });
+  }
+  // TCRT5000: выход фототранзистора, refl 0 (чёрное) … 1 (белое) → ток коллектора до 1 мА
+  function tcrtCurrent(refl) { return 1e-3 * Math.max(0, Math.min(1, refl)); }
+  function context() { const els = []; let n = 1; return { els, node: () => n++, nodeCount: () => n, add: e => (els.push(e), els.length - 1) }; }
+  const api = { MOTORS, motor, liion, ocv, boost, hbridge, HB, LOADS, load, tcrtCurrent, context };
+  if (typeof module !== 'undefined' && module.exports) module.exports = api; else root.Devices = api;
+})(typeof window !== 'undefined' ? window : globalThis);

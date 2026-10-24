@@ -1,6 +1,6 @@
 const test = require('node:test'), assert = require('node:assert');
 global.window = { Solver: require('../solver.js') };
-require('../parts.js'); require('../parts2.js'); require('../sanitize.js'); require('../netlist.js'); require('../examples.js');
+require('../parts.js'); require('../parts2.js'); window.Devices = require('../devices.js'); require('../parts3.js'); require('../sanitize.js'); require('../netlist.js'); require('../examples.js');
 const W = global.window, T = require('../transpile.js');
 test('every starter sanitizes and solves', () => {
   for (const [k, s] of Object.entries(W.STARTERS)) {

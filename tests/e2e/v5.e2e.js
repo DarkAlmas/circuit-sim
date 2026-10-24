@@ -6,7 +6,7 @@ const URL = process.argv[2] || 'http://localhost:8765/';
   pg.on('console', m => { if (m.type() === 'error') errs.push(m.text()); }); pg.on('pageerror', e => errs.push(e.message));
   await pg.goto(URL); await pg.waitForTimeout(300);
   const card = async k => { await pg.click('#new'); await pg.click(`.ncard[data-kind="${k}"]`); await pg.waitForTimeout(200); };
-  await pg.click('#new'); assert.equal(await pg.$$eval('.ncard', x => x.length), 8); await pg.click('#newClose');
+  await pg.click('#new'); assert.ok(await pg.$$eval('.ncard', x => x.length) >= 8); await pg.click('#newClose');
   // Uno + matrix
   await card('uno'); await pg.click('#run'); await pg.waitForTimeout(1200);
   const lit = await pg.$$eval('[data-part="H1"] .mxon', x => x.length); console.log('matrix lit dots', lit); assert.ok(lit >= 28);

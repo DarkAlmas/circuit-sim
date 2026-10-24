@@ -159,3 +159,124 @@ while True:
   window.STARTERS = S;
   ex['Пример: Uno и матрица 8×8'] = S.uno; ex['Пример: Pico и кольцо WS2812'] = S.pico; ex['Пример: Orange Pi, Python и HDMI'] = S.opi; ex['Пример: ATtiny85 на макетке'] = S.attiny;
 })();
+/* v7 starters: ESP32-C3 SuperMini, line-following robot, NRF24 pair */
+(function () {
+  const S = window.STARTERS, ex = window.EXAMPLES;
+  const W = (id, a, ap, b, bp) => ({ id, a: { part: a, pin: ap }, b: { part: b, pin: bp } });
+  S.esp32c3 = { kind: 'esp32c3', name: 'ESP32-C3 SuperMini', parts: [{ id: 'U1', type: 'esp32c3', x: 0, y: 0, rot: 0 },
+    { id: 'R1', type: 'resistor', x: 200, y: -45, rot: 0, props: { R: 220, Pmax: 0.25 } }, { id: 'D1', type: 'led', x: 320, y: -45, rot: 0, props: { color: 'зелёный', Vf: 2.1, Imax: 0.02 } }],
+    wires: [W('w1', 'U1', 'G5', 'R1', 'a'), W('w2', 'R1', 'b', 'D1', 'a'), W('w3', 'D1', 'b', 'U1', 'GND')],
+    code: `// ESP32-C3 SuperMini: встроенный синий LED на GPIO8 (горит при LOW) и внешний на GPIO5
+#define LED 8
+#define EXT 5
+
+void setup() {
+  Serial.begin(115200);
+  pinMode(LED, OUTPUT);
+  pinMode(EXT, OUTPUT);
+}
+
+void loop() {
+  digitalWrite(LED, LOW);   // встроенный горит
+  digitalWrite(EXT, LOW);
+  delay(400);
+  digitalWrite(LED, HIGH);
+  digitalWrite(EXT, HIGH);
+  Serial.println("тик");
+  delay(400);
+}` };
+  S.line = { kind: 'line', name: 'Робот по линии', parts: [{ id: 'U1', type: 'esp32c3', x: 0, y: 0, rot: 0 },
+    { id: 'S1', type: 'tcrt5000', x: -280, y: 220, rot: 0, props: { refl: 0.9, thr: 0.5 } }, { id: 'S2', type: 'tcrt5000', x: -140, y: 220, rot: 0, props: { refl: 0.9, thr: 0.5 } },
+    { id: 'U2', type: 'drv8833', x: 280, y: 0, rot: 0 }, { id: 'M1', type: 'ttmotor', x: 480, y: -80, rot: 0 }, { id: 'M2', type: 'ttmotor', x: 480, y: 80, rot: 0 },
+    { id: 'BT1', type: 'liion', x: 280, y: 200, rot: 0, props: { soc: 90 } }],
+    wires: [W('w1', 'S1', 'VCC', 'U1', '3V3'), W('w2', 'S1', 'GND', 'U1', 'GND'), W('w3', 'S1', 'D0', 'U1', 'G0'),
+      W('w4', 'S2', 'VCC', 'U1', '3V3'), W('w5', 'S2', 'GND', 'U1', 'GND'), W('w6', 'S2', 'D0', 'U1', 'G1'),
+      W('w7', 'U1', 'G5', 'U2', 'AIN1'), W('w8', 'U1', 'G6', 'U2', 'AIN2'), W('w9', 'U1', 'G7', 'U2', 'BIN1'), W('w10', 'U1', 'G10', 'U2', 'BIN2'),
+      W('w11', 'U2', 'AO1', 'M1', 'a'), W('w12', 'U2', 'AO2', 'M1', 'b'), W('w13', 'U2', 'BO1', 'M2', 'a'), W('w14', 'U2', 'BO2', 'M2', 'b'),
+      W('w15', 'BT1', 'p', 'U2', 'VM'), W('w16', 'BT1', 'n', 'U2', 'GND'), W('w17', 'U2', 'GND', 'U1', 'GND')],
+    code: `// Робот по линии: ESP32-C3 + 2×TCRT5000 + DRV8833 + 2 мотора TT + Li-ion 103450
+// Датчик над белым: D0 = LOW, над чёрной линией: D0 = HIGH. Двигай ползунок «Отражение» у S1/S2.
+#define SL 0      // левый датчик (D0)
+#define SR 1      // правый датчик (D0)
+#define AIN1 5
+#define AIN2 6
+#define BIN1 7
+#define BIN2 10
+#define SPEED 220
+
+void motor(int in1, int in2, int sp) {   // sp: -255..255, знак = направление
+  if (sp >= 0) { analogWrite(in1, sp); analogWrite(in2, 0); }
+  else { analogWrite(in1, 0); analogWrite(in2, -sp); }
+}
+
+void setup() {
+  Serial.begin(115200);
+  pinMode(SL, INPUT); pinMode(SR, INPUT);
+  pinMode(AIN1, OUTPUT); pinMode(AIN2, OUTPUT); pinMode(BIN1, OUTPUT); pinMode(BIN2, OUTPUT);
+  pinMode(8, OUTPUT);
+}
+
+void loop() {
+  int l = digitalRead(SL);
+  int r = digitalRead(SR);
+  if (l && !r) { motor(AIN1, AIN2, -120); motor(BIN1, BIN2, SPEED); }       // линия слева — поворот налево
+  else if (!l && r) { motor(AIN1, AIN2, SPEED); motor(BIN1, BIN2, -120); }  // линия справа — направо
+  else if (l && r) { motor(AIN1, AIN2, 0); motor(BIN1, BIN2, 0); }          // перекрёсток — стоп
+  else { motor(AIN1, AIN2, SPEED); motor(BIN1, BIN2, SPEED); }             // прямо
+  digitalWrite(8, (l || r) ? LOW : HIGH);
+  delay(20);
+}` };
+  const nrfWires = (u, r, k) => [W(k + '1', r, 'GND', u, 'GND'), W(k + '2', r, 'VCC', u, '3V3'), W(k + '3', r, 'CE', u, 'G2'), W(k + '4', r, 'CSN', u, 'G7'),
+    W(k + '5', r, 'SCK', u, 'G4'), W(k + '6', r, 'MOSI', u, 'G6'), W(k + '7', r, 'MISO', u, 'G5')];
+  ex['Пример: NRF24 — передатчик и приёмник (2 × ESP32-C3)'] = { kind: 'esp32c3', parts: [{ id: 'U1', type: 'esp32c3', x: 0, y: 0, rot: 0 }, { id: 'RF1', type: 'nrf24', x: 220, y: 40, rot: 0 },
+    { id: 'U2', type: 'esp32c3', x: 600, y: 0, rot: 0 }, { id: 'RF2', type: 'nrf24', x: 820, y: 40, rot: 0 }],
+    wires: [...nrfWires('U1', 'RF1', 'a'), ...nrfWires('U2', 'RF2', 'b')],
+    code: `// U1 — передатчик. Скетч приёмника U2 выбери в списке над редактором.
+#include <SPI.h>
+#include <RF24.h>
+RF24 radio(2, 7);              // CE, CSN
+const byte address[6] = "00001";
+int n = 0;
+
+void setup() {
+  Serial.begin(115200);
+  radio.begin();
+  radio.openWritingPipe(address);
+  radio.setPALevel(RF24_PA_LOW);
+  radio.stopListening();
+}
+
+void loop() {
+  n++;
+  bool ok = radio.write(&n, sizeof(n));
+  Serial.println(ok ? "отправлено " + String(n) : "нет ответа");
+  delay(500);
+}`,
+    codes: { U2: `// U2 — приёмник
+#include <SPI.h>
+#include <RF24.h>
+RF24 radio(2, 7);
+const byte address[6] = "00001";
+
+void setup() {
+  Serial.begin(115200);
+  radio.begin();
+  radio.openReadingPipe(0, address);
+  radio.setPALevel(RF24_PA_LOW);
+  radio.startListening();
+}
+
+void loop() {
+  if (radio.available()) {
+    int x = 0;
+    radio.read(&x, sizeof(x));
+    Serial.println("принято " + String(x));
+    digitalWrite(8, x % 2);
+  }
+  delay(10);
+}` } };
+  ex['Пример: Робот по линии (ESP32-C3)'] = S.line;
+  ex['Пример: Повышающий преобразователь 3,7 → 12 В'] = { kind: 'analog', parts: [{ id: 'BT1', type: 'liion', x: -200, y: 0, rot: 0, props: { soc: 80 } }, { id: 'U1', type: 'boost', x: 0, y: 0, rot: 0, props: { Vout: 12 } },
+    { id: 'R1', type: 'resistor', x: 200, y: 0, rot: 1, props: { R: 120, Pmax: 2 } }],
+    wires: [W('w1', 'BT1', 'p', 'U1', 'IN+'), W('w2', 'BT1', 'n', 'U1', 'IN-'), W('w3', 'U1', 'OUT+', 'R1', 'a'), W('w4', 'U1', 'OUT-', 'R1', 'b')], code: '' };
+})();

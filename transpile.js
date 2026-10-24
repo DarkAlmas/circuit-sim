@@ -1,11 +1,18 @@
 /* Simplified Arduino C -> async JS transpiler. Used inside the worker and by tests. */
 (function (root) {
-  const TYPES = '(?:unsigned\\s+)?(?:long\\s+long|int|float|double|long|bool|boolean|byte|String|char|uint8_t|uint16_t|uint32_t|int8_t|int16_t|int32_t|size_t|word|short)';
-  const LIBS = 'Servo|Adafruit_NeoPixel|LiquidCrystal_I2C|Adafruit_SSD1306|DHT|LedControl|NewPing';
+  const TYPES = '(?:unsigned\\s+)?(?:long\\s+long|int|float|double|long|bool|boolean|byte|String|char|uint8_t|uint16_t|uint32_t|int8_t|int16_t|int32_t|size_t|word|short|uint64_t)';
+  const LIBS = 'Servo|Adafruit_NeoPixel|LiquidCrystal_I2C|Adafruit_SSD1306|DHT|LedControl|NewPing|RF24|VL53L0X|Adafruit_VL53L0X|MPU6050|Adafruit_MPU6050';
   function transpile(src) {
     let s = src.replace(/^\s*#include.*$/gm, '')
       .replace(/^\s*#define\s+(\w+)\s+(.+)$/gm, 'const $1 = $2;')
       .replace(new RegExp('^(\\s*)(' + LIBS + ')\\s+(\\w+)\\s*(?:=\\s*\\w+\\s*)?(?:\\(([^;]*)\\))?\\s*;', 'gm'), (m, ind, cls, name, args) => `${ind}var ${name} = __lib('${cls}'${args ? ', ' + args : ''});`);
+    // v7: struct-like result holders, pointer args, sizeof, 64-bit literal suffixes
+    s = s.replace(/^(\s*)(?:VL53L0X_RangingMeasurementData_t|sensors_event_t)\s+([\w\s,]+);/gm, (m, ind, list) => ind + 'var ' + list.split(',').map(x => x.trim() + ' = {}').join(', ') + ';');
+    s = s.replace(/(\w+)\.(getAcceleration|getRotation|getMotion6)\s*\(([^)]*)\)/g, (m, o, fn, args) => `[${args.replace(/&/g, '')}] = ${o}.${fn}()`);
+    s = s.replace(/(\w+)\.read\s*\(\s*&\s*(\w+)\s*,([^;]*)\)/g, '$2 = $1.read($3)');
+    s = s.replace(/([(,]\s*)&(?=[A-Za-z_])/g, '$1');
+    s = s.replace(/\b(0x[0-9A-Fa-f]+|\d+)(?:ULL|LL|UL|U|L)\b/g, '$1');
+    s = s.replace(/\bsizeof\s*\(/g, '__sizeof(');
     const names = new Set(['delay', 'delayMicroseconds']);
     s = s.replace(new RegExp('\\b(?:void|' + TYPES + ')\\s*\\*?\\s+(\\w+)\\s*\\(([^)]*)\\)\\s*\\{', 'g'), (m, name, params) => {
       names.add(name);
@@ -15,7 +22,8 @@
     });
     s = s.replace(/\(\s*(?:int|float|long|double|byte|unsigned\s+long|bool)\s*\)/g, '');
     s = s.replace(new RegExp('\\b(const\\s+)?' + TYPES + '\\s+(?=[A-Za-z_])', 'g'), (m, c) => c ? 'const ' : 'let ');
-    s = s.replace(/\b(let|const)\s+(\w+)\s*\[\s*\d*\s*\]\s*=\s*\{([^}]*)\}/g, '$1 $2 = [$3]');
+    s = s.replace(/\b(let|const)\s+(\w+)\s*(?:\[\s*\d*\s*\])+\s*=\s*\{([^}]*)\}/g, '$1 $2 = [$3]');
+    s = s.replace(/\b(let|const)\s+(\w+)\s*(?:\[\s*\d*\s*\])+\s*=\s*("(?:[^"\\]|\\.)*")/g, '$1 $2 = $3');
     s = s.replace(/\b(let|const)\s+(\w+)\s*\[\s*(\d+)\s*\]\s*;/g, '$1 $2 = new Array($3).fill(0);');
     for (const n of names) s = s.replace(new RegExp('(?<![\\w.])' + n + '\\s*\\(', 'g'), `await ${n}(`);
     s = s.replace(/__DEF_/g, '');

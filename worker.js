@@ -1,5 +1,5 @@
 /* Runs the user's sketch in isolation. Network APIs are removed before user code runs. */
-importScripts('transpile.js?v=6', 'memcap.js?v=6');
+importScripts('transpile.js?v=7', 'memcap.js?v=7');
 /* Whitelist sandbox: capture what we need, then strip every other global from self and its prototype chain,
  * so even (()=>{}).constructor('return this')() sees no network, storage, workers or navigator. */
 const transpile = Transpile.transpile, pyT = Transpile.py, memInstall = MemCap.install;
@@ -23,10 +23,11 @@ for (let o = self; o && o !== Object.prototype; o = Object.getPrototypeOf(o)) {
     if (Object.getOwnPropertyDescriptor(o, k)) { try { Object.defineProperty(o, k, { value: undefined, writable: false, configurable: false }); } catch (e) {} }
   }
 }
-let inputs = {}, sensors = {}, t0 = now();
+let inputs = {}, sensors = {}, t0 = now(), rfIn = () => {};
 handler = e => {
   const m = e.data;
   if (m.t === 'in') { inputs = m.v || {}; sensors = m.s || {}; }
+  else if (m.t === 'rfin') rfIn(m);
   else if (m.t === 'start') start(m.code, m.board, m.mods || {});
 };
 const hb = () => post({ t: 'hb' });
@@ -38,6 +39,7 @@ const BOARDS = {
   attiny: { vio: 5, bits: 1023, LED: 1, A: { A1: 2, A2: 4, A3: 3, PB0: 0, PB1: 1, PB2: 2, PB3: 3, PB4: 4 } },
   pico: { vio: 3.3, bits: 1023, LED: 25, A: { A0: 26, A1: 27, A2: 28 } },
   opi: { vio: 3.3, bits: 1023, LED: 99, A: {} },
+  esp32c3: { vio: 3.3, bits: 4095, LED: 8, A: { A0: 0, A1: 1, A2: 2, A3: 3, A4: 4 } },
 };
 const CAP = 100000;
 const tooBig = n => { if (typeof n === 'number' && n > CAP) throw new RangeError('массив больше ' + CAP + ' элементов запрещён'); };
@@ -126,10 +128,36 @@ const start = function (code, board, mods) {
   const servo = { attach(p) { this.pin = p; }, write(a) { a = Math.max(0, Math.min(180, +a || 0)); this.a = a; post({ t: 'mod', k: 'servo', a }); }, read() { return this.a ?? 90; }, detach() {} };
   const dht = { begin() {}, readTemperature: () => +(sensors.temp ?? NaN), readHumidity: () => +(sensors.hum ?? NaN) };
   const sonar = { distanceCm: () => +(sensors.dist ?? 0), ping_cm: () => Math.round(+(sensors.dist ?? 0)) };
-  const LIB = { Servo: () => servo, Adafruit_NeoPixel: () => D.strip, LiquidCrystal_I2C: () => D.lcd, Adafruit_SSD1306: () => D.oled, DHT: () => dht, LedControl: () => D.matrix, NewPing: () => sonar };
+  /* v7 modules: VL53L0X (Pololu + Adafruit), MPU-6050 (jrowberg/ElectronicCats + Adafruit), NRF24L01 (RF24) */
+  const mmNow = () => sensors.mm == null ? null : Math.round(+sensors.mm);
+  const vl53 = { timeout: false, init: () => sensors.mm != null, begin: () => sensors.mm != null, setTimeout() {}, startContinuous() {}, stopContinuous() {}, setMeasurementTimingBudget() {}, setAddress() {},
+    readRangeSingleMillimeters() { const v = mmNow(); this.timeout = v == null; return v == null ? 65535 : v; }, readRangeContinuousMillimeters() { return this.readRangeSingleMillimeters(); },
+    timeoutOccurred() { return this.timeout; }, readRange() { const v = mmNow(); return v == null ? 8190 : v; },
+    rangingTest(m) { const v = mmNow(); if (m && typeof m === 'object') { m.RangeMilliMeter = v == null ? 8190 : v; m.RangeStatus = v == null || v >= 2000 ? 4 : 0; } return 0; } };
+  const imu = () => { const i = sensors.imu; if (!i) return null; const p = +i.pitch * Math.PI / 180, r = +i.roll * Math.PI / 180;
+    return { ax: -Math.sin(p) + (+i.acc || 0), ay: Math.cos(p) * Math.sin(r), az: Math.cos(p) * Math.cos(r), gz: +i.gz || 0 }; };
+  const raw = x => Math.max(-32768, Math.min(32767, Math.round(x)));
+  const mpu = { initialize() {}, testConnection: () => !!sensors.imu, begin: () => !!sensors.imu, setAccelerometerRange() {}, setGyroRange() {}, setFilterBandwidth() {}, getTemperature: () => 25,
+    getAcceleration() { const m = imu() || { ax: 0, ay: 0, az: 0 }; return [raw(m.ax * 16384), raw(m.ay * 16384), raw(m.az * 16384)]; },
+    getRotation() { const m = imu() || { gz: 0 }; return [0, 0, raw(m.gz * 131)]; },
+    getMotion6() { return [...this.getAcceleration(), ...this.getRotation()]; },
+    getAccelerationX() { return this.getAcceleration()[0]; }, getAccelerationY() { return this.getAcceleration()[1]; }, getAccelerationZ() { return this.getAcceleration()[2]; }, getRotationZ() { return this.getRotation()[2]; },
+    getEvent(a, g, t) { const m = imu() || { ax: 0, ay: 0, az: 0, gz: 0 }, G = 9.80665;
+      if (a) a.acceleration = { x: m.ax * G, y: m.ay * G, z: m.az * G }; if (g) g.gyro = { x: 0, y: 0, z: m.gz * Math.PI / 180 }; if (t) t.temperature = 25; return true; } };
+  const pkt = d => typeof d === 'string' ? d.slice(0, 32) : typeof d === 'number' || typeof d === 'boolean' ? d : Array.isArray(d) ? d.slice(0, 32).map(x => +x || 0) : d && typeof d === 'object' ? ((j) => j.length <= 256 ? JSON.parse(j) : 0)(JSON.stringify(d, (k, v) => typeof v === 'string' ? v.slice(0, 32) : v) || '0') : 0;
+  const radio = { ch: 76, wr: null, rd: {}, listening: false, q: [],
+    begin: () => !!sensors.nrf, isChipConnected: () => !!sensors.nrf, setPALevel() {}, setDataRate() {}, setRetries() {}, setAutoAck() {}, enableDynamicPayloads() {}, setPayloadSize() {}, powerUp() {}, powerDown() {}, printDetails() {},
+    setChannel(c) { this.ch = c | 0; }, openWritingPipe(a) { this.wr = String(a); }, openReadingPipe(n, a) { this.rd[n | 0] = String(a); },
+    startListening() { this.listening = true; }, stopListening() { this.listening = false; },
+    write(d) { if (!sensors.nrf || this.wr == null) return false; post({ t: 'rf', addr: this.wr, ch: this.ch, data: pkt(d) }); return !!sensors.rfPeer; },
+    available() { return this.q.length > 0; }, read() { const x = this.q.shift(); return x === undefined ? 0 : x; } };
+  rfIn = m => { if (!sensors.nrf || !radio.listening || (m.ch | 0) !== radio.ch || !Object.values(radio.rd).includes(String(m.addr))) return; if (radio.q.length < 32) radio.q.push(m.data); };
+  const LIB = { RF24: () => radio, VL53L0X: () => vl53, Adafruit_VL53L0X: () => vl53, MPU6050: () => mpu, Adafruit_MPU6050: () => mpu, Servo: () => servo, Adafruit_NeoPixel: () => D.strip, LiquidCrystal_I2C: () => D.lcd, Adafruit_SSD1306: () => D.oled, DHT: () => dht, LedControl: () => D.matrix, NewPing: () => sonar };
   const rt = {
     HIGH: 1, LOW: 0, INPUT: 'INPUT', OUTPUT: 'OUTPUT', INPUT_PULLUP: 'INPUT_PULLUP', true: true,
     LED_BUILTIN: B.LED, ...B.A,
+    RF24_PA_MIN: 0, RF24_PA_LOW: 1, RF24_PA_HIGH: 2, RF24_PA_MAX: 3, RF24_250KBPS: 2, RF24_1MBPS: 0, RF24_2MBPS: 1, MPU6050_RANGE_2_G: 0, MPU6050_RANGE_8_G: 2, MPU6050_RANGE_500_DEG: 1, MPU6050_BAND_21_HZ: 4,
+    Wire: { begin() {}, setClock() {} }, __sizeof: x => typeof x === 'string' ? x.length + 1 : Array.isArray(x) ? x.length : 4,
     NEO_GRB: 0, NEO_RGB: 0, NEO_KHZ800: 0, DHT22: 22, DHT11: 11, SSD1306_SWITCHCAPVCC: 2, WHITE: 1, BLACK: 0, SSD1306_WHITE: 1, SSD1306_BLACK: 0,
     pinMode: (p, m) => pinOut(p, m, null),
     digitalWrite: (p, v) => pinOut(p, null, v ? 1 : 0),

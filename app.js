@@ -13,7 +13,7 @@
   function autosave() { const j = JSON.stringify(strip(proj)); if (lastJ !== null && j !== lastJ) { hist.push(lastJ); if (hist.length > 100) hist.shift(); } lastJ = j; localStorage.setItem(AUTO, j); }
   function undo() { if (!hist.length) return; const j = hist.pop(); lastJ = j; proj = sanitizeProject(JSON.parse(j)); proj.code = proj.code || $('#code').value; sel = null; prevV = null; localStorage.setItem(AUTO, j); render(); props(); calc(); }
   const locked = () => running && !shorts.length;
-  function strip(p) { return { parts: p.parts.map(({ id, type, x, y, rot, props }) => ({ id, type, x, y, rot, props })), wires: p.wires.map(({ id, a, b, pts }) => ({ id, a, b, pts })), code: p.code, name: p.name }; }
+  function strip(p) { return { parts: p.parts.map(({ id, type, x, y, rot, props }) => ({ id, type, x, y, rot, props })), wires: p.wires.map(({ id, a, b, pts }) => ({ id, a, b, pts })), code: p.code, codes: p.codes, name: p.name }; }
   const uid = pre => { let i = 1; const ids = new Set([...proj.parts, ...proj.wires].map(o => o.id)); while (ids.has(pre + i)) i++; return pre + i; };
   const part = id => proj.parts.find(p => p.id === id);
   const rotPt = (x, y, r) => { for (let i = 0; i < (r || 0) % 4; i++) [x, y] = [-y, x]; return [x, y]; };
@@ -66,7 +66,7 @@
         (isSel && !locked() ? (w.pts || []).map((q, i) => `<circle class="bend" data-wire="${esc(w.id)}" data-i="${i}" cx="${q[0]}" cy="${q[1]}" r="5"/>`).join('') : ''); }).join('');
     partsL.innerHTML = [...proj.parts].sort((a, b) => !!P[b.type].strips - !!P[a.type].strips).map(p => { const d = P[p.type], [bx, by, bw, bh] = bbox(p.type), c = checks[p.id];
       const bi = d.builtin ?? 2, dk = d.display, link = links[p.id];
-      const st = { I: meas[p.id]?.I, m: meas[p.id], burned: p.burned, running, led2: running && gpio[bi]?.mode === 'OUTPUT' && gpio[bi].val > 0,
+      const st = { I: meas[p.id]?.I, m: meas[p.id], burned: p.burned, running, led2: running && gpioOf(p.id)[bi]?.mode === 'OUTPUT' && (d.ledInv ? !(gpioOf(p.id)[bi].val > 0) : gpioOf(p.id)[bi].val > 0),
         mod: dk ? p._mod : null, img: dk ? imgs[dk] : null, on: link ? link.on : undefined, why: link ? link.why : '', anim: animT[p.id] || 0 };
       const sh = shortSet.has(p.id) || shorts.some(z => z.source === p.id), t = performance.now() / 1000;
       const smoke = p.burned ? [0, 1, 2].map(k => { const f = ((t * 0.6 + k / 3) % 1); return `<circle class="smoke" cx="${Math.sin((t + k) * 2) * 6 * f}" cy="${by - 4 - f * 40}" r="${4 + f * 10}" opacity="${(0.55 * (1 - f)).toFixed(2)}"/>`; }).join('') : '';
@@ -74,6 +74,7 @@
         <rect class="hit" x="${bx}" y="${by}" width="${bw}" height="${bh}" rx="6"/><g class="art">${d.draw(p, st)}</g>${smoke}
         ${d.pins.map(q => `<circle class="pin${d.strips ? ' hole' : ''}${armed && armed.part === p.id && armed.pin === q.id ? ' armed' : ''}" data-pin="${q.id}" cx="${q.x}" cy="${q.y}" r="${d.strips ? 3 : 4}"/>`).join('')}</g>`; }).join('');
     $('#simbar').hidden = !running; $('#simbar').classList.toggle('bad', !!shorts.length); $('#svg').classList.toggle('locked', locked());
+    syncCodeFor();
     $('#boardName').textContent = (proj.parts.find(p => P[p.type].mcu) && P[proj.parts.find(p => P[p.type].mcu).type].name) || 'нет платы';
     updateTip();
   }
@@ -82,7 +83,10 @@
   /* ---------- properties panel ---------- */
   const PROP_UI = { V: ['Напряжение', 'В', 0.1], R: ['Сопротивление', 'Ом', 1], Pmax: ['Допустимая мощность', 'Вт', 0.05], pos: ['Положение движка', '', 0.01], Vf: ['Прямое напряжение Vf', 'В', 0.1], Imax: ['Макс. ток', 'А', 0.001], beta: ['Коэффициент усиления β (hFE)', '', 1], rInt: ['Внутреннее сопротивление rInt', 'Ом', 0.01],
     C: ['Ёмкость', 'Ф', 'any'], L: ['Индуктивность', 'Гн', 'any'] };
-  const SLIDERS = { lux: ['Освещённость', 'лк', 0, 1000, 1], temp: ['Температура', '°C', -40, 125, 0.5], hum: ['Влажность', '%', 0, 100, 1], dist: ['Расстояние', 'см', 2, 400, 1] };
+  const SLIDERS = { lux: ['Освещённость', 'лк', 0, 1000, 1], temp: ['Температура', '°C', -40, 125, 0.5], hum: ['Влажность', '%', 0, 100, 1], dist: ['Расстояние', 'см', 2, 400, 1],
+    refl: ['Отражение (0 — чёрная линия, 1 — белое)', '', 0, 1, 0.05], thr: ['Порог компаратора D0 (потенциометр)', '× VCC', 0, 1, 0.05], mm: ['Расстояние', 'мм', 30, 2000, 5],
+    pitch: ['Наклон вперёд/назад (pitch)', '°', -90, 90, 1], roll: ['Крен (roll)', '°', -180, 180, 1], acc: ['Ускорение вперёд', 'g', -2, 2, 0.05], gz: ['Поворот (гироскоп Z)', '°/с', -250, 250, 5],
+    soc: ['Заряд', '%', 0, 100, 1], Vout: ['Uвых (подстроечный резистор)', 'В', 5, 32, 0.5] };
   const E12V = []; for (let e = 0; e <= 6; e++) for (const m of [1, 1.2, 1.5, 1.8, 2.2, 2.7, 3.3, 3.9, 4.7, 5.6, 6.8, 8.2]) E12V.push(+(m * Math.pow(10, e)).toPrecision(3));
   const RUNITS = [['Ом', 1], ['кОм', 1e3], ['МОм', 1e6]];
   function icon(p) { const [bx, by, bw, bh] = bbox(p.type); return `<svg class="ico" viewBox="${bx} ${by} ${bw} ${bh}"><g>${P[p.type].draw({ ...p, burned: false }, { I: 0 })}</g></svg>`; }
@@ -256,13 +260,15 @@
 
   /* ---------- simulation ---------- */
   function tick() {
-    const b = Netlist.build(proj, gpio);
+    const mcus = proj.parts.filter(p => P[p.type].mcu), gpioBy = {}; for (const id in extra) gpioBy[id] = extra[id].gpio; if (mcus[0]) gpioBy[mcus[0].id] = gpio;
+    const b = Netlist.build(proj, gpio, { gpioBy, vio: mcus[0] ? P[mcus[0].type].vio : 3.3 });
     // transient step: real time between frames (clamped), state re-keyed by owner part + ordinal so it survives netlist changes
     const now = performance.now(), dt = Math.min(0.05, Math.max(1e-4, lastT ? (now - lastT) / 1000 : 1 / 60)); lastT = now;
     const keys = elKeys(b.owners), st = { vC: {}, iL: {} };
     keys.forEach((k, i) => { if (k in simState.vC) st.vC[i] = simState.vC[k]; if (k in simState.iL) st.iL[i] = simState.iL[k]; });
     const sol = Solver.solve(b.circuit, { guess: prevV && prevV.length === b.circuit.nodeCount ? prevV : null, dt, state: st });
     if (sol.state) { simState = { vC: {}, iL: {} }; for (const i in sol.state.vC) simState.vC[keys[i]] = sol.state.vC[i]; for (const i in sol.state.iL) simState.iL[keys[i]] = sol.state.iL[i]; }
+    for (const d of b.devs || []) d.step(sol, dt); // devices.js composite parts (motors, Li-ion, boost)
     simTime += dt;
     prevV = sol.v; const ctx = { ...b.ctx, v: (p, pin) => sol.v[b.ctx.n(p, pin)], supplyMax: () => Netlist.supplyMax(proj), dirty: () => { prevV = null; } };
     sim = { sol, nets: b.nets, ctx };
@@ -282,12 +288,19 @@
     else for (const p of proj.parts) { const d = P[p.type], m = meas[p.id];
       if (m && d.check) { const c = d.check(p, m, ctx); checks[p.id] = c || null; if (c && (!alert || c.level === 'burn')) alert = c; } }
     // inputs for the sketch
-    const mcu = proj.parts.find(p => P[p.type].mcu);
-    links = {}; for (const p of proj.parts) { const d = P[p.type]; if (!d.display && !d.sensor) continue; links[p.id] = linkState(p, mcu, b.nets, meas[p.id]); }
-    for (const p of proj.parts) if (p.type === 'motor') { const i = Math.abs(meas[p.id]?.I || 0); animT[p.id] = ((animT[p.id] || 0) + Math.min(40, i * 120)) % 360; }
-    if (worker && mcu) { const v = {}; for (const q of P[mcu.type].pins) { const g = P[mcu.type].gpioOf(q.id); if (g != null) v[g] = ctx.v(mcu, q.id); }
-      const s = {}; for (const p of proj.parts) { const d = P[p.type]; if (!d.sensor || !links[p.id] || !links[p.id].on) continue; if (d.sensor === 'dht') { s.temp = p.props.temp; s.hum = p.props.hum; } else if (d.sensor === 'sonar') s.dist = p.props.dist; }
-      worker.postMessage({ t: 'in', v, s }); }
+    const mcu = mcus[0];
+    links = {}; for (const p of proj.parts) { const d = P[p.type]; if (!d.display && !d.sensor) continue;
+      let l = null; for (const m of mcus) { const x = linkState(p, m, b.nets, meas[p.id]); if (x.on) { l = { ...x, mcu: m.id }; break; } if (!l) l = x; } links[p.id] = l || linkState(p, null, b.nets, meas[p.id]); }
+    for (const p of proj.parts) { const d = P[p.type];
+      if (d.motor && p._st) { p._st.ang = (((p._st.ang || 0) + Math.max(-50, Math.min(50, (p._st.rpm || 0) * 6 * dt))) % 360 + 360) % 360; animT[p.id] = p._st.ang; } }
+    const rfMods = proj.parts.filter(p => P[p.type].sensor === 'nrf' && links[p.id] && links[p.id].on);
+    const sendIn = (w, m) => { const v = {}; for (const q of P[m.type].pins) { const g = P[m.type].gpioOf(q.id); if (g != null) v[g] = ctx.v(m, q.id); }
+      const s = {}; for (const p of proj.parts) { const d = P[p.type], l = links[p.id]; if (!d.sensor || !l || !l.on || (l.mcu && l.mcu !== m.id)) continue; const pr = p.props;
+        if (d.sensor === 'dht') { s.temp = pr.temp; s.hum = pr.hum; } else if (d.sensor === 'sonar') s.dist = pr.dist; else if (d.sensor === 'vl53') s.mm = pr.mm;
+        else if (d.sensor === 'imu') s.imu = { pitch: pr.pitch, roll: pr.roll, acc: pr.acc, gz: pr.gz }; else if (d.sensor === 'nrf') { s.nrf = true; s.rfPeer = rfMods.some(o => o !== p); } }
+      w.postMessage({ t: 'in', v, s }); };
+    if (worker && mcu) sendIn(worker, mcu);
+    for (const id in extra) { const m = part(id); if (m) sendIn(extra[id].w, m); }
     const a = $('#alert'); const txt = alert ? alert.msg : '';
     if (txt !== lastAlert) { lastAlert = txt; a.hidden = !alert; if (alert) { a.textContent = (shorts.length ? '' : alert.level === 'burn' ? '🔥 ' : '⚠ ') + alert.msg; a.className = alert.level; } }
     if (sel && sel.part && part(sel.part) && !!part(sel.part).burned !== !!$('#fix')) props();
@@ -338,44 +351,76 @@
   /* sketch worker lifecycle: a crashed/hung worker (exception, OOM, infinite loop) is torn down, a fresh idle
    * worker is created right away, the console explains what happened, and the next Run uses the fresh worker. */
   let spare = null, crashes = 0;
-  const newWorker = () => new Worker('worker.js?v=6');
+  const newWorker = () => new Worker('worker.js?v=7');
   function takeWorker() { const w = spare || newWorker(); spare = null; return w; }
   function crash(msg) { if (!worker) return; worker.onmessage = worker.onerror = null; try { worker.terminate(); } catch (e) {} worker = null; gpio = {}; prevV = null; crashes++;
     try { spare = newWorker(); } catch (e) { spare = null; }
     log(msg + '\nВоркер перезапущен. Исправь код и нажми «Стоп» → «Запустить».\n', 'err'); showTab('console'); $('#status').textContent = 'Скетч упал — воркер перезапущен'; }
+  /* v7: extra boards (2nd ESP32-C3 with NRF24 etc.) run their own sketch (proj.codes[id]) in their own worker */
+  let extra = {}, rf = { sent: 0, delivered: 0, last: null };
+  const gpioOf = id => (extra[id] ? extra[id].gpio : gpio) || {};
+  function relayRf(fromId, m) {
+    const mine = proj.parts.find(p => P[p.type].sensor === 'nrf' && links[p.id] && links[p.id].on && links[p.id].mcu === fromId); if (!mine) return;
+    mine._txT = performance.now(); rf.sent++;
+    const pkt = { t: 'rfin', addr: String(m.addr).slice(0, 40), ch: m.ch | 0, data: m.data };
+    for (const p of proj.parts) { if (p === mine || P[p.type].sensor !== 'nrf' || !links[p.id] || !links[p.id].on) continue; const to = links[p.id].mcu;
+      const w = to === (proj.parts.find(q => P[q.type].mcu) || {}).id ? worker : extra[to] && extra[to].w; if (w && to !== fromId) { w.postMessage(pkt); rf.delivered++; rf.last = { from: fromId, to, data: m.data }; } } }
+  function onWorkerMsg(id, setGpio, m) {
+    if (m.t === 'pin') { const g = setGpio(), s = g[m.pin] || (g[m.pin] = { mode: 'INPUT', val: 0 }); if (m.mode) s.mode = m.mode; if (m.val != null) s.val = m.val; }
+    else if (m.t === 'mod') onMod(m); else if (m.t === 'frame' && (m.k === 'oled' || m.k === 'hdmi') && m.bmp) onFrame(m.k, m.bmp);
+    else if (m.t === 'rf') relayRf(id, m);
+    else if (m.t === 'log') log(m.s); else if (m.t === 'err') { log(m.s + '\n', 'err'); showTab('console'); } }
+  function runExtra(m, code) {
+    const e = extra[m.id] = { w: newWorker(), gpio: {}, hb: performance.now() };
+    const kill = msg => { if (!extra[m.id]) return; try { e.w.terminate(); } catch (x) {} delete extra[m.id]; prevV = null; crashes++; log('[' + m.id + '] ' + msg + '\n', 'err'); showTab('console'); };
+    e.kill = kill;
+    e.w.onmessage = ev => { e.hb = performance.now(); const x = ev.data; if (x.t === 'log') log('[' + m.id + '] ' + x.s); else onWorkerMsg(m.id, () => e.gpio, x); };
+    e.w.onerror = ev => { ev.preventDefault && ev.preventDefault(); kill('Скетч упал: ' + (ev.message || 'ошибка')); };
+    e.w.postMessage({ t: 'start', code, board: P[m.type].mcu, mods: {} });
+  }
   function runSketch(mcu) {
     worker = takeWorker(); lastHb = performance.now();
-    worker.onmessage = e => { const m = e.data; lastHb = performance.now();
-      if (m.t === 'pin') { const s = gpio[m.pin] || (gpio[m.pin] = { mode: 'INPUT', val: 0 }); if (m.mode) s.mode = m.mode; if (m.val != null) s.val = m.val; }
-      else if (m.t === 'mod') onMod(m); else if (m.t === 'frame' && (m.k === 'oled' || m.k === 'hdmi') && m.bmp) onFrame(m.k, m.bmp);
-      else if (m.t === 'log') log(m.s); else if (m.t === 'err') { log(m.s + '\n', 'err'); showTab('console'); } };
+    const id = mcu.id; worker.onmessage = e => { lastHb = performance.now(); onWorkerMsg(id, () => gpio, e.data); };
     worker.onerror = e => { e.preventDefault && e.preventDefault(); const t = String(e.message || '');
       crash(/memory|allocation|Invalid array length|Invalid typed array length|buffer/i.test(t) ? 'Скетч упал: не хватило памяти (слишком большой массив?).' : 'Скетч упал: ' + (t || 'неизвестная ошибка') + '.'); };
     worker.onmessageerror = () => crash('Скетч упал: повреждённое сообщение.');
     const mods = {}; for (const p of proj.parts) { const d = P[p.type]; if (d.display === 'strip') mods.strip = Math.max(mods.strip || 0, d.n || 0); else if (d.display) mods[d.display] = 1; }
     worker.postMessage({ t: 'start', code: proj.code, board: P[mcu.type].mcu, mods });
-    clearInterval(wd); wd = setInterval(() => { if (worker && performance.now() - lastHb > 2000) crash('Скетч остановлен: нет ответа 2 с (бесконечный цикл без delay или нехватка памяти).'); }, 500);
+    clearInterval(wd); wd = setInterval(() => { if (worker && performance.now() - lastHb > 2000) crash('Скетч остановлен: нет ответа 2 с (бесконечный цикл без delay или нехватка памяти).');
+      for (const k in extra) if (performance.now() - extra[k].hb > 2000) extra[k].kill('Скетч остановлен: нет ответа 2 с.'); }, 500);
   }
   function start() {
-    if (running) return; proj.code = $('#code').value; autosave();
+    if (running) return; saveEditor(); autosave();
     proj.parts.forEach(p => { delete p.burned; delete p.on; delete p._mod; }); gpio = {}; imgs = {}; links = {}; prevV = null; simState = { vC: {}, iL: {} }; simTime = 0; lastT = 0; lastAlert = null; con.textContent = '';
     running = true; $('#run').disabled = true; $('#stop').disabled = false;
-    const mcu = proj.parts.find(p => P[p.type].mcu);
+    proj.parts.forEach(p => { delete p._st; delete p._txT; delete p._low; delete p._duty; delete p._acc; delete p._vs; }); extra = {}; rf = { sent: 0, delivered: 0, last: null };
+    const mcus = proj.parts.filter(p => P[p.type].mcu), mcu = mcus[0];
     if (mcu && proj.code.trim()) {
       runSketch(mcu);
     }
+    for (const m of mcus.slice(1)) { const c = proj.codes && proj.codes[m.id]; if (c && c.trim()) runExtra(m, c); }
     if (!desktop()) { $('#codePane').hidden = true; $('#codeTab').classList.remove('on'); }
     tick();
   }
   function stop() {
-    running = false; shorts = []; shortSet = new Set(); shortSig = ''; $('#shortBox').hidden = true; $('#simText').hidden = false; cancelAnimationFrame(raf); clearInterval(wd); if (worker) worker.terminate(); worker = null; gpio = {}; sim = null;
+    running = false; shorts = []; shortSet = new Set(); shortSig = ''; $('#shortBox').hidden = true; $('#simText').hidden = false; cancelAnimationFrame(raf); clearInterval(wd); if (worker) worker.terminate(); worker = null; gpio = {}; sim = null; for (const k in extra) try { extra[k].w.terminate(); } catch (e) {} extra = {};
     for (const k in meas) delete meas[k]; for (const k in checks) delete checks[k]; proj.parts.forEach(p => { delete p.burned; delete p._mod; }); links = {}; imgs = {};
     $('#run').disabled = false; $('#stop').disabled = true; $('#status').textContent = 'Остановлено'; $('#alert').hidden = true;
     render(); live(); calc();
   }
   $('#run').onclick = start; $('#stop').onclick = stop;
   $('#codeTab').onclick = () => { if (desktop()) { $('#bottom').classList.remove('min'); $('#code').focus(); return; } const h = $('#codePane').hidden; $('#codePane').hidden = !h; $('#codeTab').classList.toggle('on', h); if (h) $('#code').focus(); };
-  $('#code').oninput = () => { proj.code = $('#code').value; autosave(); };
+  $('#code').oninput = () => { saveEditor(); autosave(); };
+  /* code target: with 2+ boards a selector chooses whose sketch is in the editor (first board = proj.code) */
+  let codeTarget = null, codeForSig = '';
+  function saveEditor() { const v = $('#code').value, m = proj.parts.filter(p => P[p.type].mcu);
+    if (codeTarget && m[0] && codeTarget !== m[0].id && m.some(p => p.id === codeTarget)) { proj.codes = proj.codes || {}; proj.codes[codeTarget] = v; } else proj.code = v; }
+  function syncCodeFor() { const sel2 = $('#codeFor'); if (!sel2) return; const m = proj.parts.filter(p => P[p.type].mcu), sig = m.map(p => p.id).join(',');
+    if (sig === codeForSig) return; codeForSig = sig; sel2.textContent = '';
+    for (const p of m) { const o = document.createElement('option'); o.value = p.id; o.textContent = p.id + ' · ' + P[p.type].name; sel2.appendChild(o); }
+    sel2.hidden = m.length < 2; if (!m.some(p => p.id === codeTarget)) codeTarget = m[0] ? m[0].id : null; sel2.value = codeTarget || ''; }
+  function setCodeTarget(id) { saveEditor(); const m = proj.parts.filter(p => P[p.type].mcu); codeTarget = id; $('#code').value = m[0] && id !== m[0].id ? (proj.codes && proj.codes[id]) || '' : proj.code || ''; $('#codeFor').value = id; }
+  $('#codeFor').onchange = e => setCodeTarget(e.target.value);
   $('#code').addEventListener('keydown', e => { if (e.key === 'Tab') { e.preventDefault(); document.execCommand('insertText', false, '  '); } });
 
   /* ---------- bottom panel ---------- */
@@ -392,12 +437,12 @@
     const g1 = document.createElement('optgroup'); g1.label = 'Примеры'; Object.keys(window.EXAMPLES).forEach(n => g1.appendChild(opt('ex:' + n, n))); sel_.appendChild(g1);
     const g2 = document.createElement('optgroup'); g2.label = 'Сохранённые'; Object.keys(saved()).forEach(n => g2.appendChild(opt('my:' + n, n.slice(0, 64), n === selName))); sel_.appendChild(g2);
   }
-  function open(data) { stop(); proj = sanitizeProject(data); proj.code = proj.code ?? DEFAULT_CODE; $('#code').value = proj.code; sel = null; fit(); changed(); }
+  function open(data) { stop(); codeTarget = null; codeForSig = ''; proj = sanitizeProject(data); proj.code = proj.code ?? DEFAULT_CODE; $('#code').value = proj.code; sel = null; fit(); changed(); }
   $('#projects').onchange = e => { const v = e.target.value; if (!v) return; open(v.startsWith('ex:') ? window.EXAMPLES[v.slice(3)] : (Object.prototype.hasOwnProperty.call(saved(), v.slice(3)) ? saved()[v.slice(3)] : {})); };
   $('#save').onclick = () => { let n = prompt('Название проекта:', proj.name || 'Мой проект'); if (!n) return; n = String(n).slice(0, 64); proj.name = n; proj.code = $('#code').value;
     const s = saved(); s[n] = { ...strip(proj), name: n }; localStorage.setItem(LS, JSON.stringify(s)); projList(n); $('#status').textContent = 'Сохранено: ' + n; };
   /* new-project chooser (cards built with createElement/textContent only) */
-  const NEWP = [['esp32', '📶', 'ESP32', 'Wi-Fi плата, 3,3 В, мигалка'], ['esp8266', '📡', 'ESP8266', 'NodeMCU, кнопка и светодиод'], ['uno', '🟦', 'Arduino Uno', '5 В, матрица 8×8 MAX7219'],
+  const NEWP = [['esp32', '📶', 'ESP32', 'Wi-Fi плата, 3,3 В, мигалка'], ['esp8266', '📡', 'ESP8266', 'NodeMCU, кнопка и светодиод'], ['uno', '🟦', 'Arduino Uno', '5 В, матрица 8×8 MAX7219'], ['esp32c3', '🔹', 'ESP32-C3 SuperMini', 'RISC-V, 3,3 В, LED на GPIO8'], ['line', '🤖', 'Робот по линии', 'ESP32-C3, 2×TCRT5000, DRV8833, 2 мотора TT, 103450'],
     ['attiny', '🐜', 'ATtiny85 на макетке', 'DIP-8 чип, батарейка, светодиод'], ['pico', '🍓', 'Raspberry Pi Pico', '3,3 В, лента WS2812'], ['opi', '🖥', 'Orange Pi (Python + HDMI)', 'Python, монитор 1920×1080'],
     ['analog', '🔋', 'Чистая электроника', 'Батарейка, резистор, светодиод'], ['empty', '⬜', 'Пустой', 'Чистый лист']];
   function newDialog() { const m = $('#newModal'), g = $('#newCards'); g.textContent = '';
@@ -431,5 +476,5 @@
   lastJ = JSON.stringify(strip(proj));
   layout(); palette(); projList(); $('#code').value = proj.code ?? DEFAULT_CODE; fit(); render(); props(); calc();
   window.addEventListener('resize', () => { if (!running) render(); });
-  window.__sim = { get proj() { return proj; }, get meas() { return meas; }, start, stop, undo, get gpio() { return gpio; }, get shorts() { return shorts; }, get crashes() { return crashes; }, get simTime() { return simTime; }, get hasWorker() { return !!worker; }, get worker() { return worker; }, get hasSpare() { return !!spare; }, get cam() { return cam; }, select: id => { sel = { part: id }; props(); calc(); render(); } };
+  window.__sim = { get proj() { return proj; }, get meas() { return meas; }, start, stop, undo, get gpio() { return gpio; }, get shorts() { return shorts; }, get crashes() { return crashes; }, get simTime() { return simTime; }, get hasWorker() { return !!worker; }, get worker() { return worker; }, get hasSpare() { return !!spare; }, get rf() { return rf; }, get extra() { return Object.keys(extra); }, codeFor: id => setCodeTarget(id), get cam() { return cam; }, select: id => { sel = { part: id }; props(); calc(); render(); } };
 })();

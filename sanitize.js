@@ -2,9 +2,10 @@
 (function () {
   const ID = /^[A-Za-z0-9_-]{1,32}$/;
   const NUM = { V: [0, 1000], R: [0.001, 1e9], Pmax: [0.001, 1000], pos: [0, 1], Vf: [0.1, 10], Imax: [0.0001, 10], beta: [1, 2000], rInt: [0.001, 100],
-    C: [1e-12, 1], L: [1e-9, 10], lux: [0, 100000], temp: [-40, 125], hum: [0, 100], dist: [2, 400], K: [0.001, 100], Vth: [0.1, 10], lambda: [0, 1] };
+    C: [1e-12, 1], L: [1e-9, 10], lux: [0, 100000], temp: [-40, 125], hum: [0, 100], dist: [2, 400], K: [0.001, 100], Vth: [0.1, 10], lambda: [0, 1],
+    /* v7 */ refl: [0, 1], thr: [0, 1], mm: [30, 2000], pitch: [-90, 90], roll: [-180, 180], acc: [-2, 2], gz: [-250, 250], soc: [0, 100], Vout: [5, 32] };
   const BOOL = new Set(['p']);
-  const KINDS = ['esp32', 'esp8266', 'uno', 'attiny', 'pico', 'opi', 'analog', 'empty'];
+  const KINDS = ['esp32', 'esp8266', 'uno', 'attiny', 'pico', 'opi', 'analog', 'empty', 'esp32c3', 'line'];
   const LIMITS = { parts: 500, wires: 2000, pts: 50, code: 100000, importBytes: 2 * 1024 * 1024 };
   const num = (v, lo, hi, d) => { const n = Number(v); return Number.isFinite(n) ? Math.min(hi, Math.max(lo, n)) : d; };
   function sanitizeProject(raw) {
@@ -34,6 +35,11 @@
       wids.add(w.id); out.wires.push({ id: w.id, a, b, pts });
     }
     out.code = typeof raw.code === 'string' ? raw.code.slice(0, LIMITS.code) : '';
+    // v7: per-MCU sketches for extra boards (keys must be existing MCU part ids)
+    if (raw.codes && typeof raw.codes === 'object' && !Array.isArray(raw.codes)) { const codes = {}; let total = 0;
+      for (const [k, v] of Object.entries(raw.codes).slice(0, 8)) { const p = byId.get(k); if (!p || !P[p.type].mcu || typeof v !== 'string') continue;
+        const c = v.slice(0, LIMITS.code); if (total + c.length > LIMITS.code * 4) break; total += c.length; codes[k] = c; }
+      if (Object.keys(codes).length) out.codes = codes; }
     if (typeof raw.name === 'string') out.name = raw.name.slice(0, 64);
     if (typeof raw.kind === 'string' && KINDS.includes(raw.kind)) out.kind = raw.kind;
     return out;

@@ -21,7 +21,7 @@
   }
   function shortMessage(s, proj) {
     const P = window.PARTS, src = proj.parts.find(p => p.id === s.source);
-    const V = src.type === 'dc' ? fmtUnit(+src.props.V, 'В') : src.type === 'battery' ? '9 В' : '3,3 В (' + src.id + ')';
+    const V = src.type === 'dc' ? fmtUnit(+src.props.V, 'В') : src.type === 'battery' ? '9 В' : P[src.type].srcV ? P[src.type].srcV(src) + ' (' + src.id + ')' : '3,3 В (' + src.id + ')';
     const via = s.path.map(id => proj.parts.find(p => p.id === id)).filter(Boolean)
       .map(p => p.type === 'resistor' ? `${p.id} (${fmtUnit(+p.props.R, 'Ом')})` : p.type === 'pot' ? `${p.id} (движок)` : p.id);
     return `⚡ Короткое замыкание: источник ${V} замкнут ${via.length ? 'через ' + via.join(', ') : 'проводом напрямую'}. Симуляция остановлена`;

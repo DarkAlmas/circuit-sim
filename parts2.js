@@ -32,7 +32,7 @@
         else for (const id in c.supplies) { source(p, ctx, id, gnd, c.supplies[id], 0.1); p._els[id] = p._r; }
         const powered = !c.dip || (p._pw || 0) > 2.7, ref = ctx.n(p, gnd);
         for (const q of pins) { const g = c.gpio(q.id); if (g == null || !powered) continue;
-          const s = ctx.gpio(g) || { mode: 'INPUT' };
+          const s = ctx.gpio(g, p.id) || { mode: 'INPUT' };
           if (s.mode === 'OUTPUT') { const m = ctx.node(); p._els[q.id] = ctx.add({ type: 'R', a: m, b: ctx.n(p, q.id), R: 25 }); ctx.add({ type: 'V', p: m, n: ref > 0 ? ref : 0, V: c.vio * (s.val || 0) }); }
           else if (s.mode === 'INPUT_PULLUP') { const m = ctx.node(); p._els[q.id] = ctx.add({ type: 'R', a: m, b: ctx.n(p, q.id), R: 40000 }); ctx.add({ type: 'V', p: m, n: ref > 0 ? ref : 0, V: c.vio }); } }
       },
@@ -71,6 +71,7 @@
   const arduinoGpio = id => { let m = /^D(\d+)$/.exec(id); if (m) return +m[1]; m = /^A([0-5])$/.exec(id); if (m) return 14 + +m[1]; return null; };
   const arduinoHint = id => /^GND/.test(id) ? 'GND (земля)' : id === '5V' ? '5V (питание 5 В)' : id === '3V3' ? '3V3 (3,3 В, до 50 мА)' : /^A\d/.test(id) ? id + ' (аналоговый вход, цифровой ' + arduinoGpio(id) + ')' : /^D\d/.test(id) ? 'цифровой вывод ' + id.slice(1) + ([3, 5, 6, 9, 10, 11].includes(arduinoGpio(id)) ? ' (ШИМ ~)' : '') : id;
   const glab = id => id.replace(/^GND\d$/, 'GND');
+  L.mcu = mcu;
   P.uno = mcu({ kind: 'uno', name: 'Arduino Uno (ATmega328P)', short: 'Arduino Uno', group: 'Платы', vio: 5, builtin: 13, pinMax: 0.04, w: 90, L: UNO_L, R: UNO_R,
     supplies: { '5V': 5, '3V3': 3.3, IOREF: 5 }, gpio: arduinoGpio, hint: arduinoHint, lab: glab, pcb: '#0f6f86', chipName: 'ATmega328P', sub: '16 МГц · 5 В', ledName: 'L',
     extra: (T, B, W) => `<rect x="${-W + 8}" y="${B - 40}" width="30" height="26" rx="3" fill="#222" stroke="#000"/><text x="${-W + 23}" y="${B - 44}" class="tiny lightt">DC</text><text x="0" y="${B - 40}" class="chip lightt">UNO</text>` });

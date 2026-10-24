@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="ru"><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; connect-src 'none'; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'none'"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Схемотехник — симулятор Arduino, ESP32, Pico, Orange Pi</title><link rel="icon" href="data:,"><link rel="stylesheet" href="style.css?v=6"></head>
+<title>Схемотехник — симулятор Arduino, ESP32, Pico, Orange Pi</title><link rel="icon" href="data:,"><link rel="stylesheet" href="style.css?v=7"></head>
 <body>
 <header>
   <b class="logo">⚡ Схемотехник</b>
@@ -21,7 +21,7 @@
       <filter id="glow" x="-1" y="-1" width="3" height="3"><feGaussianBlur stdDeviation="6"/></filter></defs>
       <g id="view"><rect x="-5000" y="-5000" width="10000" height="10000" fill="url(#grid)" id="bg"/><g id="wires"></g><g id="partsL"></g><path id="temp" class="wire temp"/></g></svg>
     <div id="simbar" hidden><span id="simText">● Идёт симуляция — схема только для просмотра, кнопки и переключатели работают</span><span id="shortBox" hidden><span id="shortMsg"></span> <button id="showShort">Показать</button></span></div><div id="tip" hidden></div>
-    <div id="codePane" hidden><div class="codebar">Код (Arduino C или Python для Orange Pi). Плата: <b id="boardName">—</b></div><textarea id="code" spellcheck="false"></textarea></div>
+    <div id="codePane" hidden><div class="codebar">Код (Arduino C или Python для Orange Pi). Плата: <b id="boardName">—</b> <select id="codeFor" hidden title="Чей скетч редактировать"></select></div><textarea id="code" spellcheck="false"></textarea></div>
     <div id="alert" hidden></div>
   </section>
   <aside id="right"><h3>Свойства</h3><div id="props"><p class="muted">Выбери деталь или провод</p></div></aside>
@@ -32,5 +32,5 @@
 </footer>
 <div id="newModal" class="modal" hidden><div class="mbox"><div class="mhead"><b>Новый проект</b><button id="newClose" title="Закрыть">✕</button></div><div id="newCards" class="ncards"></div></div></div>
 <div id="hdmiFull" class="modal" hidden><div class="hbox"><div class="mhead"><b>Монитор HDMI · 1920×1080</b><button id="hdmiClose" title="Закрыть">✕</button></div><canvas id="hdmiCanvas" width="1920" height="1080"></canvas></div></div>
-<script src="solver.js?v=6"></script><script src="parts.js?v=6"></script><script src="parts2.js?v=6"></script><script src="sanitize.js?v=6"></script><script src="netlist.js?v=6"></script><script src="shorts.js?v=6"></script><script src="examples.js?v=6"></script><script src="app.js?v=6"></script>
+<script src="solver.js?v=7"></script><script src="parts.js?v=7"></script><script src="parts2.js?v=7"></script><script src="devices.js?v=7"></script><script src="parts3.js?v=7"></script><script src="sanitize.js?v=7"></script><script src="netlist.js?v=7"></script><script src="shorts.js?v=7"></script><script src="examples.js?v=7"></script><script src="app.js?v=7"></script>
 </body></html>
