@@ -6,7 +6,7 @@ const EX = 'ex:Пример: мигание светодиодом (ESP32)';
   const mc = await b.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, deviceScaleFactor: 2 }); const pg = await mc.newPage();
   pg.on('console', m => { if (m.type() === 'error') errs.push(m.text()); }); pg.on('pageerror', e => errs.push(e.message));
   await pg.goto(URL); await pg.waitForTimeout(300);
-  const v8 = await pg.evaluate(() => [...document.scripts].filter(s => s.src).every(s => /\?v=(8|9|10|11|12|13|14)$/.test(s.src))); console.log('scripts ?v=8', v8); assert.ok(v8);
+  const v8 = await pg.evaluate(() => [...document.scripts].filter(s => s.src).every(s => /\?v=(8|9|10|11|12|13|14|14\.1)$/.test(s.src))); console.log('scripts ?v=8', v8); assert.ok(v8);
   const cdp = await mc.newCDPSession(pg);
   const load = async () => { await pg.selectOption('#projects', EX); await pg.waitForTimeout(250); };
   const mid = (id, f = 0.5) => pg.evaluate(([id, f]) => { const el = document.querySelector(`.whit[data-wire="${id}"]`), L = el.getTotalLength(), q = el.getPointAtLength(L * f), m = el.getScreenCTM(); return [q.x * m.a + m.e, q.y * m.d + m.f]; }, [id, f]);
@@ -19,11 +19,13 @@ const EX = 'ex:Пример: мигание светодиодом (ESP32)';
   console.log('mobile layout', JSON.stringify(lay)); assert.ok(lay.w >= 380 && lay.h > 450 && lay.bar.length === 4 && lay.bar.every(h => h >= 44) && lay.left === 'none' && lay.sw <= 390);
   await pg.tap('#mParts'); assert.equal(await pg.evaluate(() => getComputedStyle(document.querySelector('#left')).display), 'block'); await pg.tap('#mParts');
   await load();
-  // 1) tap beside the line (7px off, misses the 3px stroke) selects the wire, floating delete removes it
+  // 1) tap beside the line (7px off, misses the 3px stroke) selects the wire; delete is only in «Свойства провода»
   let [x, y] = await mid('w1'); await pg.touchscreen.tap(x, y - 7); await pg.waitForTimeout(100);
   console.log('tap near wire -> sel', await sel()); assert.equal(await sel(), 'w1');
-  const fb = await pg.evaluate(() => { const e = document.querySelector('#wireDel'); return !e.hidden && e.textContent; }); assert.match(fb, /Удалить провод/);
-  await pg.tap('#wireDel'); await pg.waitForTimeout(100); console.log('after floating delete', await wires()); assert.ok(!(await wires()).split(',').includes('w1'));
+  const popped = await pg.evaluate(() => { const e = document.querySelector('#wireDel'); const m = document.querySelector('#ctxmenu'); const items = m && !m.hidden ? [...m.children].map(b => b.textContent) : []; return { wireDel: !!e, menuDel: items.some(t => /Удалить провод/.test(t)) }; });
+  console.log('no popup delete', popped); assert.equal(popped.wireDel, false); assert.equal(popped.menuDel, false);
+  if (await pg.evaluate(() => document.body.dataset.sheet !== 'props')) await pg.tap('#mProps');
+  const del1 = await pg.$('#props #del'); assert.ok(del1); assert.match(await del1.textContent(), /Удалить провод/); await del1.tap(); await pg.waitForTimeout(100); console.log('after sheet delete', await wires()); assert.ok(!(await wires()).split(',').includes('w1'));
   // Ctrl+Z restores it
   await pg.keyboard.press('Control+z'); await pg.waitForTimeout(100); console.log('after Ctrl+Z', await wires()); assert.ok((await wires()).split(',').includes('w1'));
   // 2) the friend's flow: tap one end, tap the other end -> the existing wire is selected (no duplicate), Delete works
@@ -43,10 +45,11 @@ const EX = 'ex:Пример: мигание светодиодом (ESP32)';
   // 4) long press on a wire -> menu; long press on a part -> rotate / duplicate
   const lpress = async (x, y) => { await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y, id: 1 }] }); await pg.waitForTimeout(650); await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] }); await pg.waitForTimeout(100); };
   [x, y] = await mid('w1'); await lpress(x, y);
-  let mi = await pg.evaluate(() => { const m = document.querySelector('#ctxmenu'); return m.hidden ? null : [...m.children].map(b => b.textContent); }); console.log('wire menu', mi); assert.ok(mi && mi.some(t => /Удалить провод/.test(t)) && mi.some(t => /изгиб/.test(t)));
+  let mi = await pg.evaluate(() => { const m = document.querySelector('#ctxmenu'); return m.hidden ? null : [...m.children].map(b => b.textContent); }); console.log('wire menu', mi); assert.ok(mi && mi.some(t => /изгиб/.test(t)) && !mi.some(t => /Удалить провод/.test(t)));
   await pg.evaluate(() => [...document.querySelectorAll('#ctxmenu button')].find(b => /изгиб/.test(b.textContent)).click()); const bp = await pg.evaluate(() => window.__sim.proj.wires.find(w => w.id === 'w1').pts.length); assert.ok(bp >= 1);
-  [x, y] = await mid('w1', 0.62); console.log('lp2 at', await pg.evaluate(([x, y]) => { const e = document.elementFromPoint(x, y); return e && (e.id || e.getAttribute('class')); }, [x, y])); await pg.evaluate(() => { window.__lg = []; for (const t of ['pointerdown','pointerup','pointercancel','pointermove']) document.addEventListener(t, e => window.__lg.push(t + ':' + e.pointerType + ':' + e.isPrimary), true); }); await lpress(x, y); console.log('lg', await pg.evaluate(() => window.__lg.join(' '))); console.log('m2', await pg.evaluate(() => document.querySelector('#ctxmenu').hidden)); await pg.evaluate(() => [...document.querySelectorAll('#ctxmenu button')].find(b => /Удалить/.test(b.textContent)).click());
-  console.log('menu delete', await wires()); assert.ok(!(await wires()).split(',').includes('w1'));
+  if (await pg.evaluate(() => document.body.dataset.sheet !== 'props')) await pg.tap('#mProps');
+  await (await pg.$('#props #del')).tap(); await pg.waitForTimeout(100);
+  console.log('sheet delete', await wires()); assert.ok(!(await wires()).split(',').includes('w1'));
   const r = await pg.evaluate(() => { const e = document.querySelector('.part[data-part="R1"] .hit').getBoundingClientRect(); return [e.x + e.width / 2, e.y + e.height / 2]; }); await lpress(...r);
   mi = await pg.evaluate(() => [...document.querySelector('#ctxmenu').children].map(b => b.textContent)); console.log('part menu', mi); assert.ok(mi.some(t => /Повернуть/.test(t)) && mi.some(t => /Дублировать/.test(t)));
   const np = await pg.evaluate(() => window.__sim.proj.parts.length); await pg.evaluate(() => [...document.querySelectorAll('#ctxmenu button')].find(b => /Дублировать/.test(b.textContent)).click());
@@ -63,14 +66,18 @@ const EX = 'ex:Пример: мигание светодиодом (ESP32)';
   for (let k = 1; k <= 5; k++) await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: end[0] + (tgt[0] - end[0]) * k / 5, y: end[1] + (tgt[1] - end[1]) * k / 5, id: 1 }] });
   await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] }); await pg.waitForTimeout(100);
   const rw = await pg.evaluate(() => window.__sim.proj.wires.find(w => w.id === 'w1').b); console.log('re-wired end', JSON.stringify(rw)); assert.deepEqual(rw, { part: 'U1', pin: 'G6' });
-  [x, y] = await mid('w2'); console.log('w2at', await pg.evaluate(([x, y]) => document.elementsFromPoint(x, y).slice(0, 5).map(e => (e.id || e.getAttribute('class') || e.tagName) + (e.dataset && e.dataset.wire || '')).join(','), [x, y])); await pg.touchscreen.tap(x, y); console.log('w2sel', await sel()); await pg.tap('#wireDel'); assert.equal(await wires(), 'w1');
-  // desktop: right click -> «Удалить провод»; old click-click on two ends selects instead of duplicating
+  [x, y] = await mid('w2'); console.log('w2at', await pg.evaluate(([x, y]) => document.elementsFromPoint(x, y).slice(0, 5).map(e => (e.id || e.getAttribute('class') || e.tagName) + (e.dataset && e.dataset.wire || '')).join(','), [x, y])); await pg.touchscreen.tap(x, y); await pg.waitForTimeout(100); console.log('w2sel', await sel());
+  assert.equal(await pg.evaluate(() => !!document.querySelector('#wireDel')), false);
+  if (await pg.evaluate(() => document.body.dataset.sheet !== 'props')) await pg.tap('#mProps');
+  await (await pg.$('#props #del')).tap(); await pg.waitForTimeout(100); assert.equal(await wires(), 'w1');
+  // desktop: right click offers a bend, not «Удалить провод»; delete is the sheet button. Two clicks on the ends select instead of duplicating.
   const d = await b.newPage({ viewport: { width: 1400, height: 860 } }); d.on('pageerror', e => errs.push(e.message)); await d.goto(URL); await d.waitForTimeout(300);
   await d.selectOption('#projects', EX); await d.waitForTimeout(250);
   const dm = await d.evaluate(() => { const el = document.querySelector('.whit[data-wire="w1"]'), q = el.getPointAtLength(el.getTotalLength() / 2), m = el.getScreenCTM(); return [q.x * m.a + m.e, q.y * m.d + m.f]; });
   await d.mouse.click(dm[0], dm[1], { button: 'right' }); await d.waitForTimeout(100);
-  const dmi = await d.evaluate(() => [...document.querySelector('#ctxmenu').children].map(b => b.textContent)); console.log('desktop right-click menu', dmi); assert.ok(dmi.some(t => /Удалить провод/.test(t)));
-  await d.click('#ctxmenu button.danger'); const dw = await d.evaluate(() => window.__sim.proj.wires.map(w => w.id)); assert.ok(!dw.includes('w1'));
+  const dmi = await d.evaluate(() => [...document.querySelector('#ctxmenu').children].map(b => b.textContent)); console.log('desktop right-click menu', dmi); assert.ok(dmi.some(t => /изгиб/.test(t)) && !dmi.some(t => /Удалить провод/.test(t)));
+  assert.equal(await d.evaluate(() => !!document.querySelector('#wireDel')), false);
+  await d.click('#props #del'); const dw = await d.evaluate(() => window.__sim.proj.wires.map(w => w.id)); assert.ok(!dw.includes('w1'));
   await d.keyboard.press('Control+z'); await d.waitForTimeout(100);
   const pxy = (p, pin) => d.evaluate(([p, pin]) => { const r = document.querySelector(`.part[data-part="${p}"] .pin[data-pin="${pin}"]`).getBoundingClientRect(); return [r.x + r.width / 2, r.y + r.height / 2]; }, [p, pin]);
   const p1 = await pxy('R1', 'a'), p2 = await pxy('D1', 'a'); await d.mouse.click(...p1); await d.mouse.click(...p2); await d.waitForTimeout(100);
