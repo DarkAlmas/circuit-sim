@@ -480,10 +480,10 @@ void loop() {
   int left = sonar.ping_cm() * 10;            // мм (0 = эхо не вернулось)
   if (left == 0) left = 4000;
   int right = lox.readRangeSingleMillimeters(); // мм
-  if (!turning && (left < 320 || right < 320)) { turning = true; dir = left > right ? 1 : -1; }
-  if (turning && left > 500 && right > 500) turning = false;   // свободно с запасом — едем дальше
+  if (!turning && (left < 400 || right < 400)) { turning = true; dir = left > right ? 1 : -1; }
+  if (turning && left > 600 && right > 600) turning = false;   // свободно с запасом — едем дальше
   if (turning) { motor(IN1, IN2, -160 * dir); motor(IN3, IN4, 160 * dir); }   // dir 1 = влево
-  else { motor(IN1, IN2, 150); motor(IN3, IN4, 150); }
+  else { motor(IN1, IN2, 130); motor(IN3, IN4, 130); }
   delay(10);
 }` }; }
   // рулевое: задний привод (M1+M2 вместе) + серво на передней оси, едет по линии
