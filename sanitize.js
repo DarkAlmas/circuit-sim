@@ -49,7 +49,12 @@
   const RL = { mounts: 40, strokes: 100, pts: 4000, boxes: 30 };
   const pt = (q, w, h) => Array.isArray(q) && q.length >= 2 && Number.isFinite(+q[0]) && Number.isFinite(+q[1]) ? [Math.round(num(q[0], 0, w, 0)), Math.round(num(q[1], 0, h, 0))] : null;
   function sanitizeRobot(r, byId) {
-    const o = { body: r.body === 'round' ? 'round' : 'rect', mat: r.mat === 'black' ? 'black' : 'acrylic', mounts: [], caster: r.caster !== false, track: {}, obstacles: [], speed: num(r.speed, 0.5, 4, 1) };
+    const C = window.Chassis || (typeof require === 'function' ? require('./chassis.js') : null), P = window.PARTS;
+    const o = { body: 'rect', mat: r.mat === 'black' ? 'black' : 'acrylic', mounts: [], caster: r.caster !== false, track: {}, obstacles: [], speed: num(r.speed, 0.5, 4, 1) };
+    // v13: body outline (rect/round/poly ≤64 pts, 5 mm grid, ±200 mm), drive card (whitelist) and wheel slots (finite, clamped; part = existing motor)
+    C.cleanShape(r, o);
+    const drive = C.cleanDrive(r.drive);
+    if (drive) { o.drive = drive; o.wheels = C.cleanWheels(r.wheels, id => byId.has(id) && !!P[byId.get(id).type].motor); if (!o.wheels.length) o.wheels = C.slots(drive); }
     const seen = new Set();
     for (const m of Array.isArray(r.mounts) ? r.mounts.slice(0, RL.mounts) : []) {
       if (!m || typeof m.part !== 'string' || !byId.has(m.part) || seen.has(m.part)) continue; seen.add(m.part);
@@ -57,7 +62,7 @@
       // v10: direction of a distance sensor, radians relative to the body (0 forward, +π/2 left)
       const dir = Math.round(num(m.dir, -Math.PI, Math.PI, 0) * 100) / 100; if (dir) mm.dir = dir;
       o.mounts.push(mm); }
-    const t = r.track && typeof r.track === 'object' ? r.track : {}, PR = ['oval', 'eight', 'zigzag', 'cross', ''];
+    const t = r.track && typeof r.track === 'object' ? r.track : {}, PR = ['oval', 'eight', 'zigzag', 'cross', 'maze', 'avoid', 'park', ''];
     o.track.preset = typeof t.preset === 'string' && PR.includes(t.preset) ? t.preset : '';
     o.track.w = Math.round(num(t.w, 10, 40, 20)); o.track.strokes = []; let total = 0;
     for (const s of Array.isArray(t.strokes) ? t.strokes.slice(0, RL.strokes) : []) { if (!Array.isArray(s)) continue;

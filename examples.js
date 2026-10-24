@@ -397,6 +397,247 @@ void loop() {
 }` };
   ex['Пример: Плавная езда (ПИД)'] = S.pid;
   ex['Пример: Робот-машинка на трассе (простой)'] = S.car;
+  /* v13 «Любая машинка»: 4WD, гусеницы, рулевое (серво), меканум, лабиринт — все на Devices.vehicle */
+  const BASE = (more = []) => [{ id: 'U1', type: 'esp32', x: 0, y: 0, rot: 0 }, { id: 'D1', type: 'l298n', x: 330, y: -20, rot: 0 },
+    { id: 'BT1', type: 'liion', x: 260, y: 200, rot: 0, props: { soc: 95 } }, { id: 'BT2', type: 'liion', x: 400, y: 200, rot: 0, props: { soc: 95 } }, ...more];
+  const BW = [W('w7', 'U1', '25', 'D1', 'IN1'), W('w8', 'U1', '26', 'D1', 'IN2'), W('w9', 'U1', '27', 'D1', 'IN3'), W('w10', 'U1', '14', 'D1', 'IN4'),
+    W('w15', 'BT1', 'p', 'D1', 'VS'), W('w16', 'BT1', 'n', 'BT2', 'p'), W('w17', 'BT2', 'n', 'D1', 'GND'), W('w18', 'D1', 'GND', 'U1', 'GND2')];
+  const MOT = (id, x, y) => ({ id, type: 'ttmotor', x, y, rot: 0 });
+  const TW = (k, drv, o1, o2, m) => [W(k + 'a', drv, o1, m, 'a'), W(k + 'b', drv, o2, m, 'b')];
+  const SONAR = (id, x, y, trig, echo) => ({ part: { id, type: 'hcsr04', x, y, rot: 0, props: { dist: 200 } },
+    wires: [W(id + 'v', id, 'VCC', 'U1', '3V3'), W(id + 'g', id, 'GND', 'U1', 'GND'), W(id + 't', id, 'TRIG', 'U1', String(trig)), W(id + 'e', id, 'ECHO', 'U1', String(echo))] });
+  const I2C = (id, type, x, y, props) => ({ part: { id, type, x, y, rot: 0, props }, wires: [W(id + 'v', id, 'VCC', 'U1', '3V3'), W(id + 'g', id, 'GND', 'U1', 'GND'), W(id + 'c', id, 'SCL', 'U1', '22'), W(id + 'd', id, 'SDA', 'U1', '21')] });
+  const MOTOR_FN = `void motor(int a, int b, int sp) {   // sp: -255..255, знак = направление
+  sp = constrain(sp, -255, 255);
+  if (sp >= 0) { analogWrite(a, sp); analogWrite(b, 0); }
+  else { analogWrite(a, 0); analogWrite(b, -sp); }
+}`;
+  const BODY = { body: 'rect', size: { l: 190, w: 140, rad: 10, r: 90 }, mat: 'acrylic', speed: 1 };
+  const MB = [{ part: 'U1', x: 20, y: 0 }, { part: 'D1', x: -20, y: 0 }, { part: 'BT1', x: -55, y: 22 }, { part: 'BT2', x: -55, y: -22 }];
+  // 4WD: левая пара на канале A, правая на канале B (моторы одной стороны параллельно) + HC-SR04 спереди → парковка у стены
+  { const s = SONAR('U2', -320, -60, 4, 5);
+    S.wd4 = { kind: 'car', name: '4WD: парковка у стены', parts: BASE([MOT('M1', 540, -170), MOT('M2', 540, 130), MOT('M3', 640, -170), MOT('M4', 640, 130), s.part]),
+      wires: [...BW, ...TW('m1', 'D1', 'OUT1', 'OUT2', 'M1'), ...TW('m3', 'D1', 'OUT1', 'OUT2', 'M3'), ...TW('m2', 'D1', 'OUT3', 'OUT4', 'M2'), ...TW('m4', 'D1', 'OUT3', 'OUT4', 'M4'), ...s.wires],
+      robot: { ...BODY, caster: false, drive: '4wd', wheels: [{ x: 55, y: 72, R: 33, part: 'M1' }, { x: 55, y: -72, R: 33, part: 'M2' }, { x: -55, y: 72, R: 33, part: 'M3' }, { x: -55, y: -72, R: 33, part: 'M4' }],
+        mounts: [{ part: 'M1', x: 55, y: 72 }, { part: 'M2', x: 55, y: -72 }, { part: 'M3', x: -55, y: 72 }, { part: 'M4', x: -55, y: -72 }, { part: 'U2', x: 92, y: 0 }, ...MB], track: { preset: 'park', start: { x: 400, y: 700, th: 0 } }, obstacles: [{ x: 1730, y: 700, w: 60, h: 400 }] },
+      code: `// 4WD: четыре мотора TT, левая пара на канале A L298N, правая — на канале B.
+// Задача «Парковка у стены»: подъехать и остановиться в 5–15 см от стены, не ударившись.
+// HC-SR04 смотрит вперёд: быстро, потом медленно, потом стоп.
+#include <NewPing.h>
+#define IN1 25
+#define IN2 26
+#define IN3 27
+#define IN4 14
+NewPing sonar(4, 5, 400);   // TRIG = 4, ECHO = 5
+${MOTOR_FN}
+
+void setup() {
+  Serial.begin(115200);
+  pinMode(IN1, OUTPUT); pinMode(IN2, OUTPUT); pinMode(IN3, OUTPUT); pinMode(IN4, OUTPUT);
+}
+
+void loop() {
+  int cm = sonar.ping_cm();
+  int sp = 0;
+  if (cm > 40) sp = 160;        // далеко — полный ход
+  else if (cm > 11) sp = 70;    // близко — подкрадываемся
+  else sp = 0;                  // 10 см — стоим
+  motor(IN1, IN2, sp);
+  motor(IN3, IN4, sp);
+  Serial.println("до стены " + String(cm) + " см");
+  delay(20);
+}` }; }
+  // гусеницы + HC-SR04 (вперёд-влево) + VL53L0X (вперёд-вправо) → объезд препятствий
+  { const s = SONAR('U2', -320, -60, 4, 5), v = I2C('U3', 'vl53l0x', -320, 140, { mm: 500 });
+    S.tracks = { kind: 'car', name: 'Гусеницы: объезд препятствий', parts: BASE([MOT('M1', 540, -110), MOT('M2', 540, 70), s.part, v.part]),
+      wires: [...BW, ...TW('m1', 'D1', 'OUT1', 'OUT2', 'M1'), ...TW('m2', 'D1', 'OUT3', 'OUT4', 'M2'), ...s.wires, ...v.wires],
+      robot: { ...BODY, caster: false, drive: 'tracks', wheels: [{ x: 0, y: 78, R: 20, grip: 0.3, track: true, part: 'M1' }, { x: 0, y: -78, R: 20, grip: 0.3, track: true, part: 'M2' }],
+        mounts: [{ part: 'M1', x: 0, y: 78 }, { part: 'M2', x: 0, y: -78 }, { part: 'U2', x: 90, y: 30, dir: 0.6 }, { part: 'U3', x: 90, y: -30, dir: -0.6 }, ...MB],
+        track: { preset: 'avoid', start: { x: 200, y: 700, th: 0 } }, obstacles: [{ x: 700, y: 640, w: 160, h: 160 }, { x: 1150, y: 1000, w: 200, h: 160 }, { x: 1250, y: 350, w: 160, h: 200 }, { x: 1650, y: 750, w: 160, h: 220 }] },
+      code: `// Гусеницы: две ленты (сцепление меньше, чем у резины — в повороте их заносит).
+// Задача «Объезд препятствий»: проехать 3 м и ни во что не врезаться.
+// HC-SR04 смотрит вперёд-влево (+35°), VL53L0X — вперёд-вправо (−35°): что ближе, от того и отворачиваем.
+#include <NewPing.h>
+#include <VL53L0X.h>
+#define IN1 25
+#define IN2 26
+#define IN3 27
+#define IN4 14
+NewPing sonar(4, 5, 400);
+VL53L0X lox;
+bool turning = false;
+int dir = 1;
+${MOTOR_FN}
+
+void setup() {
+  Serial.begin(115200);
+  pinMode(IN1, OUTPUT); pinMode(IN2, OUTPUT); pinMode(IN3, OUTPUT); pinMode(IN4, OUTPUT);
+  Wire.begin();
+  lox.init();
+}
+
+void loop() {
+  int left = sonar.ping_cm() * 10;            // мм (0 = эхо не вернулось)
+  if (left == 0) left = 4000;
+  int right = lox.readRangeSingleMillimeters(); // мм
+  if (!turning && (left < 320 || right < 320)) { turning = true; dir = left > right ? 1 : -1; }
+  if (turning && left > 500 && right > 500) turning = false;   // свободно с запасом — едем дальше
+  if (turning) { motor(IN1, IN2, -160 * dir); motor(IN3, IN4, 160 * dir); }   // dir 1 = влево
+  else { motor(IN1, IN2, 150); motor(IN3, IN4, 150); }
+  delay(10);
+}` }; }
+  // рулевое: задний привод (M1+M2 вместе) + серво на передней оси, едет по линии
+  S.steer = { kind: 'car', name: 'Рулевое (серво) по линии', parts: BASE([MOT('M1', 540, -110), MOT('M2', 540, 70), { id: 'M3', type: 'servo', x: 560, y: 260, rot: 0 },
+      { id: 'S1', type: 'tcrt5000', x: -320, y: -60, rot: 0, props: { refl: 0.9, thr: 0.5 } }, { id: 'S2', type: 'tcrt5000', x: -320, y: 120, rot: 0, props: { refl: 0.9, thr: 0.5 } }]),
+    wires: [...BW, ...TW('m1', 'D1', 'OUT1', 'OUT2', 'M1'), ...TW('m2', 'D1', 'OUT3', 'OUT4', 'M2'),
+      W('sv', 'M3', 'VCC', 'D1', '5V'), W('sg', 'M3', 'GND', 'U1', 'GND'), W('ss', 'M3', 'SIG', 'U1', '13'),
+      W('w1', 'S1', 'VCC', 'U1', '3V3'), W('w2', 'S1', 'GND', 'U1', 'GND'), W('w3', 'S1', 'D0', 'U1', '32'), W('w4', 'S2', 'VCC', 'U1', '3V3'), W('w5', 'S2', 'GND', 'U1', 'GND'), W('w6', 'S2', 'D0', 'U1', '33')],
+    robot: { ...BODY, caster: false, drive: 'steer', wheels: [{ x: -60, y: 72, R: 33, part: 'M1' }, { x: -60, y: -72, R: 33, part: 'M2' }, { x: 60, y: 72, R: 33, driven: false, steer: true }, { x: 60, y: -72, R: 33, driven: false, steer: true }],
+      mounts: [{ part: 'M1', x: -60, y: 72 }, { part: 'M2', x: -60, y: -72 }, { part: 'M3', x: 60, y: 0 }, { part: 'S1', x: 90, y: 8 }, { part: 'S2', x: 90, y: -8 }, ...MB], track: { preset: 'oval' }, obstacles: [] },
+    code: `// Рулевое как у машины: задние колёса крутят моторы, передние поворачивает серво SG90.
+// Серво 90° — прямо, больше — влево, меньше — вправо (до ±40°).
+#include <Servo.h>
+#define SL 32
+#define SR 33
+#define IN1 25
+#define IN2 26
+#define IN3 27
+#define IN4 14
+Servo steer;
+int last = 0;
+${MOTOR_FN}
+
+void setup() {
+  Serial.begin(115200);
+  pinMode(IN1, OUTPUT); pinMode(IN2, OUTPUT); pinMode(IN3, OUTPUT); pinMode(IN4, OUTPUT);
+  steer.attach(13);
+  steer.write(90);
+}
+
+void loop() {
+  bool l = digitalRead(SL) == HIGH;   // HIGH = датчик над чёрной линией
+  bool r = digitalRead(SR) == HIGH;
+  int sp = 130;
+  if (l && r) { steer.write(90); last = 0; }
+  else if (l) { steer.write(118); last = 1; }      // линия слева — руль влево
+  else if (r) { steer.write(62); last = -1; }      // линия справа — руль вправо
+  else { steer.write(last >= 0 ? 130 : 50); sp = 100; } // потеряли — круто туда, где была
+  motor(IN1, IN2, sp);
+  motor(IN3, IN4, sp);
+  delay(10);
+}` };
+  // меканум: 4 мотора на двух L298N, едет квадратом: вперёд, влево боком, назад, вправо боком
+  S.mec = { kind: 'car', name: 'Меканум: едем боком', parts: [...BASE([MOT('M1', 540, -170), MOT('M2', 540, 130), MOT('M3', 640, -170), MOT('M4', 640, 130)]), { id: 'D2', type: 'l298n', x: 330, y: 330, rot: 0 }],
+    wires: [...BW, ...TW('m1', 'D1', 'OUT1', 'OUT2', 'M1'), ...TW('m2', 'D1', 'OUT3', 'OUT4', 'M2'), ...TW('m3', 'D2', 'OUT1', 'OUT2', 'M3'), ...TW('m4', 'D2', 'OUT3', 'OUT4', 'M4'),
+      W('x1', 'U1', '16', 'D2', 'IN1'), W('x2', 'U1', '17', 'D2', 'IN2'), W('x3', 'U1', '18', 'D2', 'IN3'), W('x4', 'U1', '19', 'D2', 'IN4'),
+      W('x5', 'BT1', 'p', 'D2', 'VS'), W('x6', 'BT2', 'n', 'D2', 'GND')],
+    robot: { ...BODY, caster: false, drive: 'mecanum', wheels: [{ x: 60, y: 72, R: 30, roller: -0.7854, part: 'M1' }, { x: 60, y: -72, R: 30, roller: 0.7854, part: 'M2' }, { x: -60, y: 72, R: 30, roller: 0.7854, part: 'M3' }, { x: -60, y: -72, R: 30, roller: -0.7854, part: 'M4' }],
+      mounts: [{ part: 'M1', x: 60, y: 72 }, { part: 'M2', x: 60, y: -72 }, { part: 'M3', x: -60, y: 72 }, { part: 'M4', x: -60, y: -72 }, { part: 'D2', x: -20, y: 40 }, ...MB],
+      track: { preset: '', strokes: [], start: { x: 700, y: 450, th: 0 } }, obstacles: [] },
+    code: `// Меканум: у каждого колеса ролики под 45°. Если левые и правые колёса крутить «накрест»,
+// машинка едет боком, не поворачиваясь. FL, FR — D1; RL, RR — D2.
+#define FL1 25
+#define FL2 26
+#define FR1 27
+#define FR2 14
+#define RL1 16
+#define RL2 17
+#define RR1 18
+#define RR2 19
+${MOTOR_FN}
+
+void drive(int fl, int fr, int rl, int rr) {
+  motor(FL1, FL2, fl); motor(FR1, FR2, fr); motor(RL1, RL2, rl); motor(RR1, RR2, rr);
+}
+
+void loop() {
+  drive(150, 150, 150, 150);     Serial.println("вперёд");       delay(1500);
+  drive(-150, 150, 150, -150);   Serial.println("влево боком");   delay(1500);
+  drive(-150, -150, -150, -150); Serial.println("назад");         delay(1500);
+  drive(150, -150, -150, 150);   Serial.println("вправо боком");  delay(1500);
+}
+
+void setup() {
+  Serial.begin(115200);
+  int pins[8] = {FL1, FL2, FR1, FR2, RL1, RL2, RR1, RR2};
+  for (int i = 0; i < 8; i++) pinMode(pins[i], OUTPUT);
+}` };
+  // лабиринт: HC-SR04 вперёд + VL53L0X вправо + MPU6050 (гироскоп) для точных поворотов на 90°
+  { const s = SONAR('U2', -320, -60, 4, 5), v = I2C('U3', 'vl53l0x', -320, 140, { mm: 500 }), g = I2C('U4', 'mpu6050', -320, 300, { pitch: 0, roll: 0, acc: 0, gz: 0 });
+    S.maze = { kind: 'car', name: 'Лабиринт: сонар + VL53 + гироскоп', parts: BASE([MOT('M1', 540, -110), MOT('M2', 540, 70), s.part, v.part, g.part]),
+      wires: [...BW, ...TW('m1', 'D1', 'OUT1', 'OUT2', 'M1'), ...TW('m2', 'D1', 'OUT3', 'OUT4', 'M2'), ...s.wires, ...v.wires, ...g.wires],
+      robot: { ...BODY, caster: true, drive: 'diff', wheels: [{ x: 0, y: 72, R: 33, part: 'M1' }, { x: 0, y: -72, R: 33, part: 'M2' }, { x: -72, y: 0, R: 10, driven: false, caster: true }],
+        mounts: [{ part: 'M1', x: 0, y: 72 }, { part: 'M2', x: 0, y: -72 }, { part: 'U2', x: 92, y: 0 }, { part: 'U3', x: 40, y: -60, dir: -1.57 }, { part: 'U4', x: 0, y: 30 }, ...MB],
+        track: { preset: 'maze', start: { x: 220, y: 220, th: 0 } }, obstacles: [{ x: 200, y: 450, w: 400, h: 40 }, { x: 600, y: 450, w: 400, h: 40 }, { x: 1000, y: 450, w: 400, h: 40 }, { x: 1400, y: 450, w: 400, h: 40 }, { x: 600, y: 900, w: 400, h: 40 }, { x: 1000, y: 900, w: 400, h: 40 }, { x: 1400, y: 900, w: 400, h: 40 }, { x: 1800, y: 900, w: 400, h: 40 }] },
+      code: `// Лабиринт по правилу «правой руки»: едем прямо, пока спереди свободно;
+// у стены смотрим направо: свободно — поворот направо, иначе — налево.
+// Поворот ровно на 90° считаем по гироскопу MPU-6050: угол = сумма (скорость поворота × время).
+#include <NewPing.h>
+#include <VL53L0X.h>
+#include <MPU6050.h>
+#define IN1 25
+#define IN2 26
+#define IN3 27
+#define IN4 14
+NewPing sonar(4, 5, 400);
+VL53L0X lox;
+MPU6050 mpu;
+${MOTOR_FN}
+
+float yaw = 0, target = 0;          // курс по гироскопу, ° (+ влево)
+unsigned long t0 = 0;
+
+void gyro() {                       // угол = сумма (скорость поворота × время)
+  unsigned long n = millis();
+  yaw += mpu.getRotationZ() / 131.0 * (n - t0) / 1000.0;
+  t0 = n;
+}
+
+void turn(float deg) {              // + влево, − вправо: поворот на месте до курса target
+  target += deg;
+  while (abs(target - yaw) > 3) {
+    gyro();
+    int sp = constrain((target - yaw) * 3, -90, 90);
+    if (sp > 0 && sp < 45) sp = 45;
+    if (sp < 0 && sp > -45) sp = -45;
+    motor(IN1, IN2, -sp);
+    motor(IN3, IN4, sp);
+    delay(5);
+  }
+  motor(IN1, IN2, 0); motor(IN3, IN4, 0);
+  for (int i = 0; i < 30; i++) { gyro(); delay(5); }   // ждём, пока машинка замрёт
+}
+
+void setup() {
+  Serial.begin(115200);
+  pinMode(IN1, OUTPUT); pinMode(IN2, OUTPUT); pinMode(IN3, OUTPUT); pinMode(IN4, OUTPUT);
+  Wire.begin();
+  lox.init();
+  mpu.initialize();
+  t0 = millis();
+}
+
+void loop() {
+  int front = sonar.ping_cm();
+  gyro();
+  if (front == 0 || front > 12) {   // 0 = эхо не вернулось (слишком далеко)
+    int corr = (target - yaw) * 6;    // держим курс: увело вправо — левое колесо медленнее
+    motor(IN1, IN2, 140 - corr);
+    motor(IN3, IN4, 140 + corr);
+    delay(10);
+    return;
+  }
+  motor(IN1, IN2, 0); motor(IN3, IN4, 0);
+  for (int i = 0; i < 40; i++) { gyro(); delay(5); }
+  int right = lox.readRangeSingleMillimeters();
+  Serial.println("стена! справа " + String(right) + " мм");
+  if (right > 350) turn(-90); else turn(90);
+}` }; }
+  ex['Пример: 4WD — парковка у стены'] = S.wd4;
+  ex['Пример: Гусеницы — объезд препятствий'] = S.tracks;
+  ex['Пример: Рулевое (серво) по линии'] = S.steer;
+  ex['Пример: Меканум — едем боком'] = S.mec;
+  ex['Пример: Лабиринт (сонар + VL53 + гироскоп)'] = S.maze;
   ex['Пример: Повышающий преобразователь 3,7 → 12 В'] = { kind: 'analog', parts: [{ id: 'BT1', type: 'liion', x: -200, y: 0, rot: 0, props: { soc: 80 } }, { id: 'U1', type: 'boost', x: 0, y: 0, rot: 0, props: { Vout: 12 } },
     { id: 'R1', type: 'resistor', x: 200, y: 0, rot: 1, props: { R: 120, Pmax: 2 } }],
     wires: [W('w1', 'BT1', 'p', 'U1', 'IN+'), W('w2', 'BT1', 'n', 'U1', 'IN-'), W('w3', 'U1', 'OUT+', 'R1', 'a'), W('w4', 'U1', 'OUT-', 'R1', 'b')], code: '' };

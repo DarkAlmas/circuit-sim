@@ -3,8 +3,8 @@ global.window = { Solver: require('../solver.js'), Devices: require('../devices.
 require('../parts.js'); require('../parts2.js'); require('../parts3.js'); require('../sanitize.js');
 const W = global.window, R = require('../robot.js'), D = require('../devices.js');
 test('v9 presets: 4 tracks, start on the line', () => {
-  assert.deepEqual(Object.keys(R.PRESETS), ['oval', 'eight', 'zigzag', 'cross']);
-  for (const k of Object.keys(R.PRESETS)) { const t = R.preset(k), s = R.sampler(R.raster(t));
+  assert.deepEqual(Object.keys(R.PRESETS).slice(0, 4), ['oval', 'eight', 'zigzag', 'cross']); // v13 adds line-less tasks after these
+  for (const k of Object.keys(R.PRESETS).slice(0, 4)) { const t = R.preset(k), s = R.sampler(R.raster(t));
     assert.ok(t.strokes.length && t.w === 30, k); assert.ok(s(t.start.x / 1000, t.start.y / 1000) < 0.5, k + ' start on black'); }
 });
 test('v9 sampler: white 0.9, black 0.05, outside the field darker', () => {

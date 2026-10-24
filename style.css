@@ -183,3 +183,6 @@ body.pm .rpid{font-size:14px;width:100%}body.pm .rpid label{flex:1 1 100%}body.p
 body.pm .rgrp button,body.pm .rgrp select,body.pm .rgrp input[type=number]{min-height:44px;font-size:14px}
 body.pm .rspd,body.pm .rdir{font-size:14px}
 body.pm button,body.pm select,body.pm input{touch-action:manipulation}
+/* v13 «Любая машинка» */.rdrives{display:flex;flex-wrap:wrap;gap:4px}.rcard{font-size:12px;padding:4px 8px;border-radius:8px}.rgrp .rcard.on{background:#2d5a8a;border-color:#4a9eff}
+.rmass{color:#ff9ad2;font-size:12px}.rtpl{display:inline-flex;flex-wrap:wrap;gap:4px;align-items:center}.rtpl input{width:110px}.rdir input[type=number]{width:64px}
+label.rdir[hidden],.rgrp button[hidden]{display:none}body.pm .rcard{min-height:44px}body.pm .rtpl input{min-height:44px;font-size:14px}

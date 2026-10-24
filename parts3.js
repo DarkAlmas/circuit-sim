@@ -145,7 +145,7 @@
     stamp: (p, ctx) => pwrLoad(p, ctx, 'vl53l0x'), measure: (p, sol, ctx) => pwrMeas(p, sol, ctx, { 'Расстояние': fN(+p.props.mm, 0) + ' мм' }) };
   const mpins = i2c(36, [pin('INT', 50, 36, 'INT: прерывание (не обязательно)')]);
   P.mpu6050 = { name: 'Гироскоп/акселерометр MPU-6050 (I2C)', group: 'Датчики', prefix: 'U', sensor: 'imu', dataPin: 'SDA', props: { pitch: 0, roll: 0, acc: 0, gz: 0 }, pins: mpins, box: [-40, -40, 100, 80],
-    draw: p => `${legs(mpins)}<rect x="-36" y="-30" width="92" height="56" rx="3" fill="#1d4fd0" stroke="#0e2a78"/><rect x="0" y="-18" width="18" height="18" fill="#111" transform="rotate(${fN(+p.props.roll, 0)} 9 -9)"/>
+    draw: p => `${legs(mpins)}<rect x="-36" y="-30" width="92" height="56" rx="3" fill="#1d4fd0" stroke="#0e2a78"/><rect x="0" y="-18" width="18" height="18" fill="#111" transform="rotate(${(+p.props.roll || 0).toFixed(0)} 9 -9)"/>
       <text x="10" y="-36" class="lbl">наклон ${fN(+p.props.pitch, 0)}° / ${fN(+p.props.roll, 0)}°</text>${lbls(mpins, -14)}`,
     stamp: (p, ctx) => pwrLoad(p, ctx, 'mpu6050'), measure: (p, sol, ctx) => pwrMeas(p, sol, ctx) };
 

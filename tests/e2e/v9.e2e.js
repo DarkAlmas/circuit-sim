@@ -7,7 +7,7 @@ const EX = 'ex:Пример: Робот-машинка на трассе (про
   /* ---- desktop 1920×1080 ---- */
   const pg = await (await b.newContext({ viewport: { width: 1920, height: 1080 } })).newPage(); watch(pg);
   await pg.goto(URL); await pg.waitForTimeout(300);
-  assert.ok(await pg.evaluate(() => [...document.scripts].filter(s => s.src).every(s => /\?v=(9|10|11|12)$/.test(s.src)) && !!window.Robot && !!window.RobotUI));
+  assert.ok(await pg.evaluate(() => [...document.scripts].filter(s => s.src).every(s => /\?v=(9|10|11|12|13)$/.test(s.src)) && !!window.Robot && !!window.RobotUI));
   assert.ok(await pg.evaluate(() => document.querySelector('#rtabs').hidden), 'tabs hidden for non-car projects');
   // new-project card exists
   await pg.click('#new'); assert.ok(await pg.isVisible('.ncard[data-kind="car"]')); await pg.click('#newClose');
@@ -30,7 +30,7 @@ const EX = 'ex:Пример: Робот-машинка на трассе (про
   await pg.evaluate(() => __sim.select('S2')); await pg.click('#rtabs [data-rtab="chassis"]'); assert.equal(await pg.evaluate(() => __sim.sel.part), 'S2');
   // track: presets, run, the car follows the oval by itself
   await pg.click('#rtabs [data-rtab="track"]'); await pg.waitForTimeout(100);
-  const pres = await pg.evaluate(() => [...document.querySelectorAll('#rPreset option')].map(o => o.textContent).slice(1)); console.log('presets', pres); assert.deepEqual(pres, ['Овал', 'Восьмёрка', 'Зигзаг', 'С перекрёстком']);
+  const pres = await pg.evaluate(() => [...document.querySelectorAll('#rPreset option')].map(o => o.textContent).slice(1, 5)); console.log('presets', pres); assert.deepEqual(pres, ['Овал', 'Восьмёрка', 'Зигзаг', 'С перекрёстком']);
   await pg.click('#rPlay'); await pg.waitForTimeout(9000);
   const st = await pg.evaluate(() => { const r = RobotUI.run; return { dist: Math.round(r.dist), offs: r.offs, trail: r.trail.length, on: r.trail.filter(q => q[2]).length, rpm: [Math.round(r.rpmL), Math.round(r.rpmR)], refl: __sim.proj.parts.filter(p => p.type === 'tcrt5000').map(p => p.props.refl), laps: r.laps.length }; });
   console.log('after 9 s', JSON.stringify(st)); assert.ok(st.dist > 1500, 'car drove'); assert.ok(st.on / st.trail > 0.8, 'mostly on the line'); assert.ok(st.rpm[0] > 0 || st.rpm[1] > 0);
