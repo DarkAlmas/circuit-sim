@@ -63,6 +63,8 @@
     for (const s of Array.isArray(t.strokes) ? t.strokes.slice(0, RL.strokes) : []) { if (!Array.isArray(s)) continue;
       const q = s.slice(0, RL.pts - total).map(v => pt(v, 2000, 1400)).filter(Boolean); if (!q.length) continue; total += q.length; o.track.strokes.push(q); if (total >= RL.pts) break; }
     const st = t.start && typeof t.start === 'object' ? t.start : {};
+    // v11: PID sliders (optional): finite, clamped, rounded
+    if (r.tune && typeof r.tune === 'object' && !Array.isArray(r.tune)) { const u = r.tune; o.tune = { kp: Math.round(num(u.kp, 0, 300, 25) * 10) / 10, kd: Math.round(num(u.kd, 0, 300, 150) * 10) / 10, base: Math.round(num(u.base, 0, 255, 180)) }; }
     o.track.start = { x: Math.round(num(st.x, 0, 2000, 1000)), y: Math.round(num(st.y, 0, 1400, 250)), th: num(st.th, -7, 7, 0) };
     for (const b of Array.isArray(r.obstacles) ? r.obstacles.slice(0, RL.boxes) : []) { if (!b || typeof b !== 'object') continue;
       o.obstacles.push({ x: Math.round(num(b.x, 0, 2000, 0)), y: Math.round(num(b.y, 0, 1400, 0)), w: Math.round(num(b.w, 20, 400, 100)), h: Math.round(num(b.h, 20, 400, 100)) }); }

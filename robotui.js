@@ -27,7 +27,13 @@
   const bBrush = el('button', { id: 'rBrush', textContent: '🖌 Кисть' }), bBox = el('button', { id: 'rBox', textContent: '📦 Коробка' }), bClear = el('button', { id: 'rClear', textContent: '🧽 Очистить' });
   const bPlay = el('button', { id: 'rPlay', className: 'go', textContent: '▶' }), bPause = el('button', { id: 'rPause', textContent: '⏸' }), bReset = el('button', { id: 'rReset', textContent: '⟲ На старт' });
   const spd = el('input', { id: 'rSpeed', type: 'range', min: '0.5', max: '4', step: '0.5', value: '1', title: 'Скорость симуляции' }), spdL = el('span', { className: 'rspd', textContent: '×1' });
-  const trBar = el('div', { className: 'rgrp', id: 'rTrBar' }, [selPre, bBrush, bBox, bClear, bPlay, bPause, bReset, el('label', { className: 'rspdw' }, [spd, spdL])]);
+  // v11: live PID sliders — the sketch reads them with param("kp"/"kd"/"base") every loop, so a change acts immediately
+  const TUNE = [['kp', 'Kp', 0, 300, 1], ['kd', 'Kd', 0, 300, 1], ['base', 'База', 0, 255, 5]], tIn = {}, tOut = {};
+  const pidW = el('div', { className: 'rpid', hidden: true }, TUNE.map(([k, t, lo, hi, st]) => { tIn[k] = el('input', { id: 'rT' + k, type: 'range', min: String(lo), max: String(hi), step: String(st), title: t });
+    tOut[k] = el('span', { className: 'rpidv' }); return el('label', {}, [el('span', { textContent: t }), tIn[k], tOut[k]]); }));
+  const trBar = el('div', { className: 'rgrp', id: 'rTrBar' }, [selPre, bBrush, bBox, bClear, bPlay, bPause, bReset, el('label', { className: 'rspdw' }, [spd, spdL]), pidW]);
+  for (const [k, , lo, hi] of TUNE) tIn[k].oninput = () => { const r = proj().robot; if (!r || !r.tune) return; const v = Number(tIn[k].value);
+    if (!Number.isFinite(v)) return; r.tune[k] = Math.max(lo, Math.min(hi, v)); tOut[k].textContent = String(r.tune[k]); save(); };
   bar.append(chBar, trBar);
   /* --- data --- */
   function ensure() { const p = proj(); if (!isCar(p)) return null;
@@ -47,6 +53,7 @@
   function syncBar() { const r = proj().robot; if (!r) return; selBody.value = r.body; selMat.value = r.mat; bCaster.classList.toggle('on', r.caster); selPre.value = r.track.preset || '';
     spd.value = String(r.speed); spdL.textContent = '×' + r.speed; bBrush.classList.toggle('on', mode === 'brush'); bBox.classList.toggle('on', mode === 'box');
     bPlay.disabled = !paused && sim().running; bPause.disabled = paused;
+    pidW.hidden = !r.tune; if (r.tune) for (const [k] of TUNE) { if (document.activeElement !== tIn[k]) tIn[k].value = String(r.tune[k]); tOut[k].textContent = String(r.tune[k]); }
     const dm = selDist(); dirW.hidden = !dm; if (dm && document.activeElement !== inDir) inDir.value = String(Math.round((dm.dir || 0) * 180 / Math.PI)); }
   function onOpen() { const p = proj(); run = null; paused = true; sum.hidden = true; grid = null; gridSig = '';
     tabs.hidden = !isCar(p); document.body.classList.toggle('carproj', isCar(p)); if (isCar(p)) { ensure(); show(window.innerWidth < 900 ? 'track' : 'chassis'); } else show('schema'); }

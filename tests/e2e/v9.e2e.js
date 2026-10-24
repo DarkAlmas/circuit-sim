@@ -1,13 +1,13 @@
 // v9: «Робот-машинка» — tabs Схема/Шасси/Трасса, chassis↔schematic selection link, car drives the oval by the ESP32 sketch; desktop + 390px touch phone.
 const { chromium } = require('playwright-core'); const assert = require('assert');
 const URL = process.argv[2] || 'http://localhost:8765/';
-const EX = 'ex:Пример: Робот-машинка на трассе (ESP32 + L298N)';
+const EX = 'ex:Пример: Робот-машинка на трассе (простой)';
 (async () => { const b = await chromium.launch({ executablePath: '/usr/bin/google-chrome' }); const errs = [];
   const watch = pg => { pg.on('console', m => { if (m.type() === 'error') errs.push(m.text()); }); pg.on('pageerror', e => errs.push(e.message)); };
   /* ---- desktop 1920×1080 ---- */
   const pg = await (await b.newContext({ viewport: { width: 1920, height: 1080 } })).newPage(); watch(pg);
   await pg.goto(URL); await pg.waitForTimeout(300);
-  assert.ok(await pg.evaluate(() => [...document.scripts].filter(s => s.src).every(s => /\?v=(9|10)$/.test(s.src)) && !!window.Robot && !!window.RobotUI));
+  assert.ok(await pg.evaluate(() => [...document.scripts].filter(s => s.src).every(s => /\?v=(9|10|11)$/.test(s.src)) && !!window.Robot && !!window.RobotUI));
   assert.ok(await pg.evaluate(() => document.querySelector('#rtabs').hidden), 'tabs hidden for non-car projects');
   // new-project card exists
   await pg.click('#new'); assert.ok(await pg.isVisible('.ncard[data-kind="car"]')); await pg.click('#newClose');

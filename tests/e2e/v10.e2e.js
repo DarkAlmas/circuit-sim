@@ -1,12 +1,12 @@
 // v10: Devices.car rangers — rotate handle / #rDir, ray hits a box, ⟲ На старт = car.reset(), drag the car to set the start.
 const { chromium } = require('playwright-core'); const assert = require('assert');
 const URL = process.argv[2] || 'http://localhost:8765/';
-const EX = 'ex:Пример: Робот-машинка на трассе (ESP32 + L298N)';
+const EX = 'ex:Пример: Робот-машинка на трассе (простой)';
 (async () => { const b = await chromium.launch({ executablePath: '/usr/bin/google-chrome' }); const errs = [];
   const pg = await (await b.newContext({ viewport: { width: 1920, height: 1080 } })).newPage();
   pg.on('console', m => { if (m.type() === 'error') errs.push(m.text()); }); pg.on('pageerror', e => errs.push(e.message));
   await pg.goto(URL); await pg.waitForTimeout(300);
-  assert.ok(await pg.evaluate(() => [...document.scripts].filter(s => s.src).every(s => /\?v=10$/.test(s.src))));
+  assert.ok(await pg.evaluate(() => [...document.scripts].filter(s => s.src).every(s => /\?v=(10|11)$/.test(s.src))));
   await pg.selectOption('#projects', EX); await pg.waitForTimeout(300);
   // add a VL53L0X mounted at the nose, looking forward
   await pg.evaluate(() => { const p = __sim.proj; p.parts.push({ id: 'L1', type: 'vl53l0x', x: -320, y: 300, rot: 0, props: {} }); p.robot.mounts.push({ part: 'L1', x: 90, y: 0 }); __sim.changed(); __sim.select('L1'); });

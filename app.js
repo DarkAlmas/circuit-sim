@@ -375,6 +375,7 @@
       const s = {}; for (const p of proj.parts) { const d = P[p.type], l = links[p.id]; if (!d.sensor || !l || !l.on || (l.mcu && l.mcu !== m.id)) continue; const pr = p.props;
         if (d.sensor === 'dht') { s.temp = pr.temp; s.hum = pr.hum; } else if (d.sensor === 'sonar') s.dist = pr.dist; else if (d.sensor === 'vl53') s.mm = pr.mm;
         else if (d.sensor === 'imu') s.imu = { pitch: pr.pitch, roll: pr.roll, acc: pr.acc, gz: pr.gz }; else if (d.sensor === 'nrf') { s.nrf = true; s.rfPeer = rfMods.some(o => o !== p); } }
+      const tu = proj.robot && proj.robot.tune; if (tu) { const c = (v, hi) => Number.isFinite(+v) ? Math.max(0, Math.min(hi, +v)) : null; s.tune = { kp: c(tu.kp, 300), kd: c(tu.kd, 300), base: c(tu.base, 255) }; } // v11: PID sliders, clamped again (live edits)
       w.postMessage({ t: 'in', v, s }); };
     if (worker && mcu) sendIn(worker, mcu);
     for (const id in extra) { const m = part(id); if (m) sendIn(extra[id].w, m); }

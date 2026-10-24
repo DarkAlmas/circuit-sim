@@ -6,7 +6,7 @@ const EX = 'ex:Пример: мигание светодиодом (ESP32)';
   const mc = await b.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, deviceScaleFactor: 2 }); const pg = await mc.newPage();
   pg.on('console', m => { if (m.type() === 'error') errs.push(m.text()); }); pg.on('pageerror', e => errs.push(e.message));
   await pg.goto(URL); await pg.waitForTimeout(300);
-  const v8 = await pg.evaluate(() => [...document.scripts].filter(s => s.src).every(s => /\?v=(8|9|10)$/.test(s.src))); console.log('scripts ?v=8', v8); assert.ok(v8);
+  const v8 = await pg.evaluate(() => [...document.scripts].filter(s => s.src).every(s => /\?v=(8|9|10|11)$/.test(s.src))); console.log('scripts ?v=8', v8); assert.ok(v8);
   const cdp = await mc.newCDPSession(pg);
   const load = async () => { await pg.selectOption('#projects', EX); await pg.waitForTimeout(250); };
   const mid = (id, f = 0.5) => pg.evaluate(([id, f]) => { const el = document.querySelector(`.whit[data-wire="${id}"]`), L = el.getTotalLength(), q = el.getPointAtLength(L * f), m = el.getScreenCTM(); return [q.x * m.a + m.e, q.y * m.d + m.f]; }, [id, f]);

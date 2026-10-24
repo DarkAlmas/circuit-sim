@@ -169,6 +169,8 @@ const start = function (code, board, mods) {
     millis: () => Math.floor(now() - t0), micros: () => Math.floor((now() - t0) * 1000),
     map: (x, a, b, c, d) => Math.trunc((x - a) * (d - c) / (b - a) + c),
     constrain: (x, a, b) => Math.min(b, Math.max(a, x)),
+    // v11: live tuning from the «Трасса» sliders (Kp/Kd/base); unknown name or non-finite value -> the default
+    param: (name, def = 0) => { const t = sensors.tune, v = t && Object.prototype.hasOwnProperty.call(t, String(name)) ? +t[String(name)] : NaN; return Number.isFinite(v) ? v : +def || 0; },
     random: (a, b) => b === undefined ? Math.floor(Math.random() * a) : Math.floor(a + Math.random() * (b - a)),
     min: Math.min, max: Math.max, abs: Math.abs, sqrt: Math.sqrt, pow: Math.pow, round: Math.round,
     Serial: { begin() {}, print: s => out(s), println: (s = '') => out(String(s) + '\n') },

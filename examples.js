@@ -227,7 +227,7 @@ void loop() {
   delay(20);
 }` };
   /* v9: robot car — ESP32 + L298N + 2×TCRT5000 + 2 TT wheels on a chassis, drives on the «Трасса» tab */
-  S.car = { kind: 'car', name: 'Робот-машинка (ESP32 + L298N)', parts: [{ id: 'U1', type: 'esp32', x: 0, y: 0, rot: 0 },
+  S.car = { kind: 'car', name: 'Робот-машинка (простой)', parts: [{ id: 'U1', type: 'esp32', x: 0, y: 0, rot: 0 },
     { id: 'S1', type: 'tcrt5000', x: -320, y: -60, rot: 0, props: { refl: 0.9, thr: 0.5 } }, { id: 'S2', type: 'tcrt5000', x: -320, y: 120, rot: 0, props: { refl: 0.9, thr: 0.5 } },
     { id: 'D1', type: 'l298n', x: 330, y: -20, rot: 0 }, { id: 'M1', type: 'ttmotor', x: 540, y: -110, rot: 0 }, { id: 'M2', type: 'ttmotor', x: 540, y: 70, rot: 0 },
     { id: 'BT1', type: 'liion', x: 260, y: 200, rot: 0, props: { soc: 95 } }, { id: 'BT2', type: 'liion', x: 400, y: 200, rot: 0, props: { soc: 95 } }],
@@ -326,7 +326,77 @@ void loop() {
   delay(10);
 }` } };
   ex['Пример: Робот по линии (ESP32-C3)'] = S.line;
-  ex['Пример: Робот-машинка на трассе (ESP32 + L298N)'] = S.car;
+  /* v11: smooth line following — 5×TCRT5000 on analog A0, PD controller, live Kp/Kd/base sliders on «Трасса» */
+  const SY = [24, 12, 0, -12, -24], SPN = [32, 33, 34, 35, 36];
+  S.pid = { kind: 'car', name: 'Плавная езда (ПИД)', parts: [{ id: 'U1', type: 'esp32', x: 0, y: 0, rot: 0 },
+    ...SY.map((y, i) => ({ id: 'S' + (i + 1), type: 'tcrt5000', x: -340, y: -200 + i * 110, rot: 0, props: { refl: 0.9, thr: 0.5 } })),
+    { id: 'D1', type: 'l298n', x: 330, y: -20, rot: 0 }, { id: 'M1', type: 'ttmotor', x: 540, y: -110, rot: 0 }, { id: 'M2', type: 'ttmotor', x: 540, y: 70, rot: 0 },
+    { id: 'BT1', type: 'liion', x: 260, y: 200, rot: 0, props: { soc: 95 } }, { id: 'BT2', type: 'liion', x: 400, y: 200, rot: 0, props: { soc: 95 } }],
+    wires: [...SY.flatMap((y, i) => { const id = 'S' + (i + 1), k = 's' + (i + 1); return [W(k + 'v', id, 'VCC', 'U1', '3V3'), W(k + 'g', id, 'GND', 'U1', 'GND'), W(k + 'a', id, 'A0', 'U1', String(SPN[i]))]; }),
+      W('w7', 'U1', '25', 'D1', 'IN1'), W('w8', 'U1', '26', 'D1', 'IN2'), W('w9', 'U1', '27', 'D1', 'IN3'), W('w10', 'U1', '14', 'D1', 'IN4'),
+      W('w11', 'D1', 'OUT1', 'M1', 'a'), W('w12', 'D1', 'OUT2', 'M1', 'b'), W('w13', 'D1', 'OUT3', 'M2', 'a'), W('w14', 'D1', 'OUT4', 'M2', 'b'),
+      W('w15', 'BT1', 'p', 'D1', 'VS'), W('w16', 'BT1', 'n', 'BT2', 'p'), W('w17', 'BT2', 'n', 'D1', 'GND'), W('w18', 'D1', 'GND', 'U1', 'GND2')],
+    robot: { body: 'rect', mat: 'acrylic', caster: true, speed: 1, tune: { kp: 25, kd: 150, base: 180 },
+      mounts: [{ part: 'M1', x: 0, y: 72 }, { part: 'M2', x: 0, y: -72 }, ...SY.map((y, i) => ({ part: 'S' + (i + 1), x: 80, y })),
+      { part: 'U1', x: 20, y: 0 }, { part: 'D1', x: -20, y: 0 }, { part: 'BT1', x: -55, y: 22 }, { part: 'BT2', x: -55, y: -22 }], track: { preset: 'oval' }, obstacles: [] },
+    code: `// Плавная езда: ESP32 + L298N + 5×TCRT5000 (аналоговые A0) + ПД-регулятор
+// Почему простая машинка виляет: цифровые датчики дают только «да/нет», и моторы
+// переключаются рывками (релейное управление). Здесь датчики аналоговые: мы считаем,
+// НАСКОЛЬКО линия сместилась, и поворачиваем ровно настолько, насколько нужно.
+// Kp, Kd и базовую скорость можно крутить ползунками на вкладке «Трасса» прямо на ходу.
+#define IN1 25    // левый мотор
+#define IN2 26
+#define IN3 27    // правый мотор
+#define IN4 14
+#define N 5
+#define AWHITE 400   // analogRead над белым (≈0,33 В)
+#define ABLACK 2700  // analogRead над чёрной лентой (≈2,2 В)
+int PIN[5] = {32, 33, 34, 35, 36};    // S1 (крайний левый) … S5 (крайний правый), шаг 12 мм
+float WT[5] = {2, 1, 0, -1, -2};      // вес датчика: + линия слева, − справа
+float lastE = 0;
+unsigned long lastT = 0;
+
+void motor(int a, int b, float sp) {  // sp: -255..255, знак = направление
+  sp = constrain(sp, -255, 255);
+  if (sp >= 0) { analogWrite(a, sp); analogWrite(b, 0); }
+  else { analogWrite(a, 0); analogWrite(b, -sp); }
+}
+
+void setup() {
+  Serial.begin(115200);
+  pinMode(IN1, OUTPUT); pinMode(IN2, OUTPUT); pinMode(IN3, OUTPUT); pinMode(IN4, OUTPUT);
+  Serial.println("ПД-регулятор: старт");
+}
+
+void loop() {
+  // 1) где линия: взвешенное среднее «черноты» датчиков (0 — по центру, ±2 — под крайним)
+  float sum = 0, ws = 0;
+  for (int i = 0; i < N; i++) {
+    float b = constrain((analogRead(PIN[i]) - AWHITE) / (float)(ABLACK - AWHITE), 0, 1);
+    sum += b; ws += b * WT[i];
+  }
+  float e;
+  if (sum < 0.3) e = lastE > 0 ? 3 : -3;  // линия потеряна — крутим туда, где видели её последний раз
+  else e = ws / sum;
+  // 2) ПД: P — поворот пропорционально ошибке, D — гасит раскачку (смотрит, как быстро ошибка меняется)
+  float kp = param("kp", 25);     // ползунок Kp
+  float kd = param("kd", 150);     // ползунок Kd, мс
+  float base = param("base", 180); // ползунок «База» — скорость по прямой
+  unsigned long t = millis();
+  float dt = (t - lastT) / 1000.0;
+  if (dt <= 0 || dt > 0.2) dt = 0.01;
+  float de = (e - lastE) / dt;
+  lastE = e; lastT = t;
+  float u = kp * (e + kd / 1000.0 * de);
+  // 3) в крутом повороте (линия под крайним датчиком) сбрасываем скорость, на прямой — полный ход
+  float v = base * max(0.2, 1 - 0.4 * abs(e));
+  // 4) ШИМ моторов = база ± поправка (линия слева, e > 0 → левое колесо медленнее)
+  motor(IN1, IN2, v - u);
+  motor(IN3, IN4, v + u);
+  delay(5);
+}` };
+  ex['Пример: Плавная езда (ПИД)'] = S.pid;
+  ex['Пример: Робот-машинка на трассе (простой)'] = S.car;
   ex['Пример: Повышающий преобразователь 3,7 → 12 В'] = { kind: 'analog', parts: [{ id: 'BT1', type: 'liion', x: -200, y: 0, rot: 0, props: { soc: 80 } }, { id: 'U1', type: 'boost', x: 0, y: 0, rot: 0, props: { Vout: 12 } },
     { id: 'R1', type: 'resistor', x: 200, y: 0, rot: 1, props: { R: 120, Pmax: 2 } }],
     wires: [W('w1', 'BT1', 'p', 'U1', 'IN+'), W('w2', 'BT1', 'n', 'U1', 'IN-'), W('w3', 'U1', 'OUT+', 'R1', 'a'), W('w4', 'U1', 'OUT-', 'R1', 'b')], code: '' };

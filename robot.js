@@ -58,7 +58,7 @@
       rangers: dists.map(m => ({ x: m.x / 1000, y: m.y / 1000, dir: m.dir || 0, max: rangeOf(m) })) });
     const hit = hitter(R.obstacles);
     const grid = raster(R.track), sample = sampler(grid);
-    const run = { car, grid, sample, lines, dists, L, R: Rw, track, t: 0, dist: 0, offs: 0, off: false, trail: [], lap: null, laps: [], wasFar: false, rpmL: 0, rpmR: 0, dvals: {},
+    const run = { car, grid, sample, lines, dists, L, R: Rw, track, t: 0, dist: 0, offs: 0, off: false, trail: [], lap: null, laps: [], wasFar: false, rpmL: 0, rpmR: 0, dvals: {}, hd: [],
       step(dt) { const rl = L && L.p._st ? L.p._st.rpm || 0 : 0, rr = Rw && Rw.p._st ? Rw.p._st.rpm || 0 : 0; run.rpmL = rl; run.rpmR = rr;
         const n = Math.max(1, Math.ceil(dt / 0.01)), h = dt / n, x0 = car.x, y0 = car.y;
         for (let i = 0; i < n; i++) { car.step(rl, rr, h, sample, hit);
@@ -66,6 +66,7 @@
           const m = 0.06; car.x = Math.max(m, Math.min(FIELD.w / 1000 - m, car.x)); car.y = Math.max(m, Math.min(FIELD.h / 1000 - m, car.y)); }
         car.step(rl, rr, 0, sample, hit); // dt=0: no motion, just re-read the sensors at the final (wall-clamped) pose
         run.t += dt; run.dist += Math.hypot(car.x - x0, car.y - y0) * 1000;
+        run.hd.push([run.t, car.th]); if (run.hd.length > 20000) run.hd.splice(0, 5000); // v11: heading log for jitter()
         run.sense();
         const raw = lines.length ? car.vals.some(v => v.refl < 0.5) || sample(car.x, car.y) < 0.5 : sample(car.x, car.y) < 0.5;
         // a short wiggle between the sensors is normal line following; "off the line" = no black under any sensor for > 0.25 s
@@ -86,7 +87,7 @@
           if (m.p.type === 'vl53l0x') m.p.props.mm = Math.max(30, Math.min(2000, Math.round(d))); else m.p.props.dist = Math.max(2, Math.min(400, Math.round(d / 10))); }); },
       // «На старт» / drag on pause: Devices.car.reset() (with a pose it also becomes the new start)
       reset(pose) { if (pose) { car.reset({ x: pose.x / 1000, y: pose.y / 1000, th: pose.th }); st.x = pose.x; st.y = pose.y; st.th = pose.th; } else car.reset();
-        Object.assign(run, { t: 0, dist: 0, offs: 0, off: false, lost: 0, trail: [], lap: null, laps: [], wasFar: false, lapStart: 0, lapOffs: 0, _shown: false, _nl: 0 });
+        Object.assign(run, { t: 0, dist: 0, offs: 0, off: false, lost: 0, trail: [], hd: [], lap: null, laps: [], wasFar: false, lapStart: 0, lapOffs: 0, _shown: false, _nl: 0 });
         car.step(0, 0, 0, sample, hit); run.sense(); return run; } };
     car.step(0, 0, 0, sample, hit); run.sense();
     return run; }
@@ -100,6 +101,16 @@
           let a = (lo - p) / d, b = (hi - p) / d; if (a > b) [a, b] = [b, a]; t0 = Math.max(t0, a); t1 = Math.min(t1, b); if (t0 > t1) { ok = false; break; } }
         if (ok && t0 < best) best = t0; }
       return best; }; }
-  const api = { FIELD, CELL, GW, GH, PRESETS, preset, raster, sampler, raycast, hitter, roleOf, defaultMounts, create, chaikin };
+  /* v11: heading jitter = RMS of (turn rate − its 0.5 s moving average), rad/s. Smooth driving ≈ 0; bang-bang wiggle is large.
+     hd: [[t, th], …] (th unwrapped here); from: skip the first seconds (start-up) */
+  function jitter(hd, from = 0, win = 0.5) { const s = hd.filter(q => q[0] >= from); if (s.length < 3) return 0; const w = [];
+    for (let i = 1; i < s.length; i++) { const dt = s[i][0] - s[i - 1][0]; if (dt <= 0) continue; let d = s[i][1] - s[i - 1][1]; d = ((d + Math.PI) % (2 * Math.PI) + 2 * Math.PI) % (2 * Math.PI) - Math.PI; w.push([s[i][0], d / dt]); }
+    let sum = 0, n = 0, a = 0, b = 0, acc = 0;
+    for (let i = 0; i < w.length; i++) { const t = w[i][0];
+      while (b < w.length && w[b][0] <= t + win / 2) acc += w[b++][1];
+      while (w[a][0] < t - win / 2) acc -= w[a++][1];
+      const m = acc / (b - a), e = w[i][1] - m; sum += e * e; n++; }
+    return n ? Math.sqrt(sum / n) : 0; }
+  const api = { jitter, FIELD, CELL, GW, GH, PRESETS, preset, raster, sampler, raycast, hitter, roleOf, defaultMounts, create, chaikin };
   if (typeof module !== 'undefined' && module.exports) module.exports = api; else root.Robot = api;
 })(typeof window !== 'undefined' ? window : globalThis);
