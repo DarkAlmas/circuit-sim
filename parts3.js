@@ -100,6 +100,7 @@
     pins: [pin('p', -40, 0, '+ (красный провод)', '+'), pin('n', 40, 0, '− (чёрный провод)', '−')], box: [-44, -36, 88, 68],
     draw: p => { const st = p._st || {}, s = st.soc != null ? st.soc : +p.props.soc / 100, c = s > 0.5 ? '#2c2' : s > 0.2 ? '#fb2' : '#e33';
       return `${L.lead}<rect x="-22" y="-26" width="44" height="52" rx="4" fill="#2a64c8" stroke="#123c80"/><rect x="-6" y="-30" width="12" height="4" fill="#888"/><text x="0" y="-12" class="tiny lightt">103450</text>
+      <text x="-14" y="-18" class="lbl">+</text><text x="14" y="-18" class="lbl">−</text>
       <rect x="-14" y="-4" width="28" height="10" fill="#0b1a33" stroke="#9ab"/><rect x="-13" y="-3" width="${(26 * s).toFixed(1)}" height="8" fill="${c}"/><text x="0" y="18" class="tiny lightt">${fN(st.V || D.ocv(s), 2)} В · ${Math.round(s * 100)}%</text>`; },
     stamp(p, ctx) { const s0 = +p.props.soc / 100; if (!p._st || p._st.set !== s0) p._st = { soc: s0, set: s0 }; ctx.dev(D.liion(ctx, ctx.n(p, 'p'), ctx.n(p, 'n'), p._st, 2.0)); },
     measure(p, sol, ctx) { const st = p._st || {}, I = st.I || 0, U = vd(p, ctx, 'p', 'n');
@@ -168,4 +169,23 @@
     supplies: { '5V': 5, '3V3': 3.3 }, gpio: c3g, lab: id => /^G\d/.test(id) ? id.slice(1) : id, pcb: '#151515', chipName: 'ESP32-C3', sub: 'RISC-V · 3,3 В', ledName: 'LED8',
     hint: id => id === 'GND' ? 'GND (земля)' : id === '5V' ? '5V (USB / вход 5 В)' : id === '3V3' ? '3V3 (выход 3,3 В)' : 'GPIO' + c3g(id) + (c3g(id) <= 4 ? ' (АЦП, A' + c3g(id) + ')' : '') + (c3g(id) === 8 ? ' — синий светодиод (горит при LOW)' : '') + (c3g(id) === 9 ? ' — кнопка BOOT' : '') + (c3g(id) >= 20 ? c3g(id) === 20 ? ' (RX)' : ' (TX)' : '') });
   P.esp32c3.ledInv = true;
+  /* Over-voltage / pin-current burn lives on the board model (same idea as NRF24 > 3.6 V). 5V and VIN are power inputs and do not burn. */
+  const c3stamp = P.esp32c3.stamp, c3max = 0.04;
+  P.esp32c3.stamp = function (p, ctx) { if (p.burned) { p._els = {}; return; } return c3stamp.call(this, p, ctx); };
+  P.esp32c3.check = function (p, m, ctx) {
+    if (p.burned) return { level: 'burn', msg: p._burnMsg || 'Плата сгорела: 0 В на GPIO' };
+    const vg = ctx.v(p, 'GND');
+    for (const q of P.esp32c3.pins) {
+      if (q.id === '5V' || q.id === 'VIN' || /^GND/.test(q.id)) continue;
+      const gpio = c3g(q.id), power = q.id === '3V3';
+      if (gpio == null && !power) continue;
+      const u = ctx.v(p, q.id) - vg, i = Math.abs((m.pinI && m.pinI[q.id]) || 0);
+      const overV = u > 3.6, overI = gpio != null && i > c3max;
+      if (!overV && !overI) continue;
+      p.burned = true;
+      p._burnMsg = power ? `Плата сгорела: ${fN(u, 1)} В на GPIO (${q.id})` : `Плата сгорела: ${fN(u, 1)} В на GPIO${gpio}`;
+      if (ctx.dirty) ctx.dirty();
+      return { level: 'burn', msg: p._burnMsg };
+    }
+  };
 })();

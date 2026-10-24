@@ -127,7 +127,14 @@ const start = function (code, board, mods) {
   const delay = ms => { hb(); if (D.dirty.size) D.flush(); return new Promise(r => _setTimeout(r, Math.max(0, +ms || 0))); };
   const servo = { attach(p) { this.pin = p; }, write(a) { a = Math.max(0, Math.min(180, +a || 0)); this.a = a; post({ t: 'mod', k: 'servo', a }); }, read() { return this.a ?? 90; }, detach() {} };
   const dht = { begin() {}, readTemperature: () => +(sensors.temp ?? NaN), readHumidity: () => +(sensors.hum ?? NaN) };
-  const sonar = { distanceCm: () => +(sensors.dist ?? 0), ping_cm: () => Math.round(+(sensors.dist ?? 0)) };
+  let sonarErr = '';
+  const sonar = {
+    distanceCm() {
+      if (sensors.sonarWhy) { if (sonarErr !== sensors.sonarWhy) { sonarErr = sensors.sonarWhy; post({ t: 'err', s: String(sensors.sonarWhy).slice(0, 300) }); } return NaN; }
+      return +(sensors.dist ?? 0);
+    },
+    ping_cm() { return (sensors.sonarWhy || sensors.dist == null) ? 0 : Math.round(+sensors.dist); },
+  };
   /* v7 modules: VL53L0X (Pololu + Adafruit), MPU-6050 (jrowberg/ElectronicCats + Adafruit), NRF24L01 (RF24) */
   const mmNow = () => sensors.mm == null ? null : Math.round(+sensors.mm);
   const vl53 = { timeout: false, init: () => sensors.mm != null, begin: () => sensors.mm != null, setTimeout() {}, startContinuous() {}, stopContinuous() {}, setMeasurementTimingBudget() {}, setAddress() {},

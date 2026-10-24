@@ -641,4 +641,20 @@ void loop() {
   ex['Пример: Повышающий преобразователь 3,7 → 12 В'] = { kind: 'analog', parts: [{ id: 'BT1', type: 'liion', x: -200, y: 0, rot: 0, props: { soc: 80 } }, { id: 'U1', type: 'boost', x: 0, y: 0, rot: 0, props: { Vout: 12 } },
     { id: 'R1', type: 'resistor', x: 200, y: 0, rot: 1, props: { R: 120, Pmax: 2 } }],
     wires: [W('w1', 'BT1', 'p', 'U1', 'IN+'), W('w2', 'BT1', 'n', 'U1', 'IN-'), W('w3', 'U1', 'OUT+', 'R1', 'a'), W('w4', 'U1', 'OUT-', 'R1', 'b')], code: '' };
+  ex['Пример: Uno и HC-SR04'] = { kind: 'uno', name: 'Uno и HC-SR04',
+    parts: [{ id: 'U1', type: 'uno', x: 0, y: 0, rot: 0 }, { id: 'U2', type: 'hcsr04', x: -240, y: -20, rot: 0, props: { dist: 87 } }],
+    wires: [W('w1', 'U1', '5V', 'U2', 'VCC'), W('w2', 'U1', 'GND', 'U2', 'GND'), W('w3', 'U1', 'D7', 'U2', 'TRIG'), W('w4', 'U1', 'D6', 'U2', 'ECHO')],
+    code: `// HC-SR04: Trig = D7, Echo = D6, Vcc = 5V, Gnd = GND. Расстояние печатает sonar.distanceCm().
+#include <NewPing.h>
+NewPing sonar(7, 6, 400);
+
+void setup() {
+  Serial.begin(9600);
+}
+
+void loop() {
+  float cm = sonar.distanceCm();
+  if (cm == cm && cm >= 2) Serial.println("расстояние " + String(cm) + " см");
+  delay(50);
+}` };
 })();

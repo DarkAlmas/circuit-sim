@@ -11,6 +11,14 @@ main{flex:1;display:flex;min-height:0}
 h3{margin:6px 0;font-size:13px;color:#8a94a8;text-transform:uppercase}.muted,.hint{color:#6c768a;font-size:12px}
 .grp{margin-top:10px;font-size:12px;color:#8a94a8;text-transform:uppercase}
 .item{padding:6px 8px;margin:3px 0;background:#1f2636;border:1px solid #2a3242;border-radius:6px;cursor:grab;user-select:none}.item:hover{border-color:#4a7bd0}
+#palette .item{display:flex;align-items:center;gap:6px}
+#palette svg.thumb{width:56px;height:56px;flex:0 0 56px;background:#0e121a;border-radius:8px;border:1px solid #2a3242}
+#palette .nm{font-size:12px;line-height:1.2;min-width:0}
+.wcolors{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0}
+.wcolors button{width:44px;min-height:44px;height:44px;border-radius:8px;border:2px solid #39435a;padding:0}
+.wcolors button.on{outline:2px solid #fff;outline-offset:1px}
+.wire.ink{filter:drop-shadow(0 0 1px #9aa3b5)}
+#bends .bendrow{display:flex;justify-content:space-between;align-items:center;gap:6px;margin:4px 0}
 #center{flex:1;position:relative;min-width:0}#svg{width:100%;height:100%;display:block;touch-action:none;background:#0f131b}
 .lead{stroke:#b8c0cc;stroke-width:2}.sym{stroke:#e6e6e6;stroke-width:2;fill:none}.body{fill:#2a3242;stroke:#6c768a;stroke-width:1.5}
 .res{fill:#d9b98a;stroke:#7a5a30}.pcb{fill:#1b2b48;stroke:#4a6a9a;stroke-width:2}
@@ -153,8 +161,8 @@ body.pm #left{height:var(--h-left,60vh)}body.pm #right{height:var(--h-right,40vh
 body.pm #search{min-height:44px;font-size:16px;width:100%;box-sizing:border-box}
 body.pm #palette{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px}
 body.pm #palette .grp,body.pm #palette .muted{grid-column:1/-1;font-size:14px}
-body.pm #palette .item{flex-direction:column;justify-content:center;gap:2px;min-height:72px;margin:0;padding:4px 2px;text-align:center;font-size:12px;line-height:1.15;overflow:hidden;word-break:break-word}
-body.pm #palette .item .ico{font-size:20px}
+body.pm #palette .item{flex-direction:column;justify-content:flex-start;gap:2px;min-height:96px;margin:0;padding:4px 2px;text-align:center;font-size:12px;line-height:1.15;overflow:hidden;word-break:break-word}
+body.pm #palette svg.thumb{width:56px;height:56px}
 body.pm #left .hint{display:none}
 body.pm #props .cards{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px}
 body.pm #props .card{min-width:0}
