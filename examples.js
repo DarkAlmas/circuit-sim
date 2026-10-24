@@ -226,6 +226,55 @@ void loop() {
   digitalWrite(8, (l || r) ? LOW : HIGH);
   delay(20);
 }` };
+  /* v9: robot car — ESP32 + L298N + 2×TCRT5000 + 2 TT wheels on a chassis, drives on the «Трасса» tab */
+  S.car = { kind: 'car', name: 'Робот-машинка (ESP32 + L298N)', parts: [{ id: 'U1', type: 'esp32', x: 0, y: 0, rot: 0 },
+    { id: 'S1', type: 'tcrt5000', x: -320, y: -60, rot: 0, props: { refl: 0.9, thr: 0.5 } }, { id: 'S2', type: 'tcrt5000', x: -320, y: 120, rot: 0, props: { refl: 0.9, thr: 0.5 } },
+    { id: 'D1', type: 'l298n', x: 330, y: -20, rot: 0 }, { id: 'M1', type: 'ttmotor', x: 540, y: -110, rot: 0 }, { id: 'M2', type: 'ttmotor', x: 540, y: 70, rot: 0 },
+    { id: 'BT1', type: 'liion', x: 260, y: 200, rot: 0, props: { soc: 95 } }, { id: 'BT2', type: 'liion', x: 400, y: 200, rot: 0, props: { soc: 95 } }],
+    wires: [W('w1', 'S1', 'VCC', 'U1', '3V3'), W('w2', 'S1', 'GND', 'U1', 'GND'), W('w3', 'S1', 'D0', 'U1', '32'),
+      W('w4', 'S2', 'VCC', 'U1', '3V3'), W('w5', 'S2', 'GND', 'U1', 'GND'), W('w6', 'S2', 'D0', 'U1', '33'),
+      W('w7', 'U1', '25', 'D1', 'IN1'), W('w8', 'U1', '26', 'D1', 'IN2'), W('w9', 'U1', '27', 'D1', 'IN3'), W('w10', 'U1', '14', 'D1', 'IN4'),
+      W('w11', 'D1', 'OUT1', 'M1', 'a'), W('w12', 'D1', 'OUT2', 'M1', 'b'), W('w13', 'D1', 'OUT3', 'M2', 'a'), W('w14', 'D1', 'OUT4', 'M2', 'b'),
+      W('w15', 'BT1', 'p', 'D1', 'VS'), W('w16', 'BT1', 'n', 'BT2', 'p'), W('w17', 'BT2', 'n', 'D1', 'GND'), W('w18', 'D1', 'GND', 'U1', 'GND2')],
+    robot: { body: 'rect', mat: 'acrylic', caster: true, speed: 1, mounts: [{ part: 'M1', x: 0, y: 72 }, { part: 'M2', x: 0, y: -72 }, { part: 'S1', x: 78, y: 8 }, { part: 'S2', x: 78, y: -8 },
+      { part: 'U1', x: 20, y: 0 }, { part: 'D1', x: -20, y: 0 }, { part: 'BT1', x: -55, y: 22 }, { part: 'BT2', x: -55, y: -22 }], track: { preset: 'oval' }, obstacles: [] },
+    code: `// Робот-машинка: ESP32 + L298N + 2×TCRT5000 + 2 мотора TT + 2×Li-ion 103450 (7,4 В)
+// Открой вкладку «Трасса» и нажми ▶. Датчик над чёрной линией: D0 = HIGH, над белым: D0 = LOW.
+#define SL 32     // левый датчик линии (D0)
+#define SR 33     // правый датчик линии (D0)
+#define IN1 25    // левый мотор
+#define IN2 26
+#define IN3 27    // правый мотор
+#define IN4 14
+#define SPEED 90  // скорость по прямой (0..255)
+#define TURN 150  // внешнее колесо в повороте
+#define SLOW 20   // внутреннее колесо в повороте (медленно вперёд)
+// Датчики стоят ближе друг к другу, чем ширина линии: на линии оба видят чёрное.
+int last = 0;     // куда ушла линия в последний раз: -1 налево, 1 направо
+
+void motor(int a, int b, int sp) {   // sp: -255..255, знак = направление
+  if (sp >= 0) { analogWrite(a, sp); analogWrite(b, 0); }
+  else { analogWrite(a, 0); analogWrite(b, -sp); }
+}
+
+void setup() {
+  Serial.begin(115200);
+  pinMode(SL, INPUT); pinMode(SR, INPUT);
+  pinMode(IN1, OUTPUT); pinMode(IN2, OUTPUT); pinMode(IN3, OUTPUT); pinMode(IN4, OUTPUT);
+  Serial.println("Робот по линии: старт");
+}
+
+void loop() {
+  int l = digitalRead(SL);
+  int r = digitalRead(SR);
+  if (l && !r) last = -1;               // правый съехал — линия слева
+  else if (!l && r) last = 1;           // левый съехал — линия справа
+  else if (l && r) last = 0;            // оба на линии (и на перекрёстке) — прямо
+  if (last < 0)      { motor(IN1, IN2, SLOW); motor(IN3, IN4, TURN); }   // налево
+  else if (last > 0) { motor(IN1, IN2, TURN); motor(IN3, IN4, SLOW); }   // направо
+  else               { motor(IN1, IN2, SPEED); motor(IN3, IN4, SPEED); }  // прямо
+  delay(5);
+}` };
   const nrfWires = (u, r, k) => [W(k + '1', r, 'GND', u, 'GND'), W(k + '2', r, 'VCC', u, '3V3'), W(k + '3', r, 'CE', u, 'G2'), W(k + '4', r, 'CSN', u, 'G7'),
     W(k + '5', r, 'SCK', u, 'G4'), W(k + '6', r, 'MOSI', u, 'G6'), W(k + '7', r, 'MISO', u, 'G5')];
   ex['Пример: NRF24 — передатчик и приёмник (2 × ESP32-C3)'] = { kind: 'esp32c3', parts: [{ id: 'U1', type: 'esp32c3', x: 0, y: 0, rot: 0 }, { id: 'RF1', type: 'nrf24', x: 220, y: 40, rot: 0 },
@@ -276,6 +325,7 @@ void loop() {
   delay(10);
 }` } };
   ex['Пример: Робот по линии (ESP32-C3)'] = S.line;
+  ex['Пример: Робот-машинка на трассе (ESP32 + L298N)'] = S.car;
   ex['Пример: Повышающий преобразователь 3,7 → 12 В'] = { kind: 'analog', parts: [{ id: 'BT1', type: 'liion', x: -200, y: 0, rot: 0, props: { soc: 80 } }, { id: 'U1', type: 'boost', x: 0, y: 0, rot: 0, props: { Vout: 12 } },
     { id: 'R1', type: 'resistor', x: 200, y: 0, rot: 1, props: { R: 120, Pmax: 2 } }],
     wires: [W('w1', 'BT1', 'p', 'U1', 'IN+'), W('w2', 'BT1', 'n', 'U1', 'IN-'), W('w3', 'U1', 'OUT+', 'R1', 'a'), W('w4', 'U1', 'OUT-', 'R1', 'b')], code: '' };

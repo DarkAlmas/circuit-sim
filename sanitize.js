@@ -5,7 +5,7 @@
     C: [1e-12, 1], L: [1e-9, 10], lux: [0, 100000], temp: [-40, 125], hum: [0, 100], dist: [2, 400], K: [0.001, 100], Vth: [0.1, 10], lambda: [0, 1],
     /* v7 */ refl: [0, 1], thr: [0, 1], mm: [30, 2000], pitch: [-90, 90], roll: [-180, 180], acc: [-2, 2], gz: [-250, 250], soc: [0, 100], Vout: [5, 32] };
   const BOOL = new Set(['p']);
-  const KINDS = ['esp32', 'esp8266', 'uno', 'attiny', 'pico', 'opi', 'analog', 'empty', 'esp32c3', 'line'];
+  const KINDS = ['esp32', 'esp8266', 'uno', 'attiny', 'pico', 'opi', 'analog', 'empty', 'esp32c3', 'line', 'car'];
   const LIMITS = { parts: 500, wires: 2000, pts: 50, code: 100000, importBytes: 2 * 1024 * 1024 };
   const num = (v, lo, hi, d) => { const n = Number(v); return Number.isFinite(n) ? Math.min(hi, Math.max(lo, n)) : d; };
   function sanitizeProject(raw) {
@@ -42,7 +42,28 @@
       if (Object.keys(codes).length) out.codes = codes; }
     if (typeof raw.name === 'string') out.name = raw.name.slice(0, 64);
     if (typeof raw.kind === 'string' && KINDS.includes(raw.kind)) out.kind = raw.kind;
+    // v9: robot car (chassis mounts, track strokes, boxes) — every field validated here first
+    if (raw.robot && typeof raw.robot === 'object' && !Array.isArray(raw.robot)) out.robot = sanitizeRobot(raw.robot, byId);
     return out;
+  }
+  const RL = { mounts: 40, strokes: 100, pts: 4000, boxes: 30 };
+  const pt = (q, w, h) => Array.isArray(q) && q.length >= 2 && Number.isFinite(+q[0]) && Number.isFinite(+q[1]) ? [Math.round(num(q[0], 0, w, 0)), Math.round(num(q[1], 0, h, 0))] : null;
+  function sanitizeRobot(r, byId) {
+    const o = { body: r.body === 'round' ? 'round' : 'rect', mat: r.mat === 'black' ? 'black' : 'acrylic', mounts: [], caster: r.caster !== false, track: {}, obstacles: [], speed: num(r.speed, 0.5, 4, 1) };
+    const seen = new Set();
+    for (const m of Array.isArray(r.mounts) ? r.mounts.slice(0, RL.mounts) : []) {
+      if (!m || typeof m.part !== 'string' || !byId.has(m.part) || seen.has(m.part)) continue; seen.add(m.part);
+      o.mounts.push({ part: m.part, x: Math.round(num(m.x, -150, 150, 0)), y: Math.round(num(m.y, -150, 150, 0)) }); }
+    const t = r.track && typeof r.track === 'object' ? r.track : {}, PR = ['oval', 'eight', 'zigzag', 'cross', ''];
+    o.track.preset = typeof t.preset === 'string' && PR.includes(t.preset) ? t.preset : '';
+    o.track.w = Math.round(num(t.w, 10, 40, 20)); o.track.strokes = []; let total = 0;
+    for (const s of Array.isArray(t.strokes) ? t.strokes.slice(0, RL.strokes) : []) { if (!Array.isArray(s)) continue;
+      const q = s.slice(0, RL.pts - total).map(v => pt(v, 2000, 1400)).filter(Boolean); if (!q.length) continue; total += q.length; o.track.strokes.push(q); if (total >= RL.pts) break; }
+    const st = t.start && typeof t.start === 'object' ? t.start : {};
+    o.track.start = { x: Math.round(num(st.x, 0, 2000, 1000)), y: Math.round(num(st.y, 0, 1400, 250)), th: num(st.th, -7, 7, 0) };
+    for (const b of Array.isArray(r.obstacles) ? r.obstacles.slice(0, RL.boxes) : []) { if (!b || typeof b !== 'object') continue;
+      o.obstacles.push({ x: Math.round(num(b.x, 0, 2000, 0)), y: Math.round(num(b.y, 0, 1400, 0)), w: Math.round(num(b.w, 20, 400, 100)), h: Math.round(num(b.h, 20, 400, 100)) }); }
+    return o;
   }
   /* Parse untrusted JSON text (file import) with a size cap before sanitizing. */
   function parseProjectText(text) {
@@ -53,5 +74,5 @@
     return sanitizeProject(d);
   }
   const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-  window.sanitizeProject = sanitizeProject; window.parseProjectText = parseProjectText; window.SANITIZE_LIMITS = LIMITS; window.PROJECT_KINDS = KINDS; window.esc = esc; window.ID_RE = ID;
+  window.sanitizeProject = sanitizeProject; window.parseProjectText = parseProjectText; window.SANITIZE_LIMITS = LIMITS; window.ROBOT_LIMITS = RL; window.PROJECT_KINDS = KINDS; window.esc = esc; window.ID_RE = ID;
 })();

@@ -13,7 +13,7 @@
   function autosave() { const j = JSON.stringify(strip(proj)); if (lastJ !== null && j !== lastJ) { hist.push(lastJ); if (hist.length > 100) hist.shift(); } lastJ = j; localStorage.setItem(AUTO, j); }
   function undo() { if (!hist.length) return; const j = hist.pop(); lastJ = j; proj = sanitizeProject(JSON.parse(j)); proj.code = proj.code || $('#code').value; sel = null; prevV = null; localStorage.setItem(AUTO, j); render(); props(); calc(); }
   const locked = () => running && !shorts.length;
-  function strip(p) { return { parts: p.parts.map(({ id, type, x, y, rot, props }) => ({ id, type, x, y, rot, props })), wires: p.wires.map(({ id, a, b, pts }) => ({ id, a, b, pts })), code: p.code, codes: p.codes, name: p.name }; }
+  function strip(p) { return { parts: p.parts.map(({ id, type, x, y, rot, props }) => ({ id, type, x, y, rot, props })), wires: p.wires.map(({ id, a, b, pts }) => ({ id, a, b, pts })), code: p.code, codes: p.codes, name: p.name, kind: p.kind, robot: p.robot }; }
   const uid = pre => { let i = 1; const ids = new Set([...proj.parts, ...proj.wires].map(o => o.id)); while (ids.has(pre + i)) i++; return pre + i; };
   const part = id => proj.parts.find(p => p.id === id);
   const rotPt = (x, y, r) => { for (let i = 0; i < (r || 0) % 4; i++) [x, y] = [-y, x]; return [x, y]; };
@@ -336,6 +336,8 @@
   /* ---------- simulation ---------- */
   function tick() {
     const mcus = proj.parts.filter(p => P[p.type].mcu), gpioBy = {}; for (const id in extra) gpioBy[id] = extra[id].gpio; if (mcus[0]) gpioBy[mcus[0].id] = gpio;
+    // v9: move the robot car first (motor rpm from the previous frame), so this frame's stamp already sees the new sensor readings
+    if (window.RobotUI) RobotUI.onTick(proj, Math.min(0.05, Math.max(1e-4, lastT ? (performance.now() - lastT) / 1000 : 1 / 60)));
     const b = Netlist.build(proj, gpio, { gpioBy, vio: mcus[0] ? P[mcus[0].type].vio : 3.3 });
     // transient step: real time between frames (clamped), state re-keyed by owner part + ordinal so it survives netlist changes
     const now = performance.now(), dt = Math.min(0.05, Math.max(1e-4, lastT ? (now - lastT) / 1000 : 1 / 60)); lastT = now;
@@ -481,7 +483,7 @@
     running = false; shorts = []; shortSet = new Set(); shortSig = ''; $('#shortBox').hidden = true; $('#simText').hidden = false; cancelAnimationFrame(raf); clearInterval(wd); if (worker) worker.terminate(); worker = null; gpio = {}; sim = null; for (const k in extra) try { extra[k].w.terminate(); } catch (e) {} extra = {};
     for (const k in meas) delete meas[k]; for (const k in checks) delete checks[k]; proj.parts.forEach(p => { delete p.burned; delete p._mod; }); links = {}; imgs = {};
     $('#run').disabled = false; $('#stop').disabled = true; $('#status').textContent = 'Остановлено'; $('#alert').hidden = true;
-    render(); live(); calc();
+    render(); live(); calc(); if (window.RobotUI) RobotUI.onStop();
   }
   $('#run').onclick = start; $('#stop').onclick = stop;
   $('#codeTab').onclick = () => { if (desktop()) { $('#bottom').classList.remove('min'); $('#code').focus(); return; } const h = $('#codePane').hidden; $('#codePane').hidden = !h; $('#codeTab').classList.toggle('on', h); if (h) $('#code').focus(); };
@@ -512,12 +514,12 @@
     const g1 = document.createElement('optgroup'); g1.label = 'Примеры'; Object.keys(window.EXAMPLES).forEach(n => g1.appendChild(opt('ex:' + n, n))); sel_.appendChild(g1);
     const g2 = document.createElement('optgroup'); g2.label = 'Сохранённые'; Object.keys(saved()).forEach(n => g2.appendChild(opt('my:' + n, n.slice(0, 64), n === selName))); sel_.appendChild(g2);
   }
-  function open(data) { stop(); codeTarget = null; codeForSig = ''; proj = sanitizeProject(data); proj.code = proj.code ?? DEFAULT_CODE; $('#code').value = proj.code; sel = null; fit(); changed(); }
+  function open(data) { stop(); codeTarget = null; codeForSig = ''; proj = sanitizeProject(data); proj.code = proj.code ?? DEFAULT_CODE; $('#code').value = proj.code; sel = null; fit(); changed(); if (window.RobotUI) RobotUI.onOpen(); }
   $('#projects').onchange = e => { const v = e.target.value; if (!v) return; open(v.startsWith('ex:') ? window.EXAMPLES[v.slice(3)] : (Object.prototype.hasOwnProperty.call(saved(), v.slice(3)) ? saved()[v.slice(3)] : {})); };
   $('#save').onclick = () => { let n = prompt('Название проекта:', proj.name || 'Мой проект'); if (!n) return; n = String(n).slice(0, 64); proj.name = n; proj.code = $('#code').value;
     const s = saved(); s[n] = { ...strip(proj), name: n }; localStorage.setItem(LS, JSON.stringify(s)); projList(n); $('#status').textContent = 'Сохранено: ' + n; };
   /* new-project chooser (cards built with createElement/textContent only) */
-  const NEWP = [['esp32', '📶', 'ESP32', 'Wi-Fi плата, 3,3 В, мигалка'], ['esp8266', '📡', 'ESP8266', 'NodeMCU, кнопка и светодиод'], ['uno', '🟦', 'Arduino Uno', '5 В, матрица 8×8 MAX7219'], ['esp32c3', '🔹', 'ESP32-C3 SuperMini', 'RISC-V, 3,3 В, LED на GPIO8'], ['line', '🤖', 'Робот по линии', 'ESP32-C3, 2×TCRT5000, DRV8833, 2 мотора TT, 103450'],
+  const NEWP = [['esp32', '📶', 'ESP32', 'Wi-Fi плата, 3,3 В, мигалка'], ['esp8266', '📡', 'ESP8266', 'NodeMCU, кнопка и светодиод'], ['uno', '🟦', 'Arduino Uno', '5 В, матрица 8×8 MAX7219'], ['esp32c3', '🔹', 'ESP32-C3 SuperMini', 'RISC-V, 3,3 В, LED на GPIO8'], ['line', '🤖', 'Робот по линии', 'ESP32-C3, 2×TCRT5000, DRV8833, 2 мотора TT, 103450'], ['car', '🏎', 'Робот-машинка', 'Шасси, колёса, датчики и трасса с чёрной линией'],
     ['attiny', '🐜', 'ATtiny85 на макетке', 'DIP-8 чип, батарейка, светодиод'], ['pico', '🍓', 'Raspberry Pi Pico', '3,3 В, лента WS2812'], ['opi', '🖥', 'Orange Pi (Python + HDMI)', 'Python, монитор 1920×1080'],
     ['analog', '🔋', 'Чистая электроника', 'Батарейка, резистор, светодиод'], ['empty', '⬜', 'Пустой', 'Чистый лист']];
   function newDialog() { const m = $('#newModal'), g = $('#newCards'); g.textContent = '';
@@ -552,5 +554,5 @@
   lastJ = JSON.stringify(strip(proj));
   layout(); palette(); projList(); $('#code').value = proj.code ?? DEFAULT_CODE; fit(); render(); props(); calc();
   window.addEventListener('resize', () => { if (!running) render(); });
-  window.__sim = { get proj() { return proj; }, get sel() { return sel; }, get wireMode() { return wireMode; }, get armed() { return armed; }, get meas() { return meas; }, start, stop, undo, get gpio() { return gpio; }, get shorts() { return shorts; }, get crashes() { return crashes; }, get simTime() { return simTime; }, get hasWorker() { return !!worker; }, get worker() { return worker; }, get hasSpare() { return !!spare; }, get rf() { return rf; }, get extra() { return Object.keys(extra); }, codeFor: id => setCodeTarget(id), get cam() { return cam; }, render: () => render(), select: id => { sel = { part: id }; props(); calc(); render(); } };
+  window.__sim = { get proj() { return proj; }, get running() { return running; }, changed() { changed(); }, select(id) { sel = id && part(id) ? { part: id } : null; render(); props(); }, get sel() { return sel; }, get wireMode() { return wireMode; }, get armed() { return armed; }, get meas() { return meas; }, start, stop, undo, get gpio() { return gpio; }, get shorts() { return shorts; }, get crashes() { return crashes; }, get simTime() { return simTime; }, get hasWorker() { return !!worker; }, get worker() { return worker; }, get hasSpare() { return !!spare; }, get rf() { return rf; }, get extra() { return Object.keys(extra); }, codeFor: id => setCodeTarget(id), get cam() { return cam; }, render: () => render(), select: id => { sel = { part: id }; props(); calc(); render(); } };
 })();
