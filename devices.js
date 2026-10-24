@@ -53,3 +53,28 @@
   const api = { MOTORS, motor, liion, ocv, boost, hbridge, HB, LOADS, load, tcrtCurrent, context };
   if (typeof module !== 'undefined' && module.exports) module.exports = api; else root.Devices = api;
 })(typeof window !== 'undefined' ? window : globalThis);
+
+// ---- Robot car (differential drive) ----
+(function(){
+  var api = (typeof module!=='undefined'&&module.exports)?module.exports:(window.Devices=window.Devices||{});
+  // opts: {track(m), wheelR(m), mass(kg), kind(motor), sensors:[{x,y}] (body coords, m)}
+  api.car = function(opts){
+    opts=opts||{};
+    var c={x:opts.x||0,y:opts.y||0,th:opts.th||0,v:0,w:0,
+      track:opts.track||0.13, R:opts.wheelR||0.033, m:opts.mass||0.4,
+      sensors:opts.sensors||[{x:0.08,y:-0.01},{x:0.08,y:0.01}], vals:[]};
+    c.J=c.m*c.track*c.track/6;
+    // rpmL/rpmR from motor states; sample(x,y)->reflectance 0..1
+    c.step=function(rpmL,rpmR,dt,sample){
+      var vl=rpmL*2*Math.PI/60*c.R, vr=rpmR*2*Math.PI/60*c.R;
+      var vT=(vl+vr)/2, wT=(vr-vl)/c.track, k=Math.min(1,dt/0.05); // inertia/slip lag
+      c.v+=(vT-c.v)*k; c.w+=(wT-c.w)*k;
+      c.th+=c.w*dt; c.x+=c.v*Math.cos(c.th)*dt; c.y+=c.v*Math.sin(c.th)*dt;
+      var s=Math.sin(c.th),co=Math.cos(c.th);
+      c.vals=c.sensors.map(function(p){var wx=c.x+p.x*co-p.y*s, wy=c.y+p.x*s+p.y*co;
+        return {x:wx,y:wy,refl:sample?sample(wx,wy):1};});
+      return c;
+    };
+    return c;
+  };
+})();

@@ -1,5 +1,5 @@
 /* Runs the user's sketch in isolation. Network APIs are removed before user code runs. */
-importScripts('transpile.js?v=7', 'memcap.js?v=7');
+importScripts('transpile.js?v=8', 'memcap.js?v=8');
 /* Whitelist sandbox: capture what we need, then strip every other global from self and its prototype chain,
  * so even (()=>{}).constructor('return this')() sees no network, storage, workers or navigator. */
 const transpile = Transpile.transpile, pyT = Transpile.py, memInstall = MemCap.install;

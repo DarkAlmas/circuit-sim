@@ -60,12 +60,12 @@ h4{margin:10px 0 4px;font-size:12px;color:#8a94a8;text-transform:uppercase}
 .card.orange .bar i{background:#ff9a2e}.card.red .bar i{background:#ff3b3b}.card.red .cv{color:#ff6b6b}.card.dead .cv{color:#888}
 .burnt{display:flex;justify-content:space-between;align-items:center;background:#3a1a1a;border:1px solid #a33;border-radius:8px;padding:6px 10px;margin-bottom:6px;color:#ff9a9a}
 .link{color:#6cb0ff;align-self:center;font-size:13px}
-@media (max-width:760px){main{flex-direction:column}#left{width:auto;max-height:110px;border-right:0}#right{width:auto;max-height:40vh;border-left:0}#center{min-height:50vh}}
+@media (max-width:899px){main{flex-direction:column}#left{width:auto;max-height:110px;border-right:0}#right{width:auto;max-height:40vh;border-left:0}#center{min-height:50vh}}
 /* v4: keep the project dropdown inside narrow screens */
 #projects{max-width:100%;min-width:0;box-sizing:border-box}
-@media (max-width:760px){#projects{width:100%;flex:1 1 100%}}
+@media (max-width:899px){#projects{width:100%;flex:1 1 100%}}
 /* v5: desktop layout, modals, displays */
-@media (min-width:761px){#left{width:260px}#right{width:320px}
+@media (min-width:900px){#left{width:260px}#right{width:320px}
   body.dock footer#bottom{display:flex;height:35vh;min-height:180px}body.dock footer.min{height:auto;min-height:0}
   body.dock #codeDock{flex:1 1 60%;min-width:0;position:relative;border-right:1px solid #2a3242}body.dock #codeDock #codePane{position:absolute;inset:0}
   body.dock footer.min #codeDock{display:none}
@@ -82,3 +82,26 @@ h4{margin:10px 0 4px;font-size:12px;color:#8a94a8;text-transform:uppercase}
 .pix{image-rendering:pixelated}.warnt{fill:#ffb020}
 input[type=range]{width:100%}
 .capv{fill:#7fe0a8;font-size:11px}
+
+/* v8: wires easy to tap, floating buttons, context menu, mobile sheets */
+.whit{fill:none;stroke:transparent;stroke-width:20px;vector-effect:non-scaling-stroke;pointer-events:stroke;cursor:pointer;stroke-linecap:round;stroke-linejoin:round}
+.wire.sel{stroke-width:4}.wend{fill:#fff;stroke:#4a9eff;stroke-width:2;vector-effect:non-scaling-stroke;cursor:grab}
+.fbtn{position:absolute;z-index:20;white-space:nowrap;box-shadow:0 2px 10px #0008;min-height:36px}
+button.danger,.fbtn.danger{background:#7a2020;border-color:#b33}
+#ctxmenu{position:absolute;z-index:30;display:flex;flex-direction:column;gap:2px;background:#1a2030;border:1px solid #39435a;border-radius:10px;padding:4px;box-shadow:0 4px 18px #000a;min-width:180px}
+#ctxmenu button{text-align:left;border:0;min-height:40px}
+#mhint{pointer-events:none;position:absolute;left:50%;transform:translateX(-50%);bottom:12px;z-index:25;background:#1a2030ee;border:1px solid #39435a;border-radius:8px;padding:8px 12px;font-size:13px;max-width:92%;text-align:center}
+#mbar{display:none}
+@media (max-width:899px){
+  body{height:100dvh}main{position:relative}#center{min-height:0;flex:1}
+  #left,#right{position:fixed;left:0;right:0;bottom:56px;max-height:60vh!important;z-index:40;display:none;border-top:1px solid #39435a;border-radius:14px 14px 0 0;box-shadow:0 -6px 24px #000a}
+  body[data-sheet=parts] #left,body[data-sheet=props] #right{display:block}
+  #codePane{position:fixed;left:0;right:0;bottom:56px;height:60vh;z-index:40;background:#161b27}
+  #mbar{display:flex;gap:4px;padding:6px;background:#1a2030;border-top:1px solid #2a3242;flex:0 0 auto}
+  #mbar button{flex:1;min-height:44px;font-size:13px;padding:4px}
+  header button,header .btn,header select{min-height:44px}.fbtn{min-height:44px}#ctxmenu button{min-height:44px}
+  .item{min-height:44px;display:flex;align-items:center}
+  .logo{display:none}header{gap:4px;padding:4px 6px}
+  footer#bottom{position:fixed;left:0;right:0;bottom:56px;height:28vh;z-index:41;display:none;background:#161b27;border-top:1px solid #39435a}
+  body[data-sheet=code] footer#bottom{display:block}body[data-sheet=code] #codePane{bottom:calc(56px + 28vh);height:38vh}
+}

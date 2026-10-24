@@ -61,9 +61,11 @@
     const blink = Math.floor(performance.now() / 500) % 2 === 0;
     wiresL.innerHTML = proj.wires.map(w => { const d = wirePath(w), c = wireColor(w, N), isSel = sel && sel.wire === w.id, sh = shortSet.has(w.id);
       const black = N.groundRoots.has(N.netOf(w.a.part, w.a.pin));
-      return (isSel ? `<path d="${d}" class="wsel"/>` : '') + `<path d="${d}" class="wire${black ? ' gndw' : ''}${sh ? ' short' + (blink ? ' on' : '') : ''}" data-wire="${esc(w.id)}" stroke="${black ? '#0b0d12' : c}"/>` +
+      return (isSel ? `<path d="${d}" class="wsel"/>` : '') + `<path d="${d}" class="wire${black ? ' gndw' : ''}${sh ? ' short' + (blink ? ' on' : '') : ''}${isSel ? ' sel' : ''}" data-wire="${esc(w.id)}" stroke="${black ? '#0b0d12' : c}"/>` +
         (running && !shorts.length && Math.abs(w.I || 0) > 1e-6 ? `<path d="${d}" class="flow" stroke-dashoffset="${-(flowOff[w.id] || 0)}"/>` : '') +
-        (isSel && !locked() ? (w.pts || []).map((q, i) => `<circle class="bend" data-wire="${esc(w.id)}" data-i="${i}" cx="${q[0]}" cy="${q[1]}" r="5"/>`).join('') : ''); }).join('');
+        `<path d="${d}" class="whit" data-wire="${esc(w.id)}"/>` +
+        (isSel && !locked() ? (w.pts || []).map((q, i) => `<circle class="bend" data-wire="${esc(w.id)}" data-i="${i}" cx="${q[0]}" cy="${q[1]}" r="5"/>`).join('') +
+          ['a', 'b'].map(k => { const q = pinPos(part(w[k].part), w[k].pin); return `<circle class="wend" data-wire="${esc(w.id)}" data-end="${k}" cx="${q[0]}" cy="${q[1]}" r="${(9 / cam.s).toFixed(2)}"/>`; }).join('') : ''); }).join('');
     partsL.innerHTML = [...proj.parts].sort((a, b) => !!P[b.type].strips - !!P[a.type].strips).map(p => { const d = P[p.type], [bx, by, bw, bh] = bbox(p.type), c = checks[p.id];
       const bi = d.builtin ?? 2, dk = d.display, link = links[p.id];
       const st = { I: meas[p.id]?.I, m: meas[p.id], burned: p.burned, running, led2: running && gpioOf(p.id)[bi]?.mode === 'OUTPUT' && (d.ledInv ? !(gpioOf(p.id)[bi].val > 0) : gpioOf(p.id)[bi].val > 0),
@@ -74,7 +76,7 @@
         <rect class="hit" x="${bx}" y="${by}" width="${bw}" height="${bh}" rx="6"/><g class="art">${d.draw(p, st)}</g>${smoke}
         ${d.pins.map(q => `<circle class="pin${d.strips ? ' hole' : ''}${armed && armed.part === p.id && armed.pin === q.id ? ' armed' : ''}" data-pin="${q.id}" cx="${q.x}" cy="${q.y}" r="${d.strips ? 3 : 4}"/>`).join('')}</g>`; }).join('');
     $('#simbar').hidden = !running; $('#simbar').classList.toggle('bad', !!shorts.length); $('#svg').classList.toggle('locked', locked());
-    syncCodeFor();
+    syncCodeFor(); placeFloat();
     $('#boardName').textContent = (proj.parts.find(p => P[p.type].mcu) && P[proj.parts.find(p => P[p.type].mcu).type].name) || 'нет платы';
     updateTip();
   }
@@ -101,7 +103,7 @@
   function props() {
     const el = $('#props');
     if (sel && sel.wire) { el.innerHTML = `<div class="phead"><b>Провод ${esc(sel.wire)}</b><button id="del" class="danger">Удалить</button></div><p class="muted">Двойной щелчок по проводу добавляет точку изгиба, по точке удаляет её. Точки можно перетаскивать.</p>`; $('#del').onclick = del; return; }
-    const p = sel && part(sel.part); if (!p) { el.innerHTML = '<p class="muted">Выбери деталь или провод</p>'; return; }
+    const p = sel && part(sel.part); if (!p) { el.innerHTML = '<p class="muted">Выбери деталь или провод. Провод: коснитесь линии (или правый клик / долгое нажатие — меню).</p>'; return; }
     const d = P[p.type], pr = p.props || {};
     let h = `<div class="phead">${icon(p)}<div class="pname"><b>${esc(p.id)}</b><span>${d.name}</span></div><button id="del" class="danger">Удалить</button></div>`;
     const keys = Object.keys(pr);
@@ -201,28 +203,41 @@
     cam.x = mx - (mx - cam.x) * s / cam.s; cam.y = my - (my - cam.y) * s / cam.s; cam.s = s; }
   svg.addEventListener('pointerdown', e => {
     { const t = performance.now(), L = lastDown; lastDown = { t, x: e.clientX, y: e.clientY }; if (L && t - L.t < 400 && Math.hypot(e.clientX - L.x, e.clientY - L.y) < 6 && pointers.size === 0) { lastDown = null; onDbl(e); return; } }
-    pointers.set(e.pointerId, { x: e.clientX, y: e.clientY }); try { svg.setPointerCapture(e.pointerId); } catch (_) {}
+    if (e.isPrimary) pointers.clear(); pointers.set(e.pointerId, { x: e.clientX, y: e.clientY }); try { svg.setPointerCapture(e.pointerId); } catch (_) {}
     if (pointers.size === 2) { if (drag && drag.press && P[drag.press.type].interactive === 'momentary') drag.press.on = false; pinchStart(); return; }
     if (pointers.size > 2) return;
-    const pinEl = e.target.closest('.pin'), partEl = e.target.closest('.part'), wireEl = e.target.closest('.wire'), bendEl = e.target.closest('.bend');
+    closeMenu(); const touch = e.pointerType === 'touch' || e.pointerType === 'pen';
+    let pinEl = e.target.closest('.pin'), partEl = e.target.closest('.part'); let wireEl = bestWire(e.clientX, e.clientY, e.target.closest('.whit, .wire')); const bendEl = e.target.closest('.bend'), endEl = e.target.closest('.wend') || document.elementsFromPoint(e.clientX, e.clientY).find(el => el.classList && el.classList.contains('wend'));
+    if (!pinEl && touch && !endEl && !bendEl) { const np = nearestPin(e.clientX, e.clientY, wireEl ? 7 : partEl ? 12 : 22); if (np) { pinEl = np.pinEl; partEl = np.partEl; } }
+    if (pinEl && touch && !wireMode && !armed && !wiresAt({ part: partEl.dataset.part, pin: pinEl.dataset.pin }).length) { const w = wireNear(e.clientX, e.clientY, 8); if (w) { wireEl = w; pinEl = null; partEl = null; } }
+    if (!pinEl && !wireEl && partEl && !e.target.closest('.knob, .btnp')) { const w = wireNear(e.clientX, e.clientY, touch ? 9 : 5); if (w) { wireEl = w; partEl = null; } }
+    if (!pinEl) startLong(e);
     const knobEl = e.target.closest('.knob'); if (knobEl && partEl) { const p = part(partEl.dataset.part); sel = { part: p.id }; props(); drag = { knob: p, x0: e.clientX, y0: e.clientY, pos0: p.props.pos }; return; }
+    if (endEl && !locked()) { const w = proj.wires.find(x => x.id === endEl.dataset.wire); if (w) { drag = { wend: w, end: endEl.dataset.end }; return; } }
     if (bendEl && !locked()) { const w = proj.wires.find(x => x.id === bendEl.dataset.wire); drag = { bend: w, i: +bendEl.dataset.i }; return; }
     if (pinEl && !locked() && !(running && P[part(partEl.dataset.part).type].interactive)) {
       const t = { part: partEl.dataset.part, pin: pinEl.dataset.pin };
-      if (!armed) armed = t;
-      else { if (armed.part !== t.part || armed.pin !== t.pin) { const w = { id: uid('w'), a: armed, b: t, pts: [] }; proj.wires.push(w); sel = { wire: w.id }; } armed = null; temp.setAttribute('d', ''); changed(); }
+      if (!armed) { const ws = wiresAt(t);
+        if (touch && !wireMode && ws.length) { const k = t.part + ':' + t.pin; pinCycle = pinCycle && pinCycle.k === k ? { k, i: (pinCycle.i + 1) % ws.length } : { k, i: 0 };
+          sel = { wire: ws[ws.length - 1 - pinCycle.i].id }; props(); calc(); render(); return; }
+        armed = { ...t, pts: [] }; }
+      else { if (armed.part !== t.part || armed.pin !== t.pin) { const ex = proj.wires.find(w => same(w.a, armed) && same(w.b, t) || same(w.a, t) && same(w.b, armed));
+          if (ex) sel = { wire: ex.id }; else { const w = { id: uid('w'), a: { part: armed.part, pin: armed.pin }, b: t, pts: armed.pts.slice() }; proj.wires.push(w); sel = { wire: w.id }; } }
+        armed = null; temp.setAttribute('d', ''); changed(); }
       render(); return;
     }
+    if (armed && touch && !partEl && !wireEl) { drag = { pan: true, x: e.clientX - cam.x, y: e.clientY - cam.y, armTap: [e.clientX, e.clientY] }; return; }
     if (armed) { armed = null; temp.setAttribute('d', ''); render(); }
     if (partEl) { const p = part(partEl.dataset.part), d = P[p.type];
       sel = { part: p.id }; props(); calc();
       if (running && d.interactive) { p.on = d.interactive === 'toggle' ? !p.on : true; drag = { press: p }; render(); return; }
       if (locked()) { drag = { pan: true, x: e.clientX - cam.x, y: e.clientY - cam.y }; render(); return; }
       const [wx, wy] = toWorld(e.clientX, e.clientY); drag = { part: p, dx: wx - p.x, dy: wy - p.y }; render(); return; }
-    if (wireEl) { sel = { wire: wireEl.dataset.wire }; props(); calc(); drag = { pan: true, x: e.clientX - cam.x, y: e.clientY - cam.y }; render(); return; }
+    if (wireEl) { sel = { wire: wireEl.dataset.wire }; pinCycle = null; props(); calc(); drag = { pan: true, x: e.clientX - cam.x, y: e.clientY - cam.y }; render(); return; }
     sel = null; props(); calc(); drag = { pan: true, x: e.clientX - cam.x, y: e.clientY - cam.y }; render();
   });
   svg.addEventListener('pointermove', e => {
+    if (lp && Math.hypot(e.clientX - lp.x, e.clientY - lp.y) > 8) cancelLong();
     mouse = { x: e.clientX, y: e.clientY }; if (pointers.has(e.pointerId)) pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
     const pe = e.target.closest && e.target.closest('.part'), pn = e.target.closest && e.target.closest('.pin');
     hover = pe ? { part: pe.dataset.part, pin: pn ? pn.dataset.pin : null } : null;
@@ -231,32 +246,92 @@
     else if (drag && drag.part) { const [wx, wy] = toWorld(e.clientX, e.clientY); const nx = snap(wx - drag.dx), ny = snap(wy - drag.dy); if (nx !== drag.part.x || ny !== drag.part.y) { drag.part.x = nx; drag.part.y = ny; drag.moved = true; } if (!running) render(); }
     else if (drag && drag.knob) { drag.knob.props.pos = Math.min(1, Math.max(0, drag.pos0 + ((e.clientX - drag.x0) - (e.clientY - drag.y0)) / 150)); drag.moved = true; const i = document.querySelector('#props input[data-k="pos"]'); if (i) i.value = drag.knob.props.pos; prevV = null; if (!running) render(); }
     else if (drag && drag.bend) { const [wx, wy] = toWorld(e.clientX, e.clientY); drag.bend.pts[drag.i] = [snap(wx), snap(wy)]; drag.moved = true; if (!running) render(); }
-    else if (drag && drag.pan) { cam.x = e.clientX - drag.x; cam.y = e.clientY - drag.y; if (!running) render(); }
-    if (armed) { const [ax, ay] = pinPos(part(armed.part), armed.pin), [bx, by] = toWorld(e.clientX, e.clientY); temp.setAttribute("d", `M${ax} ${ay} L${bx} ${by}`); }
+    else if (drag && drag.wend) { const o = drag.wend[drag.end === 'a' ? 'b' : 'a'], [ax, ay] = pinPos(part(o.part), o.pin), [bx, by] = toWorld(e.clientX, e.clientY); temp.setAttribute('d', `M${ax} ${ay} L${bx} ${by}`); drag.moved = true; }
+    else if (drag && drag.pan) { if (drag.armTap && Math.hypot(e.clientX - drag.armTap[0], e.clientY - drag.armTap[1]) < 8) return; drag.armTap = null; cam.x = e.clientX - drag.x; cam.y = e.clientY - drag.y; if (!running) render(); }
+    if (armed) drawTemp(...toWorld(e.clientX, e.clientY));
     updateTip();
   });
-  const up = e => { pointers.delete(e.pointerId); if (drag && drag.pinch) { drag = null; return; }
+  const up = e => { pointers.delete(e.pointerId); cancelLong(); if (drag && drag.pinch) { drag = null; return; }
+    if (drag && drag.armTap && armed) { armed.pts.push(toWorld(...drag.armTap).map(snap)); drawTemp(...toWorld(...drag.armTap)); drag = null; render(); return; }
+    if (drag && drag.wend) { const w = drag.wend, k = drag.end, o = w[k === 'a' ? 'b' : 'a']; drag = null; temp.setAttribute('d', '');
+      const np = pinUnder(e.clientX, e.clientY); if (np && !(np.part === o.part && np.pin === o.pin) && !same(np, w[k])) { w[k] = np; changed(); } else render(); return; }
     if (drag && drag.press && P[drag.press.type].interactive === 'momentary') drag.press.on = false; if (drag && drag.moved) { autosave(); prevV = null; } drag = null; if (!running) render(); };
-  svg.addEventListener('pointerup', up); svg.addEventListener('pointercancel', up);
+  svg.addEventListener('pointerup', up); svg.addEventListener('pointercancel', up); window.addEventListener('pointerup', e => pointers.delete(e.pointerId), true); window.addEventListener('pointercancel', e => pointers.delete(e.pointerId), true);
   svg.addEventListener('pointerleave', () => { hover = null; updateTip(); });
   // double-click is detected manually: pointer capture + re-render swallow native dblclick events
   function onDbl(e) { const tg = document.elementFromPoint(e.clientX, e.clientY); if (!tg) return;
     const pg = tg.closest('.part'); if (pg && part(pg.dataset.part) && P[part(pg.dataset.part).type].display === 'hdmi') { openHdmi(); return; }
     if (locked()) return;
     const bendEl = tg.closest('.bend'); if (bendEl) { const w = proj.wires.find(x => x.id === bendEl.dataset.wire); w.pts.splice(+bendEl.dataset.i, 1); changed(); return; }
-    const wireEl = tg.closest('.wire'); if (!wireEl) return; const w = proj.wires.find(x => x.id === wireEl.dataset.wire); if (!w) return;
-    const [wx, wy] = toWorld(e.clientX, e.clientY), Q = wirePts(w);
-    let best = 0, bd = Infinity; for (let i = 0; i < Q.length - 1; i++) { const [x1, y1] = Q[i], [x2, y2] = Q[i + 1], L = (x2 - x1) ** 2 + (y2 - y1) ** 2 || 1;
-      const t = Math.max(0, Math.min(1, ((wx - x1) * (x2 - x1) + (wy - y1) * (y2 - y1)) / L)), dd = Math.hypot(wx - x1 - t * (x2 - x1), wy - y1 - t * (y2 - y1)); if (dd < bd) { bd = dd; best = i; } }
-    if (!w.pts || !w.pts.length) { w.pts = Q.slice(1, -1).map(q => [q[0], q[1]]); } else best = best; // keep auto-route corners as editable points
-    const inner = w.pts.length === Q.length - 2 ? best : Math.min(best, w.pts.length); w.pts.splice(inner, 0, [snap(wx), snap(wy)]); sel = { wire: w.id }; changed(); }
+    const wireEl = tg.closest('.whit, .wire'); if (!wireEl) return; const w = proj.wires.find(x => x.id === wireEl.dataset.wire); if (!w) return;
+    addBend(w, ...toWorld(e.clientX, e.clientY)); }
   svg.addEventListener('wheel', e => { e.preventDefault(); zoomAt(e.clientX, e.clientY, cam.s * Math.exp(-e.deltaY * 0.0015)); if (!running) render(); }, { passive: false });
+  const same = (x, y) => x.part === y.part && x.pin === y.pin;
+  const wiresAt = t => proj.wires.filter(w => same(w.a, t) || same(w.b, t));
+  let wireMode = false, pinCycle = null, lp = null;
+  function drawTemp(bx, by) { if (!armed) return; const [ax, ay] = pinPos(part(armed.part), armed.pin); temp.setAttribute('d', `M${ax} ${ay}` + armed.pts.map(q => ` L${q[0]} ${q[1]}`).join('') + ` L${bx} ${by}`); }
+  function bestWire(cx, cy, hit) { if (!hit) return null; const c = document.elementsFromPoint(cx, cy).filter(el => el.classList && el.classList.contains('whit'));
+    if (c.length < 2) return hit; let best = hit, bd = Infinity;
+    for (const el of c) { const L = el.getTotalLength(), m = el.getScreenCTM(); if (!m) continue; for (let i = 0; i <= 48; i++) { const q = el.getPointAtLength(L * i / 48), d = Math.hypot(q.x * m.a + q.c * 0 + m.e - cx, q.y * m.d + m.f - cy); if (d < bd) { bd = d; best = el; } } }
+    return best; }
+  function wireNear(cx, cy, rad) { let best = null, bd = rad; for (const el of document.elementsFromPoint(cx, cy)) { if (!el.classList || !el.classList.contains('whit')) continue;
+      const L = el.getTotalLength(), m = el.getScreenCTM(); if (!m) continue; for (let i = 0; i <= 64; i++) { const q = el.getPointAtLength(L * i / 64), d = Math.hypot(q.x * m.a + m.e - cx, q.y * m.d + m.f - cy); if (d < bd) { bd = d; best = el; } } } return best; }
+  function nearestPin(cx, cy, rad) { let best = null, bd = rad; for (const el of partsL.querySelectorAll('.pin')) { const r = el.getBoundingClientRect(), d = Math.hypot(r.x + r.width / 2 - cx, r.y + r.height / 2 - cy);
+    if (d < bd) { bd = d; best = el; } } return best ? { pinEl: best, partEl: best.closest('.part') } : null; }
+  function pinUnder(cx, cy) { const tg = document.elementFromPoint(cx, cy); let pe = tg && tg.closest && tg.closest('.pin'); if (!pe) { const n = nearestPin(cx, cy, 22); pe = n && n.pinEl; }
+    return pe ? { part: pe.closest('.part').dataset.part, pin: pe.dataset.pin } : null; }
+  function startLong(e) { cancelLong(); if (e.pointerType === 'mouse' || locked()) return; const x = e.clientX, y = e.clientY, t0 = e.target; lp = { x, y, t: setTimeout(() => { lp = null; if (pointers.size > 1) return;
+    if (drag && drag.part && drag.moved) return; drag = null; openMenu(x, y, t0); }, 500) }; }
+  function cancelLong() { if (lp) { clearTimeout(lp.t); lp = null; } }
+  function cancelArm() { armed = null; temp.setAttribute('d', ''); render(); }
+  function addBend(w, wx, wy) { const Q = wirePts(w); let best = 0, bd = Infinity; for (let i = 0; i < Q.length - 1; i++) { const [x1, y1] = Q[i], [x2, y2] = Q[i + 1], L = (x2 - x1) ** 2 + (y2 - y1) ** 2 || 1;
+      const t = Math.max(0, Math.min(1, ((wx - x1) * (x2 - x1) + (wy - y1) * (y2 - y1)) / L)), dd = Math.hypot(wx - x1 - t * (x2 - x1), wy - y1 - t * (y2 - y1)); if (dd < bd) { bd = dd; best = i; } }
+    if (!w.pts || !w.pts.length) w.pts = Q.slice(1, -1).map(q => [q[0], q[1]]);
+    const inner = w.pts.length === Q.length - 2 ? best : Math.min(best, w.pts.length); w.pts.splice(inner, 0, [snap(wx), snap(wy)]); sel = { wire: w.id }; changed(); }
+  function dup() { const p = sel && part(sel.part); if (!p || locked()) return; const d = P[p.type]; addPart(p.type, p.x + 40, p.y + 40); const q = part(sel.part); q.props = clone(p.props); q.rot = p.rot; changed(); }
+  /* context menu (long press / right click) and floating buttons: DOM via createElement/textContent only */
+  const menu = document.createElement('div'); menu.id = 'ctxmenu'; menu.hidden = true; $('#center').appendChild(menu);
+  const fdel = document.createElement('button'); fdel.id = 'wireDel'; fdel.className = 'fbtn danger'; fdel.textContent = '🗑 Удалить провод'; fdel.hidden = true; $('#center').appendChild(fdel);
+  const fcan = document.createElement('button'); fcan.id = 'wireCancel'; fcan.className = 'fbtn'; fcan.textContent = '✕ Отменить провод'; fcan.hidden = true; $('#center').appendChild(fcan);
+  fdel.addEventListener('pointerdown', e => e.stopPropagation()); fdel.onclick = () => { if (sel && sel.wire) del(); };
+  fcan.addEventListener('pointerdown', e => e.stopPropagation()); fcan.onclick = cancelArm;
+  menu.addEventListener('pointerdown', e => e.stopPropagation());
+  function closeMenu() { menu.hidden = true; menu.textContent = ''; }
+  function openMenu(cx, cy, t0) { if (locked()) return; const tg = t0 && t0.isConnected ? t0 : document.elementFromPoint(cx, cy); if (!tg || !tg.closest) return;
+    const we = tg.closest('.whit, .wire') || wireNear(cx, cy, 9), pe = tg.closest('.part'), items = [];
+    if (we) { const w = proj.wires.find(x => x.id === we.dataset.wire); if (!w) return; sel = { wire: w.id }; const [wx, wy] = toWorld(cx, cy);
+      items.push(['🗑 Удалить провод', del, 'danger'], ['↯ Добавить изгиб', () => addBend(w, wx, wy)]); }
+    else if (pe && part(pe.dataset.part)) { sel = { part: pe.dataset.part }; items.push(['🗑 Удалить', del, 'danger'], ['⟳ Повернуть', rotate], ['⧉ Дублировать', dup]); }
+    else return;
+    props(); calc(); render(); menu.textContent = '';
+    for (const [t, fn, c] of items) { const b = document.createElement('button'); b.textContent = t; if (c) b.className = c; b.onclick = () => { closeMenu(); fn(); }; menu.appendChild(b); }
+    const r = $('#center').getBoundingClientRect(); menu.hidden = false;
+    menu.style.left = Math.max(4, Math.min(cx - r.left, r.width - menu.offsetWidth - 4)) + 'px'; menu.style.top = Math.max(4, Math.min(cy - r.top, r.height - menu.offsetHeight - 4)) + 'px'; }
+  svg.addEventListener('contextmenu', e => { e.preventDefault(); if (!menu.hidden) return; cancelLong(); drag = null; openMenu(e.clientX, e.clientY); });
+  document.addEventListener('pointerdown', e => { if (!menu.hidden && !menu.contains(e.target)) closeMenu(); }, true);
+  function placeFloat() { const w = sel && sel.wire && !locked() && proj.wires.find(x => x.id === sel.wire), el = w && wiresL.querySelector(`.whit[data-wire="${CSS.escape(w.id)}"]`);
+    if (el) { const L = el.getTotalLength(), q = el.getPointAtLength(L / 2), cw = $('#center').clientWidth; fdel.hidden = false;
+      fdel.style.left = Math.max(4, Math.min(cam.x + q.x * cam.s - fdel.offsetWidth / 2, cw - fdel.offsetWidth - 4)) + 'px'; fdel.style.top = Math.max(4, cam.y + q.y * cam.s - fdel.offsetHeight - 14) + 'px'; }
+    else fdel.hidden = true;
+    fcan.hidden = !armed; }
+  /* mobile bottom bar: sheets for parts / properties / code, and wire mode */
+  function sheet(k) { const cur = document.body.dataset.sheet || ''; const nx = cur === k ? '' : k; document.body.dataset.sheet = nx;
+    for (const [id, v] of [['mParts', 'parts'], ['mProps', 'props']]) $('#' + id).classList.toggle('on', nx === v);
+    if (cur === 'code' && !desktop()) { $('#codePane').hidden = true; $('#codeTab').classList.remove('on'); $('#mCode').classList.remove('on'); } }
+  $('#mParts').onclick = () => sheet('parts'); $('#mProps').onclick = () => sheet('props');
+  $('#mCode').onclick = () => { $('#mParts').classList.remove('on'); $('#mProps').classList.remove('on'); const open = document.body.dataset.sheet !== 'code'; document.body.dataset.sheet = open ? 'code' : '';
+    if ($('#codePane').hidden === open) $('#codeTab').click(); $('#mCode').classList.toggle('on', open); };
+  $('#mWire').onclick = () => { wireMode = !wireMode; $('#mWire').classList.toggle('on', wireMode); $('#mWire').setAttribute('aria-pressed', String(wireMode)); if (!wireMode) cancelArm();
+    showHint(wireMode ? 'Режим «Провод»: коснитесь первого вывода, затем второго. Пустое место — изгиб.' : 'Провод: коснитесь линии, чтобы выделить'); };
+  $('#palette').addEventListener('click', () => { if (document.body.dataset.sheet === 'parts') sheet('parts'); });
+  const hintEl = document.createElement('div'); hintEl.id = 'mhint'; hintEl.hidden = true; $('#center').appendChild(hintEl); let hintT = 0;
+  function showHint(t) { hintEl.textContent = t; hintEl.hidden = false; clearTimeout(hintT); hintT = setTimeout(() => { hintEl.hidden = true; }, 3500); }
   function rotate() { if (locked()) return; const p = sel && part(sel.part); if (p) { p.rot = ((p.rot || 0) + 1) % 4; changed(); } }
   function del() { if (!sel || locked()) return; if (sel.part) { proj.parts = proj.parts.filter(p => p.id !== sel.part); proj.wires = proj.wires.filter(w => w.a.part !== sel.part && w.b.part !== sel.part); }
-    if (sel.wire) proj.wires = proj.wires.filter(w => w.id !== sel.wire); sel = null; changed(); }
+    if (sel.wire) proj.wires = proj.wires.filter(w => w.id !== sel.wire); sel = null; closeMenu(); changed(); }
   document.addEventListener('keydown', e => { if (/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName)) return;
     if ((e.ctrlKey || e.metaKey) && (e.key === 'z' || e.key === 'Z' || e.key === 'я' || e.code === 'KeyZ')) { e.preventDefault(); if (!locked()) undo(); return; }
-    if (e.key === 'r' || e.key === 'R' || e.key === 'к' || e.key === 'К') rotate(); else if (e.key === 'Delete' || e.key === 'Backspace') del(); else if (e.key === 'Escape') { armed = null; temp.setAttribute('d', ''); render(); } });
+    if (e.key === 'r' || e.key === 'R' || e.key === 'к' || e.key === 'К') rotate(); else if (e.key === 'Delete' || e.key === 'Backspace') del(); else if (e.key === 'Escape') { closeMenu(); cancelArm(); } });
 
   /* ---------- simulation ---------- */
   function tick() {
@@ -351,7 +426,7 @@
   /* sketch worker lifecycle: a crashed/hung worker (exception, OOM, infinite loop) is torn down, a fresh idle
    * worker is created right away, the console explains what happened, and the next Run uses the fresh worker. */
   let spare = null, crashes = 0;
-  const newWorker = () => new Worker('worker.js?v=7');
+  const newWorker = () => new Worker('worker.js?v=8');
   function takeWorker() { const w = spare || newWorker(); spare = null; return w; }
   function crash(msg) { if (!worker) return; worker.onmessage = worker.onerror = null; try { worker.terminate(); } catch (e) {} worker = null; gpio = {}; prevV = null; crashes++;
     try { spare = newWorker(); } catch (e) { spare = null; }
@@ -457,17 +532,18 @@
   $('#hdmiClose').onclick = () => { $('#hdmiFull').hidden = true; };
   document.addEventListener('keydown', e => { if (e.key === 'Escape') { $('#hdmiFull').hidden = true; $('#newModal').hidden = true; } });
   /* desktop: code editor docks into the bottom panel, Serial on the right */
-  const desktop = () => window.matchMedia('(min-width: 761px)').matches;
+  const desktop = () => window.matchMedia('(min-width: 900px)').matches;
   function layout() { const cp = $('#codePane'), dock = $('#codeDock'); if (!dock) return;
     if (desktop()) { if (cp.parentNode !== dock) dock.appendChild(cp); cp.hidden = false; document.body.classList.add('dock'); }
     else { if (cp.parentNode === dock) $('#center').appendChild(cp); document.body.classList.remove('dock'); } }
-  window.matchMedia('(min-width: 761px)').addEventListener('change', layout);
+  window.matchMedia('(min-width: 900px)').addEventListener('change', layout);
   $('#export').onclick = () => { proj.code = $('#code').value; const a = document.createElement('a');
     a.href = URL.createObjectURL(new Blob([JSON.stringify({ ...strip(proj), format: 'circuitsim/1' }, null, 2)], { type: 'application/json' })); a.download = (proj.name || 'circuit') + '.json'; a.click(); };
   $('#import').onchange = async e => { const f = e.target.files[0]; if (!f) return; try { if (f.size > window.SANITIZE_LIMITS.importBytes) throw new Error('файл больше 2 МБ');
     open(parseProjectText(await f.text())); } catch (err) { alert('Не удалось импортировать: ' + err.message); } e.target.value = ''; };
   function fit() { if (!proj.parts.length) return; const xs = proj.parts.map(p => p.x), ys = proj.parts.map(p => p.y), r = svg.getBoundingClientRect();
-    cam.s = 1; cam.x = r.width / 2 - (Math.min(...xs) + Math.max(...xs)) / 2; cam.y = r.height / 2 - (Math.min(...ys) + Math.max(...ys)) / 2; }
+    cam.s = Math.min(1, Math.max(0.4, Math.min(r.width / (Math.max(...xs) - Math.min(...xs) + 200), r.height / (Math.max(...ys) - Math.min(...ys) + 200))));
+    cam.x = r.width / 2 - cam.s * (Math.min(...xs) + Math.max(...xs)) / 2; cam.y = r.height / 2 - cam.s * (Math.min(...ys) + Math.max(...ys)) / 2; }
 
   $('#showShort').onclick = () => { const z = shorts[0]; if (!z) return; const ids = new Set([z.source, ...z.path]), pts = [];
     for (const p of proj.parts) if (ids.has(p.id)) pts.push([p.x, p.y]); for (const w of proj.wires) if (ids.has(w.id)) pts.push(...wirePts(w));
@@ -476,5 +552,5 @@
   lastJ = JSON.stringify(strip(proj));
   layout(); palette(); projList(); $('#code').value = proj.code ?? DEFAULT_CODE; fit(); render(); props(); calc();
   window.addEventListener('resize', () => { if (!running) render(); });
-  window.__sim = { get proj() { return proj; }, get meas() { return meas; }, start, stop, undo, get gpio() { return gpio; }, get shorts() { return shorts; }, get crashes() { return crashes; }, get simTime() { return simTime; }, get hasWorker() { return !!worker; }, get worker() { return worker; }, get hasSpare() { return !!spare; }, get rf() { return rf; }, get extra() { return Object.keys(extra); }, codeFor: id => setCodeTarget(id), get cam() { return cam; }, select: id => { sel = { part: id }; props(); calc(); render(); } };
+  window.__sim = { get proj() { return proj; }, get sel() { return sel; }, get wireMode() { return wireMode; }, get armed() { return armed; }, get meas() { return meas; }, start, stop, undo, get gpio() { return gpio; }, get shorts() { return shorts; }, get crashes() { return crashes; }, get simTime() { return simTime; }, get hasWorker() { return !!worker; }, get worker() { return worker; }, get hasSpare() { return !!spare; }, get rf() { return rf; }, get extra() { return Object.keys(extra); }, codeFor: id => setCodeTarget(id), get cam() { return cam; }, render: () => render(), select: id => { sel = { part: id }; props(); calc(); render(); } };
 })();
