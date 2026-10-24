@@ -32,3 +32,4 @@ footer{background:#161b27;border-top:1px solid #2a3242}.tabs{display:flex;gap:4p
 .live div{display:flex;justify-content:space-between;padding:2px 0;font:13px ui-monospace,monospace}.live b{color:#ffd34d}
 .prop{display:flex;flex-direction:column;margin:6px 0;font-size:12px;color:#8a94a8}.prop input,.prop select{margin-top:2px}
 .row{display:flex;gap:6px;margin:8px 0}
+.gndw{filter:drop-shadow(0 0 1px #9aa3b5)}

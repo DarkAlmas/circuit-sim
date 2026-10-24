@@ -8,10 +8,10 @@
   let running = false, worker = null, gpio = {}, lastHb = 0, sim = null, prevV = null, raf = 0, wd = 0, lastAlert = '';
   const meas = {}, checks = {}, flowOff = {};
 
-  function load() { try { const a = JSON.parse(localStorage.getItem(AUTO)); if (a && a.parts) return a; } catch (e) {} return clone(window.EXAMPLES[Object.keys(window.EXAMPLES)[0]]); }
+  function load() { try { const a = JSON.parse(localStorage.getItem(AUTO)); if (a && a.parts) return sanitizeProject(a); } catch (e) {} return sanitizeProject(window.EXAMPLES[Object.keys(window.EXAMPLES)[0]]); }
   function clone(o) { return JSON.parse(JSON.stringify(o)); }
   function autosave() { localStorage.setItem(AUTO, JSON.stringify(strip(proj))); }
-  function strip(p) { return { parts: p.parts.map(({ id, type, x, y, rot, props }) => ({ id, type, x, y, rot, props })), wires: p.wires, code: p.code }; }
+  function strip(p) { return { parts: p.parts.map(({ id, type, x, y, rot, props }) => ({ id, type, x, y, rot, props })), wires: p.wires.map(({ id, a, b, pts }) => ({ id, a, b, pts })), code: p.code, name: p.name }; }
   const uid = pre => { let i = 1; const ids = new Set([...proj.parts, ...proj.wires].map(o => o.id)); while (ids.has(pre + i)) i++; return pre + i; };
   const part = id => proj.parts.find(p => p.id === id);
   const rotPt = (x, y, r) => { for (let i = 0; i < (r || 0) % 4; i++) [x, y] = [-y, x]; return [x, y]; };
@@ -51,11 +51,11 @@
     const N = Netlist.nets(proj);
     wiresL.innerHTML = proj.wires.map(w => { const d = wirePath(w), c = wireColor(w, N);
       const black = N.groundRoots.has(N.netOf(w.a.part, w.a.pin));
-      return `<path d="${d}" class="wire${sel && sel.wire === w.id ? ' sel' : ''}" data-wire="${w.id}" stroke="${black ? '#0b0d12' : c}" ${black ? 'style="filter:drop-shadow(0 0 1px #9aa3b5)"' : ''}/>` +
+      return `<path d="${d}" class="wire${sel && sel.wire === w.id ? ' sel' : ''}" data-wire="${esc(w.id)}" stroke="${black ? '#0b0d12' : c}" ${black ? 'class="gndw"' : ''}/>` +
         (running && Math.abs(w.I || 0) > 1e-6 ? `<path d="${d}" class="flow" stroke-dashoffset="${-(flowOff[w.id] || 0)}"/>` : ''); }).join('');
     partsL.innerHTML = proj.parts.map(p => { const d = P[p.type], [bx, by, bw, bh] = bbox(p.type), c = checks[p.id];
       const st = { I: meas[p.id]?.I, m: meas[p.id], burned: p.burned, led2: running && gpio[2]?.mode === 'OUTPUT' && gpio[2].val > 0 };
-      return `<g class="part${sel && sel.part === p.id ? ' sel' : ''}${c ? ' ' + c.level : ''}" data-part="${p.id}" transform="translate(${p.x} ${p.y}) rotate(${(p.rot || 0) * 90})">
+      return `<g class="part${sel && sel.part === p.id ? ' sel' : ''}${c ? ' ' + c.level : ''}" data-part="${esc(p.id)}" transform="translate(${p.x} ${p.y}) rotate(${(p.rot || 0) * 90})">
         <rect class="hit" x="${bx}" y="${by}" width="${bw}" height="${bh}" rx="6"/>${d.draw(p, st)}
         ${d.pins.map(q => `<circle class="pin${armed && armed.part === p.id && armed.pin === q.id ? ' armed' : ''}" data-pin="${q.id}" cx="${q.x}" cy="${q.y}" r="3.5"><title>${q.label}</title></circle>`).join('')}</g>`; }).join('');
     $('#boardName').textContent = (proj.parts.find(p => P[p.type].mcu) && P[proj.parts.find(p => P[p.type].mcu).type].name) || 'нет платы (добавь ESP32 или ESP8266)';
@@ -67,12 +67,12 @@
   const PROP_UI = { V: ['Напряжение, В', 'number', 0.1], R: ['Сопротивление, Ом', 'number', 1], Pmax: ['Допустимая мощность, Вт', 'number', 0.05], pos: ['Положение движка', 'range', 0.01], Vf: ['Прямое напряжение Vf, В', 'number', 0.1], Imax: ['Макс. ток, А', 'number', 0.001] };
   function props() {
     const el = $('#props');
-    if (sel && sel.wire) { el.innerHTML = `<p>Провод ${sel.wire}</p><div class="row"><button id="del">Удалить</button></div>`; $('#del').onclick = del; return; }
+    if (sel && sel.wire) { el.innerHTML = `<p>Провод ${esc(sel.wire)}</p><div class="row"><button id="del">Удалить</button></div>`; $('#del').onclick = del; return; }
     const p = sel && part(sel.part); if (!p) { el.innerHTML = '<p class="muted">Выбери деталь или провод</p>'; return; }
     const d = P[p.type];
-    el.innerHTML = `<p><b>${p.id}</b> — ${d.name}</p>` + Object.keys(p.props || {}).map(k => k === 'color'
-      ? `<label class="prop">Цвет<select data-k="color">${Object.keys(LED_COLORS).map(c => `<option${c === p.props.color ? ' selected' : ''}>${c}</option>`).join('')}</select></label>`
-      : `<label class="prop">${PROP_UI[k][0]}<input data-k="${k}" type="${PROP_UI[k][1]}" step="${PROP_UI[k][2]}" ${k === 'pos' ? 'min="0" max="1"' : 'min="0"'} value="${p.props[k]}"></label>`).join('') +
+    el.innerHTML = `<p><b>${esc(p.id)}</b> — ${d.name}</p>` + Object.keys(p.props || {}).map(k => k === 'color'
+      ? `<label class="prop">Цвет<select data-k="color">${Object.keys(LED_COLORS).map(c => `<option${c === p.props.color ? ' selected' : ''}>${esc(c)}</option>`).join('')}</select></label>`
+      : `<label class="prop">${PROP_UI[k][0]}<input data-k="${k}" type="${PROP_UI[k][1]}" step="${PROP_UI[k][2]}" ${k === 'pos' ? 'min="0" max="1"' : 'min="0"'} value="${esc(p.props[k])}"></label>`).join('') +
       (p.burned ? '<p class="bad">Сгорел. Замени: кнопка ниже.</p><div class="row"><button id="fix">Заменить новым</button></div>' : '') +
       `<div class="row"><button id="rot">⟳ Повернуть (R)</button><button id="del">Удалить</button></div>`;
     el.querySelectorAll('[data-k]').forEach(i => i.oninput = () => { const k = i.dataset.k;
@@ -116,7 +116,7 @@
       const root = N.netOf(p.id, q.id); if (N.groundRoots.has(root) && P[p.type].mcu) continue;
       const terms = [];
       for (const o of proj.parts) { const mo = meas[o.id]; if (!mo || !mo.pinI) continue;
-        for (const [pin, i] of Object.entries(mo.pinI)) if (N.netOf(o.id, pin) === root && Math.abs(i) > 1e-9) terms.push([`${o.id}.${P[o.type].pins.find(z => z.id === pin).label}`, -i]); }
+        for (const [pin, i] of Object.entries(mo.pinI)) if (N.netOf(o.id, pin) === root && Math.abs(i) > 1e-9) terms.push([`${esc(o.id)}.${P[o.type].pins.find(z => z.id === pin).label}`, -i]); }
       if (terms.length < 2) continue;
       const sum = terms.reduce((a, t) => a + t[1], 0);
       L.push(`<span class="f">1-й закон Кирхгофа</span>, узел вывода ${q.label} (${fU(v(q.id), 'В')}): ΣI = ${terms.map(([n, i], k) => `${i < 0 ? '− ' : k ? '+ ' : ''}${fU(Math.abs(i), 'А')} <span class="muted">(${n})</span>`).join(' ')} = <b>${fU(Math.abs(sum) < 1e-7 ? 0 : sum, 'А')}</b>`);
@@ -200,7 +200,7 @@
     running = true; $('#run').disabled = true; $('#stop').disabled = false;
     const mcu = proj.parts.find(p => P[p.type].mcu);
     if (mcu && proj.code.trim()) {
-      worker = new Worker('worker.js'); lastHb = performance.now();
+      worker = new Worker('worker.js?v=2'); lastHb = performance.now();
       worker.onmessage = e => { const m = e.data; lastHb = performance.now();
         if (m.t === 'pin') { const s = gpio[m.pin] || (gpio[m.pin] = { mode: 'INPUT', val: 0 }); if (m.mode) s.mode = m.mode; if (m.val != null) { s.val = m.val; if (s.mode !== 'OUTPUT' && m.val != null && !m.mode) s.mode = s.mode; } }
         else if (m.t === 'log') log(m.s); else if (m.t === 'err') { log(m.s + '\n', 'err'); showTab('console'); } };
@@ -229,21 +229,23 @@
   $('#collapse').onclick = () => { const f = $('#bottom'); f.classList.toggle('min'); $('#collapse').textContent = f.classList.contains('min') ? '▴' : '▾'; };
 
   /* ---------- projects ---------- */
-  const saved = () => { try { return JSON.parse(localStorage.getItem(LS)) || {}; } catch (e) { return {}; } };
+  const saved = () => { try { const o = JSON.parse(localStorage.getItem(LS)); return o && typeof o === 'object' && !Array.isArray(o) ? o : {}; } catch (e) { return {}; } };
   function projList(selName) {
-    const s = saved();
-    $('#projects').innerHTML = '<option value="">— проекты —</option><optgroup label="Примеры">' + Object.keys(window.EXAMPLES).map(n => `<option value="ex:${n}">${n}</option>`).join('') +
-      '</optgroup><optgroup label="Сохранённые">' + Object.keys(s).map(n => `<option value="my:${n}"${n === selName ? ' selected' : ''}>${n}</option>`).join('') + '</optgroup>';
+    const sel_ = $('#projects'); sel_.textContent = '';
+    const opt = (v, t, on) => { const o = document.createElement('option'); o.value = v; o.textContent = t; if (on) o.selected = true; return o; };
+    sel_.appendChild(opt('', '— проекты —'));
+    const g1 = document.createElement('optgroup'); g1.label = 'Примеры'; Object.keys(window.EXAMPLES).forEach(n => g1.appendChild(opt('ex:' + n, n))); sel_.appendChild(g1);
+    const g2 = document.createElement('optgroup'); g2.label = 'Сохранённые'; Object.keys(saved()).forEach(n => g2.appendChild(opt('my:' + n, n.slice(0, 64), n === selName))); sel_.appendChild(g2);
   }
-  function open(data) { stop(); proj = clone(data); proj.code = proj.code ?? DEFAULT_CODE; $('#code').value = proj.code; sel = null; fit(); changed(); }
-  $('#projects').onchange = e => { const v = e.target.value; if (!v) return; open(v.startsWith('ex:') ? window.EXAMPLES[v.slice(3)] : saved()[v.slice(3)]); };
-  $('#save').onclick = () => { const n = prompt('Название проекта:', proj.name || 'Мой проект'); if (!n) return; proj.name = n; proj.code = $('#code').value;
+  function open(data) { stop(); proj = sanitizeProject(data); proj.code = proj.code ?? DEFAULT_CODE; $('#code').value = proj.code; sel = null; fit(); changed(); }
+  $('#projects').onchange = e => { const v = e.target.value; if (!v) return; open(v.startsWith('ex:') ? window.EXAMPLES[v.slice(3)] : (Object.prototype.hasOwnProperty.call(saved(), v.slice(3)) ? saved()[v.slice(3)] : {})); };
+  $('#save').onclick = () => { let n = prompt('Название проекта:', proj.name || 'Мой проект'); if (!n) return; n = String(n).slice(0, 64); proj.name = n; proj.code = $('#code').value;
     const s = saved(); s[n] = { ...strip(proj), name: n }; localStorage.setItem(LS, JSON.stringify(s)); projList(n); $('#status').textContent = 'Сохранено: ' + n; };
   $('#new').onclick = () => open({ parts: [], wires: [], code: 'void setup() {\n  \n}\n\nvoid loop() {\n  \n}\n' });
   $('#export').onclick = () => { proj.code = $('#code').value; const a = document.createElement('a');
     a.href = URL.createObjectURL(new Blob([JSON.stringify({ ...strip(proj), format: 'circuitsim/1' }, null, 2)], { type: 'application/json' })); a.download = (proj.name || 'circuit') + '.json'; a.click(); };
   $('#import').onchange = async e => { const f = e.target.files[0]; if (!f) return; try { const d = JSON.parse(await f.text());
-    if (!Array.isArray(d.parts) || !Array.isArray(d.wires) || d.parts.some(p => !P[p.type])) throw new Error('неизвестный формат'); open(d); } catch (err) { alert('Не удалось импортировать: ' + err.message); } e.target.value = ''; };
+    if (!Array.isArray(d.parts) || !Array.isArray(d.wires)) throw new Error('неизвестный формат'); open(d); } catch (err) { alert('Не удалось импортировать: ' + err.message); } e.target.value = ''; };
   function fit() { if (!proj.parts.length) return; const xs = proj.parts.map(p => p.x), ys = proj.parts.map(p => p.y), r = svg.getBoundingClientRect();
     cam.s = 1; cam.x = r.width / 2 - (Math.min(...xs) + Math.max(...xs)) / 2; cam.y = r.height / 2 - (Math.min(...ys) + Math.max(...ys)) / 2; }
 

@@ -1,0 +1,15 @@
+{ "name": "<img src=x onerror=alert('name')>",
+  "parts": [
+    { "id": "<img src=x onerror=alert(1)>", "type": "resistor", "x": 0, "y": 0, "rot": 0, "props": { "R": 220 } },
+    { "id": "R1", "type": "resistor", "x": "<svg onload=alert(2)>", "y": 1e400, "rot": "9", "props": { "R": "<script>alert(3)</script>", "Pmax": 0.25, "evil": "<b>x</b>" }, "onclick": "alert(4)" },
+    { "id": "D1", "type": "led", "x": 100, "y": 0, "rot": 0, "props": { "color": "\"><svg onload=alert(5)>", "Vf": 1.8, "Imax": 0.02 } },
+    { "id": "X1", "type": "__proto__", "x": 0, "y": 0 },
+    { "id": "X2", "type": "constructor", "x": 0, "y": 0 }
+  ],
+  "wires": [
+    { "id": "w1", "a": { "part": "R1", "pin": "b" }, "b": { "part": "D1", "pin": "a" } },
+    { "id": "w2\" onmouseover=\"alert(6)", "a": { "part": "R1", "pin": "a" }, "b": { "part": "D1", "pin": "b" } },
+    { "id": "w3", "a": { "part": "R1", "pin": "<x>" }, "b": { "part": "D1", "pin": "b" } }
+  ],
+  "code": "void setup(){ Serial.println(\"<img src=x onerror=alert(7)>\"); }\nvoid loop(){ delay(100); }"
+}
