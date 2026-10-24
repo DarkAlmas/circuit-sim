@@ -104,3 +104,80 @@
     return c;
   };
 })();
+
+// ---- general vehicle: N wheels, steering, tracks (least-squares kinematics + lag) ----
+(function(){
+  var api=(typeof module!=='undefined'&&module.exports)?module.exports:window.Devices;
+  function solve3(A,b){var m=A.map(function(r,i){return r.concat([b[i]]);});
+    for(var i=0;i<3;i++){var p=i;for(var k=i+1;k<3;k++)if(Math.abs(m[k][i])>Math.abs(m[p][i]))p=k;
+      var t=m[i];m[i]=m[p];m[p]=t;if(Math.abs(m[i][i])<1e-12)return[0,0,0];
+      for(k=0;k<3;k++)if(k!==i){var f=m[k][i]/m[i][i];for(var j=i;j<4;j++)m[k][j]-=f*m[i][j];}}
+    return[m[0][3]/m[0][0],m[1][3]/m[1][1],m[2][3]/m[2][2]];}
+  // opts.wheels:[{x,y,R,driven(true),grip(1)}]; track = wheel with grip<1 (skid)
+  api.vehicle=function(opts){
+    opts=opts||{};var c=api.car(opts);
+    c.wheels=opts.wheels||[{x:0,y:-0.065,R:0.033},{x:0,y:0.065,R:0.033},{x:0.1,y:0,R:0.01,driven:false,caster:true}];
+    c.tau=opts.tau||0.05; c.vx=0;c.vy=0;c.ax=0;
+    var s0=c.step, r0=c.reset;
+    c.reset=function(p){r0(p);c.vx=c.vy=c.ax=0;return c;};
+    // input: rpm[] per wheel (null for free), steer[] rad per wheel (0 default)
+    c.drive=function(rpm,steer,dt,sample,hit){
+      var A=[[0,0,0],[0,0,0],[0,0,0]],b=[0,0,0];
+      c.wheels.forEach(function(w,i){
+        if(w.caster)return;
+        var a=(steer&&steer[i])||0,ca=Math.cos(a),sa=Math.sin(a),g=w.grip==null?1:w.grip;
+        // longitudinal row (only if driven), lateral row (no side slip)
+        var rows=[],sp=(rpm&&rpm[i]!=null)?rpm[i]*2*Math.PI/60*w.R:null;
+        if(w.roller!=null){ // mecanum/omni: only velocity along (a+roller) is constrained
+          var u=a+w.roller,cu=Math.cos(u),su=Math.sin(u);
+          if(sp!=null)rows.push([[cu,su,-w.y*cu+w.x*su],sp*Math.cos(w.roller),1]);
+        } else {
+          if(w.driven!==false&&sp!=null)rows.push([[ca,sa,-w.y*ca+w.x*sa],sp,1]);
+          rows.push([[-sa,ca,w.y*sa+w.x*ca],0,g]);
+        }
+        rows.forEach(function(r){for(var p=0;p<3;p++){b[p]+=r[2]*r[0][p]*r[1];for(var q=0;q<3;q++)A[p][q]+=r[2]*r[0][p]*r[0][q];}});
+      });
+      for(var p=0;p<3;p++)A[p][p]+=1e-6;
+      var t=solve3(A,b),k=Math.min(1,dt/c.tau),ovx=c.vx;
+      c.vx+=(t[0]-c.vx)*k;c.vy+=(t[1]-c.vy)*k;c.w+=(t[2]-c.w)*k;c.ax=(c.vx-ovx)/dt;
+      var co=Math.cos(c.th),si=Math.sin(c.th);
+      c.th+=c.w*dt;c.x+=(c.vx*co-c.vy*si)*dt;c.y+=(c.vx*si+c.vy*co)*dt;c.v=c.vx;
+      // reuse sensor code with zero wheel input (no motion)
+      var sv=c.v,sw=c.w;c.v=0;c.w=0;s0.call(c,0,0,0,sample,hit);c.v=sv;c.w=sw;
+      c.imu={gz:c.w,ax:c.ax,ay:c.vx*c.w}; // MPU6050: rad/s, m/s^2
+      return c;
+    };
+    return c;
+  };
+})();
+
+// ---- collisions: rectangular body vs axis-aligned boxes/walls ----
+(function(){
+  var api=(typeof module!=='undefined'&&module.exports)?module.exports:window.Devices;
+  var base=api.vehicle;
+  api.vehicle=function(opts){
+    opts=opts||{};var c=base(opts),b=opts.body||{l:0.2,w:0.15};
+    c.obstacles=opts.obstacles||[]; // [{x,y,w,h}] x,y = min corner, metres
+    c.bump=false;var d0=c.drive;
+    // body: {l,w} rectangle, {r} circle, or {poly:[[x,y],...]} (body coords, m)
+    var loc=[];
+    if(b.poly){b.poly.forEach(function(p,i){var q=b.poly[(i+1)%b.poly.length];
+      for(var k=0;k<4;k++)loc.push([p[0]+(q[0]-p[0])*k/4,p[1]+(q[1]-p[1])*k/4]);});}
+    else if(b.r){for(var k=0;k<24;k++)loc.push([b.r*Math.cos(k*Math.PI/12),b.r*Math.sin(k*Math.PI/12)]);}
+    else{for(var i=0;i<=4;i++)for(var j=0;j<=4;j++){if(i>0&&i<4&&j>0&&j<4)continue;loc.push([(i/4-.5)*b.l,(j/4-.5)*b.w]);}}
+    function pts(){var co=Math.cos(c.th),si=Math.sin(c.th);
+      return loc.map(function(p){return[c.x+p[0]*co-p[1]*si,c.y+p[0]*si+p[1]*co];});}
+    c.drive=function(rpm,steer,dt,sample,hit){
+      d0(rpm,steer,dt,sample,hit);c.bump=false;
+      for(var it=0;it<4;it++){var moved=false;
+        pts().forEach(function(p){c.obstacles.forEach(function(o){
+          if(p[0]>o.x&&p[0]<o.x+o.w&&p[1]>o.y&&p[1]<o.y+o.h){
+            var dx=[o.x-p[0],o.x+o.w-p[0]],dy=[o.y-p[1],o.y+o.h-p[1]];
+            var mx=Math.abs(dx[0])<Math.abs(dx[1])?dx[0]:dx[1],my=Math.abs(dy[0])<Math.abs(dy[1])?dy[0]:dy[1];
+            if(Math.abs(mx)<Math.abs(my))c.x+=mx;else c.y+=my;moved=true;c.bump=true;}});});
+        if(!moved)break;}
+      if(c.bump){c.vx*=0.2;c.vy*=0.2;c.w*=0.5;c.v=c.vx;}
+      return c;};
+    return c;
+  };
+})();
