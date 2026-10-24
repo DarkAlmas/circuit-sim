@@ -51,9 +51,10 @@ const SHOT = process.argv[3] || '/tmp';
   await pg.mouse.dblclick(mid.x, mid.y); await pg.waitForTimeout(150);
   const n1 = await pg.evaluate(() => (__sim.proj.wires.find(w => w.id === 'w1').pts || []).length);
   ok(n1 >= 1, 'double-click adds a bend');
-  const bend = await pg.evaluate(() => { const el = document.querySelector('.bend'); const r = el.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; });
-  await pg.mouse.dblclick(bend.x, bend.y); await pg.waitForTimeout(150);
-  ok(await pg.evaluate(() => (__sim.proj.wires.find(w => w.id === 'w1').pts || []).length) < n1, 'double-click removes the bend');
+  const bend = await pg.evaluate(m => { let best = null, bd = 1e9; for (const el of document.querySelectorAll('.bend')) { const r = el.getBoundingClientRect(), cx = r.x + r.width / 2, cy = r.y + r.height / 2, d = Math.hypot(cx - m.x, cy - m.y); if (d < bd) { bd = d; best = { x: cx, y: cy }; } } return best; }, mid);
+  await pg.mouse.dblclick(bend.x, bend.y); await pg.waitForTimeout(200);
+  const n2 = await pg.evaluate(() => { const w = __sim.proj.wires.find(x => x.id === 'w1'); return w ? (w.pts || []).length : -1; });
+  ok(n2 >= 0 && n2 < n1, 'double-click removes the bend (' + n2 + ' < ' + n1 + ')');
   await pg.click('#props #del'); await pg.waitForTimeout(100);
   ok(await pg.evaluate(() => !__sim.proj.wires.some(w => w.id === 'w1')), 'sheet deletes the wire');
 
