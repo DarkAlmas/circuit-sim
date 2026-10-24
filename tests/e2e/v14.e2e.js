@@ -9,7 +9,7 @@ const SHOT = process.argv[3] || '/tmp';
   pg.on('console', m => { if (/Content Security Policy|Refused/i.test(m.text())) errs.push(m.text()); });
   await pg.goto(URL); await pg.evaluate(() => localStorage.clear()); await pg.reload(); await pg.waitForTimeout(300);
   const ok = (c, m) => { assert.ok(c, m); console.log('✓', m); };
-  ok(await pg.evaluate(() => [...document.scripts].filter(s => s.src).every(s => /\?v=14\.1$/.test(s.src))), 'scripts ?v=14.1');
+  ok(await pg.evaluate(() => [...document.scripts].filter(s => s.src).every(s => /\?v=14\.2$/.test(s.src))), 'scripts ?v=14.2');
 
   const thumbs = await pg.evaluate(() => {
     const items = [...document.querySelectorAll('#palette .item')];
@@ -50,7 +50,7 @@ const SHOT = process.argv[3] || '/tmp';
   ok(!extra.wireDel && extra.labels.length === 1 && extra.labels[0] === 'del', 'no floating Удалить провод');
   await pg.mouse.click(mid.x, mid.y, { button: 'right' }); await pg.waitForTimeout(100);
   const menu = await pg.evaluate(() => { const m = document.querySelector('#ctxmenu'); return m && !m.hidden ? [...m.children].map(b => b.textContent) : []; });
-  ok(menu.some(t => /изгиб/.test(t)) && !menu.some(t => /Удалить провод/.test(t)), 'right-click bend menu has no delete');
+  ok(menu.some(t => /изгиб/.test(t)) && menu.some(t => /Удалить провод/.test(t)), 'right-click menu has delete and bend');
   await pg.keyboard.press('Escape');
   ok(sheet.colors.join() === 'красный,чёрный,синий,зелёный,жёлтый,белый', 'six wire colors');
   await pg.click('[data-wcolor="синий"]'); await pg.waitForTimeout(100);
