@@ -30,7 +30,7 @@
     const pins = [...L.map((id, i) => ({ id, x: -80, y: -H / 2 + 30 + i * 20, label: lab(id), hint: hintOf(id) })), ...R.map((id, i) => ({ id, x: 80, y: -H / 2 + 30 + i * 20, label: lab(id), hint: hintOf(id) }))];
     const gpioOf = id => kind === 'esp32' ? (/^\d+$/.test(id) ? +id : null) : (NODEMCU[id] ?? null);
     return {
-      name: kind === 'esp32' ? 'ESP32 DevKit' : 'ESP8266 NodeMCU', group: 'Платы', mcu: kind, pins, gpioOf,
+      name: kind === 'esp32' ? 'ESP32 DevKit' : 'ESP8266 NodeMCU', group: 'Платы', mcu: kind, vio: 3.3, builtin: 2, pins, gpioOf,
       ground: id => id.startsWith('GND'),
       box: kind === 'esp32' ? [-84, -H / 2 - 6, 168, H + 12] : [-84, -H / 2 - 6, 168, H + 12],
       draw: (p, st) => { const T = -H / 2, B = H / 2, e32 = kind === 'esp32';
@@ -111,7 +111,7 @@
       measure: (p, sol, ctx) => { const i1 = sol.currents[p._e1], i2 = sol.currents[p._e2];
         const U = ctx.v(p, 'a') - ctx.v(p, 'b'); const P = Math.abs((ctx.v(p, 'a') - ctx.v(p, 'w')) * i1) + Math.abs((ctx.v(p, 'w') - ctx.v(p, 'b')) * i2);
         return { U, I: i1, P, pinI: { a: i1, w: i2 - i1, b: -i2 } }; } },
-    led: { name: 'Светодиод', group: 'Полупроводники', props: { color: 'красный', Vf: 1.8, Imax: 0.02 }, pins: [{ id: 'a', x: -40, y: 0, label: 'A', hint: 'Анод +' }, { id: 'b', x: 40, y: 0, label: 'K', hint: 'Катод −' }],
+    led: { name: 'Светодиод', group: 'Индикация', props: { color: 'красный', Vf: 1.8, Imax: 0.02 }, pins: [{ id: 'a', x: -40, y: 0, label: 'A', hint: 'Анод +' }, { id: 'b', x: 40, y: 0, label: 'K', hint: 'Катод −' }],
       box: [-44, -46, 88, 70],
       draw: (p, st) => { const c = LED_COLORS[p.props.color]?.[0] || '#f33', b = st.burned ? 0 : Math.min(1, (st.I || 0) / 0.015);
         return `<path d="M-40 0 H-5 V-12" class="leg"/><path d="M40 0 H5 V-12" class="leg"/>
@@ -177,5 +177,6 @@
     for (const [k, s] of pre) if (a >= k * 0.9995) { const v = x / k; return fmtNum(v, Math.abs(v) >= 100 ? 0 : Math.abs(v) >= 10 ? 1 : 2) + ' ' + s + u; }
     return fmtNum(x / 1e-9, 1) + ' н' + u;
   }
+  window.PartsLib = { two, lead, r2, meas2, source, bands, LED_COLORS };
   window.PARTS = PARTS; window.resistorBands = bands; window.LED_COLORS = LED_COLORS; window.fmtUnit = fmtUnit; window.fmtNum = fmtNum; window.e12up = e12up;
 })();

@@ -20,7 +20,7 @@
       for (const q of d.pins) { const k = find(key(p.id, q.id));
         if (d.ground && d.ground(q.id)) groundRoots.add(k);
         if (d.source && q.id === d.source.plus) plusRoots.add(k);
-        if (d.mcu && /^(3V3|VIN)/.test(q.id)) plusRoots.add(k); } }
+        if (d.mcu && (d.supplies ? Object.prototype.hasOwnProperty.call(d.supplies, q.id) : /^(3V3|VIN)/.test(q.id))) plusRoots.add(k); } }
     if (!groundRoots.size) { const s = project.parts.find(p => P[p.type].source); if (s) groundRoots.add(find(key(s.id, P[s.type].source.minus))); }
     const node = new Map(); let n = 1;
     for (const k of parent.keys()) { if (bbIds.has(k.slice(0, k.indexOf(':')))) continue; const r = find(k); if (!node.has(r)) node.set(r, groundRoots.has(r) ? 0 : n++); }
@@ -40,7 +40,7 @@
     return { circuit: { nodeCount: count, elements }, nets: N, ctx };
   }
   function supplyMax(project) {
-    let m = 0; for (const p of project.parts) { if (p.type === 'dc') m = Math.max(m, +p.props.V); if (p.type === 'battery') m = Math.max(m, 9); if (window.PARTS[p.type].mcu) m = Math.max(m, 3.3); }
+    let m = 0; for (const p of project.parts) { if (p.type === 'dc') m = Math.max(m, +p.props.V); if (p.type === 'battery') m = Math.max(m, 9); if (window.PARTS[p.type].mcu) m = Math.max(m, window.PARTS[p.type].vio || 3.3); }
     return m || 5;
   }
   window.Netlist = { build, nets, supplyMax };

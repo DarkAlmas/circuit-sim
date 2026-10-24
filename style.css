@@ -64,3 +64,20 @@ h4{margin:10px 0 4px;font-size:12px;color:#8a94a8;text-transform:uppercase}
 /* v4: keep the project dropdown inside narrow screens */
 #projects{max-width:100%;min-width:0;box-sizing:border-box}
 @media (max-width:760px){#projects{width:100%;flex:1 1 100%}}
+/* v5: desktop layout, modals, displays */
+@media (min-width:761px){#left{width:260px}#right{width:320px}
+  body.dock footer#bottom{display:flex;height:35vh;min-height:180px}body.dock footer.min{height:auto;min-height:0}
+  body.dock #codeDock{flex:1 1 60%;min-width:0;position:relative;border-right:1px solid #2a3242}body.dock #codeDock #codePane{position:absolute;inset:0}
+  body.dock footer.min #codeDock{display:none}
+  body.dock #bside{flex:1 1 40%;min-width:0;display:flex;flex-direction:column}body.dock #bside .pane{height:auto;flex:1}
+}
+#codeDock:empty{display:none}
+.modal{position:fixed;inset:0;background:rgba(5,8,14,.75);display:flex;align-items:center;justify-content:center;z-index:50}.modal[hidden]{display:none}
+.mbox{background:#161b27;border:1px solid #2a3242;border-radius:12px;padding:14px;width:min(760px,94vw);max-height:90vh;overflow:auto}
+.mhead{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}
+.ncards{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:10px}
+.ncard{display:flex;flex-direction:column;align-items:flex-start;gap:4px;padding:12px;text-align:left;border-radius:10px;background:#1f2636;border:1px solid #2a3242;min-height:96px}
+.ncard:hover{border-color:#3fb37f}.nic{font-size:26px}
+.hbox{width:min(96vw,calc(88vh * 16 / 9));background:#000;border-radius:8px;padding:8px}.hbox canvas{width:100%;height:auto;display:block;background:#000}
+.pix{image-rendering:pixelated}.warnt{fill:#ffb020}
+input[type=range]{width:100%}

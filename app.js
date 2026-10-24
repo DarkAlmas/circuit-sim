@@ -28,7 +28,7 @@
   const triple = m => m ? `${fU(m.U, 'В')} · ${fU(Math.abs(m.I), 'А')} · ${fU(m.P, 'Вт')}` : 'нет данных';
 
   /* ---------- palette ---------- */
-  const GROUPS = ['Платы', 'Питание', 'Пассивные', 'Полупроводники', 'Ввод/вывод'];
+  const GROUPS = ['Платы', 'Питание', 'Микросхемы', 'Индикация', 'Активные', 'Датчики', 'Пассивные', 'Полупроводники', 'Ввод/вывод'];
   function palette() {
     const q = $('#search').value.trim().toLowerCase();
     $('#palette').innerHTML = GROUPS.map(g => { const items = Object.entries(P).filter(([k, d]) => d.group === g && (!q || d.name.toLowerCase().includes(q)));
@@ -40,7 +40,7 @@
   svg.addEventListener('dragover', e => e.preventDefault());
   svg.addEventListener('drop', e => { e.preventDefault(); const t = e.dataTransfer.getData('text/part'); if (t) addPart(t, ...toWorld(e.clientX, e.clientY)); });
   function addPart(type, x, y) {
-    const d = P[type]; const p = { id: uid(d.mcu ? 'U' : { resistor: 'R', led: 'D', diode: 'D', npn: 'Q', button: 'S', switch: 'S', pot: 'RV', dc: 'V', battery: 'B', gnd: 'G', breadboard: 'BB', voltmeter: 'PV', ammeter: 'PA' }[type] || 'X'), type, x: snap(x), y: snap(y), rot: 0, props: clone(d.props || {}) };
+    const d = P[type]; const p = { id: uid(d.prefix || (d.mcu ? 'U' : null) || { resistor: 'R', led: 'D', diode: 'D', npn: 'Q', button: 'S', switch: 'S', pot: 'RV', dc: 'V', battery: 'B', gnd: 'G', breadboard: 'BB', voltmeter: 'PV', ammeter: 'PA' }[type] || 'X'), type, x: snap(x), y: snap(y), rot: 0, props: clone(d.props || {}) };
     proj.parts.push(p); sel = { part: p.id }; changed();
   }
 
@@ -65,20 +65,24 @@
         (running && !shorts.length && Math.abs(w.I || 0) > 1e-6 ? `<path d="${d}" class="flow" stroke-dashoffset="${-(flowOff[w.id] || 0)}"/>` : '') +
         (isSel && !locked() ? (w.pts || []).map((q, i) => `<circle class="bend" data-wire="${esc(w.id)}" data-i="${i}" cx="${q[0]}" cy="${q[1]}" r="5"/>`).join('') : ''); }).join('');
     partsL.innerHTML = [...proj.parts].sort((a, b) => !!P[b.type].strips - !!P[a.type].strips).map(p => { const d = P[p.type], [bx, by, bw, bh] = bbox(p.type), c = checks[p.id];
-      const st = { I: meas[p.id]?.I, m: meas[p.id], burned: p.burned, led2: running && gpio[2]?.mode === 'OUTPUT' && gpio[2].val > 0 };
+      const bi = d.builtin ?? 2, dk = d.display, link = links[p.id];
+      const st = { I: meas[p.id]?.I, m: meas[p.id], burned: p.burned, running, led2: running && gpio[bi]?.mode === 'OUTPUT' && gpio[bi].val > 0,
+        mod: dk ? p._mod : null, img: dk ? imgs[dk] : null, on: link ? link.on : undefined, why: link ? link.why : '', anim: animT[p.id] || 0 };
       const sh = shortSet.has(p.id) || shorts.some(z => z.source === p.id), t = performance.now() / 1000;
       const smoke = p.burned ? [0, 1, 2].map(k => { const f = ((t * 0.6 + k / 3) % 1); return `<circle class="smoke" cx="${Math.sin((t + k) * 2) * 6 * f}" cy="${by - 4 - f * 40}" r="${4 + f * 10}" opacity="${(0.55 * (1 - f)).toFixed(2)}"/>`; }).join('') : '';
       return `<g class="part${sel && sel.part === p.id ? ' sel' : ''}${c ? ' ' + c.level : ''}${p.burned ? ' burned' : ''}${sh ? ' short' + (blink ? ' on' : '') : ''}" data-part="${esc(p.id)}" transform="translate(${p.x} ${p.y}) rotate(${(p.rot || 0) * 90})">
         <rect class="hit" x="${bx}" y="${by}" width="${bw}" height="${bh}" rx="6"/><g class="art">${d.draw(p, st)}</g>${smoke}
         ${d.pins.map(q => `<circle class="pin${d.strips ? ' hole' : ''}${armed && armed.part === p.id && armed.pin === q.id ? ' armed' : ''}" data-pin="${q.id}" cx="${q.x}" cy="${q.y}" r="${d.strips ? 3 : 4}"/>`).join('')}</g>`; }).join('');
     $('#simbar').hidden = !running; $('#simbar').classList.toggle('bad', !!shorts.length); $('#svg').classList.toggle('locked', locked());
-    $('#boardName').textContent = (proj.parts.find(p => P[p.type].mcu) && P[proj.parts.find(p => P[p.type].mcu).type].name) || 'нет платы (добавь ESP32 или ESP8266)';
+    $('#boardName').textContent = (proj.parts.find(p => P[p.type].mcu) && P[proj.parts.find(p => P[p.type].mcu).type].name) || 'нет платы';
     updateTip();
   }
   function changed() { prevV = null; autosave(); render(); props(); calc(); }
 
   /* ---------- properties panel ---------- */
-  const PROP_UI = { V: ['Напряжение', 'В', 0.1], R: ['Сопротивление', 'Ом', 1], Pmax: ['Допустимая мощность', 'Вт', 0.05], pos: ['Положение движка', '', 0.01], Vf: ['Прямое напряжение Vf', 'В', 0.1], Imax: ['Макс. ток', 'А', 0.001], beta: ['Коэффициент усиления β (hFE)', '', 1], rInt: ['Внутреннее сопротивление rInt', 'Ом', 0.01] };
+  const PROP_UI = { V: ['Напряжение', 'В', 0.1], R: ['Сопротивление', 'Ом', 1], Pmax: ['Допустимая мощность', 'Вт', 0.05], pos: ['Положение движка', '', 0.01], Vf: ['Прямое напряжение Vf', 'В', 0.1], Imax: ['Макс. ток', 'А', 0.001], beta: ['Коэффициент усиления β (hFE)', '', 1], rInt: ['Внутреннее сопротивление rInt', 'Ом', 0.01],
+    C: ['Ёмкость', 'Ф', 'any'], L: ['Индуктивность', 'Гн', 'any'] };
+  const SLIDERS = { lux: ['Освещённость', 'лк', 0, 1000, 1], temp: ['Температура', '°C', -40, 125, 0.5], hum: ['Влажность', '%', 0, 100, 1], dist: ['Расстояние', 'см', 2, 400, 1] };
   const E12V = []; for (let e = 0; e <= 6; e++) for (const m of [1, 1.2, 1.5, 1.8, 2.2, 2.7, 3.3, 3.9, 4.7, 5.6, 6.8, 8.2]) E12V.push(+(m * Math.pow(10, e)).toPrecision(3));
   const RUNITS = [['Ом', 1], ['кОм', 1e3], ['МОм', 1e6]];
   function icon(p) { const [bx, by, bw, bh] = bbox(p.type); return `<svg class="ico" viewBox="${bx} ${by} ${bw} ${bh}"><g>${P[p.type].draw({ ...p, burned: false }, { I: 0 })}</g></svg>`; }
@@ -104,6 +108,7 @@
           h += `<label class="prop">Сопротивление<span class="rrow"><input data-k="R" type="number" min="0" step="any" value="${esc(+(pr.R / u[1]).toPrecision(6))}"><select id="runit">${RUNITS.map(x => `<option value="${x[1]}"${x === u ? ' selected' : ''}>${x[0]}</option>`).join('')}</select>
             <select id="e12"><option value="">E12…</option>${E12V.map(v => `<option value="${v}"${v === pr.R ? ' selected' : ''}>${esc(fmtUnit(v, 'Ом'))}</option>`).join('')}</select></span></label>
             <div class="bands">${resistorBands(pr.R).map(c => `<svg viewBox="0 0 10 20"><rect width="10" height="20" fill="${c}"/></svg>`).join('')}</div>`; }
+        else if (SLIDERS[k]) { const [nm, u, lo, hi, stp] = SLIDERS[k]; h += `<label class="prop">${nm}: <b class="sv" data-sv="${k}">${esc(pr[k])}</b> ${u}<input data-k="${k}" type="range" min="${lo}" max="${hi}" step="${stp}" value="${esc(pr[k])}"></label>`; }
         else { const ui = PROP_UI[k] || [k, '', 'any']; h += `<label class="prop">${ui[0]}${ui[1] ? ', ' + ui[1] : ''}<input data-k="${k}" type="${k === 'pos' ? 'range' : 'number'}" step="${ui[2]}" ${k === 'pos' ? 'min="0" max="1"' : 'min="0"'} value="${esc(pr[k])}"></label>`; }
       } }
     h += '<h4>Сейчас</h4>';
@@ -113,7 +118,7 @@
       <div class="row"><button id="rot">⟳ Повернуть (R)</button><a href="#" id="showCalc" class="link">Показать расчёт</a></div>`;
     el.innerHTML = h;
     el.querySelectorAll('input[data-k]').forEach(i => { i.oninput = () => { const k = i.dataset.k; let v = +i.value; if (!Number.isFinite(v)) return;
-      if (k === 'R') v *= +$('#runit').value; p.props[k] = Math.max(k === 'R' || k === 'rInt' ? 0.001 : 0, v);
+      if (k === 'R') v *= +$('#runit').value; p.props[k] = SLIDERS[k] ? v : Math.max(k === 'R' || k === 'rInt' ? 0.001 : 0, v); const sv = el.querySelector(`[data-sv="${k}"]`); if (sv) sv.textContent = String(v);
       if (k === 'R') { const bs = el.querySelectorAll('.bands rect'); resistorBands(p.props.R).forEach((c, j) => bs[j].setAttribute('fill', c)); }
       commitProp(); }; });
     if ($('#runit')) $('#runit').onchange = () => { const i = el.querySelector('input[data-k="R"]'); p.props.R = Math.max(0.001, +i.value * +$('#runit').value); commitProp(); props(); };
@@ -231,7 +236,9 @@
   svg.addEventListener('pointerup', up); svg.addEventListener('pointercancel', up);
   svg.addEventListener('pointerleave', () => { hover = null; updateTip(); });
   // double-click is detected manually: pointer capture + re-render swallow native dblclick events
-  function onDbl(e) { if (locked()) return; const tg = document.elementFromPoint(e.clientX, e.clientY); if (!tg) return;
+  function onDbl(e) { const tg = document.elementFromPoint(e.clientX, e.clientY); if (!tg) return;
+    const pg = tg.closest('.part'); if (pg && part(pg.dataset.part) && P[part(pg.dataset.part).type].display === 'hdmi') { openHdmi(); return; }
+    if (locked()) return;
     const bendEl = tg.closest('.bend'); if (bendEl) { const w = proj.wires.find(x => x.id === bendEl.dataset.wire); w.pts.splice(+bendEl.dataset.i, 1); changed(); return; }
     const wireEl = tg.closest('.wire'); if (!wireEl) return; const w = proj.wires.find(x => x.id === wireEl.dataset.wire); if (!w) return;
     const [wx, wy] = toWorld(e.clientX, e.clientY), Q = wirePts(w);
@@ -270,7 +277,11 @@
       if (m && d.check) { const c = d.check(p, m, ctx); checks[p.id] = c || null; if (c && (!alert || c.level === 'burn')) alert = c; } }
     // inputs for the sketch
     const mcu = proj.parts.find(p => P[p.type].mcu);
-    if (worker && mcu) { const v = {}; for (const q of P[mcu.type].pins) { const g = P[mcu.type].gpioOf(q.id); if (g != null) v[g] = ctx.v(mcu, q.id); } worker.postMessage({ t: 'in', v }); }
+    links = {}; for (const p of proj.parts) { const d = P[p.type]; if (!d.display && !d.sensor) continue; links[p.id] = linkState(p, mcu, b.nets, meas[p.id]); }
+    for (const p of proj.parts) if (p.type === 'motor') { const i = Math.abs(meas[p.id]?.I || 0); animT[p.id] = ((animT[p.id] || 0) + Math.min(40, i * 120)) % 360; }
+    if (worker && mcu) { const v = {}; for (const q of P[mcu.type].pins) { const g = P[mcu.type].gpioOf(q.id); if (g != null) v[g] = ctx.v(mcu, q.id); }
+      const s = {}; for (const p of proj.parts) { const d = P[p.type]; if (!d.sensor || !links[p.id] || !links[p.id].on) continue; if (d.sensor === 'dht') { s.temp = p.props.temp; s.hum = p.props.hum; } else if (d.sensor === 'sonar') s.dist = p.props.dist; }
+      worker.postMessage({ t: 'in', v, s }); }
     const a = $('#alert'); const txt = alert ? alert.msg : '';
     if (txt !== lastAlert) { lastAlert = txt; a.hidden = !alert; if (alert) { a.textContent = (shorts.length ? '' : alert.level === 'burn' ? '🔥 ' : '⚠ ') + alert.msg; a.className = alert.level; } }
     if (sel && sel.part && part(sel.part) && !!part(sel.part).burned !== !!$('#fix')) props();
@@ -278,34 +289,65 @@
     render(); live(); calc();
     raf = requestAnimationFrame(tick);
   }
+  /* display/sensor modules: need power and a data pin on the same net as some MCU pin (protocol itself is not simulated) */
+  let links = {}, imgs = {}, animT = {};
+  function linkState(p, mcu, nets, m) {
+    const d = P[p.type], data = d.dataPin || (d.pins.find(q => /^(DIN|DI|SDA|SIG|DATA|IN|TRIG|HDMI)$/.test(q.id)) || {}).id;
+    if (!mcu) return { on: false, why: 'нет платы' };
+    if (d.display === 'hdmi') { const a = nets.netOf ? nets.netOf(p.id, 'HDMI') : null, mb = P[mcu.type].pins.some(q => q.id === 'HDMI') && nets.netOf ? nets.netOf(mcu.id, 'HDMI') : null;
+      return a != null && a === mb ? { on: true } : { on: false, why: 'Нет сигнала' }; }
+    if (m && m.powered === false) return { on: false, why: 'нет питания' };
+    if (!data || !nets.netOf) return { on: true };
+    const n = nets.netOf(p.id, data); const ok = P[mcu.type].pins.some(q => P[mcu.type].gpioOf(q.id) != null && nets.netOf(mcu.id, q.id) === n);
+    return ok ? { on: true } : { on: false, why: 'данные не подключены' };
+  }
+  const cv = {}; let hdmiThumbT = 0;
+  function onFrame(k, bmp) {
+    let c = cv[k]; if (!c) { c = cv[k] = document.createElement('canvas'); c.width = bmp.width; c.height = bmp.height; }
+    c.getContext('2d').drawImage(bmp, 0, 0); bmp.close && bmp.close();
+    if (k === 'hdmi') { const fc = $('#hdmiCanvas'); if (!$('#hdmiFull').hidden) fc.getContext('2d').drawImage(c, 0, 0);
+      const t = performance.now(); if (t - hdmiThumbT < 100) return; hdmiThumbT = t;
+      const th = cv.hth || (cv.hth = Object.assign(document.createElement('canvas'), { width: 320, height: 180 })); th.getContext('2d').drawImage(c, 0, 0, 320, 180); imgs.hdmi = th.toDataURL('image/png'); }
+    else imgs[k] = c.toDataURL('image/png');
+  }
+  function lcdImage(lines) { const c = cv.lcd || (cv.lcd = Object.assign(document.createElement('canvas'), { width: 336, height: 84 })), g = c.getContext('2d');
+    g.clearRect(0, 0, 336, 84); g.fillStyle = '#1b2a06'; g.font = 'bold 30px monospace'; g.textBaseline = 'top';
+    lines.slice(0, 2).forEach((l, r) => [...String(l).slice(0, 16)].forEach((ch, i) => g.fillText(ch, 4 + i * 20.7, 6 + r * 40))); imgs.lcd = c.toDataURL('image/png'); }
+  function onMod(m) { const target = proj.parts.find(p => P[p.type].display === m.k); if (!target) return;
+    if (m.k === 'strip') { target._mod = { px: Array.isArray(m.px) ? m.px.slice(0, 256).map(x => x | 0) : [] }; }
+    else if (m.k === 'matrix') target._mod = { rows: Array.isArray(m.rows) ? m.rows.slice(0, 8).map(x => x & 255) : [] };
+    else if (m.k === 'servo') target._mod = { a: Math.max(0, Math.min(180, +m.a || 0)) };
+    else if (m.k === 'lcd' && Array.isArray(m.lines)) { target._mod = {}; lcdImage(m.lines.map(String)); } }
   const con = $('#console');
   function log(s, cls) { const span = document.createElement('span'); if (cls) span.className = cls; span.textContent = s; con.appendChild(span); if (con.textContent.length > 20000) con.textContent = con.textContent.slice(-10000); con.scrollTop = 1e9; }
   function start() {
     if (running) return; proj.code = $('#code').value; autosave();
-    proj.parts.forEach(p => { delete p.burned; delete p.on; }); gpio = {}; prevV = null; lastAlert = null; con.textContent = '';
+    proj.parts.forEach(p => { delete p.burned; delete p.on; delete p._mod; }); gpio = {}; imgs = {}; links = {}; prevV = null; lastAlert = null; con.textContent = '';
     running = true; $('#run').disabled = true; $('#stop').disabled = false;
     const mcu = proj.parts.find(p => P[p.type].mcu);
     if (mcu && proj.code.trim()) {
-      worker = new Worker('worker.js?v=4'); lastHb = performance.now();
+      worker = new Worker('worker.js?v=5'); lastHb = performance.now();
       worker.onmessage = e => { const m = e.data; lastHb = performance.now();
         if (m.t === 'pin') { const s = gpio[m.pin] || (gpio[m.pin] = { mode: 'INPUT', val: 0 }); if (m.mode) s.mode = m.mode; if (m.val != null) { s.val = m.val; if (s.mode !== 'OUTPUT' && m.val != null && !m.mode) s.mode = s.mode; } }
+        else if (m.t === 'mod') onMod(m); else if (m.t === 'frame' && (m.k === 'oled' || m.k === 'hdmi') && m.bmp) onFrame(m.k, m.bmp);
         else if (m.t === 'log') log(m.s); else if (m.t === 'err') { log(m.s + '\n', 'err'); showTab('console'); } };
       worker.onerror = e => { log('Ошибка скетча: ' + e.message + '\n', 'err'); showTab('console'); };
-      worker.postMessage({ t: 'start', code: proj.code, board: P[mcu.type].mcu });
+      const mods = {}; for (const p of proj.parts) { const d = P[p.type]; if (d.display === 'strip') mods.strip = Math.max(mods.strip || 0, d.n || 0); else if (d.display) mods[d.display] = 1; }
+      worker.postMessage({ t: 'start', code: proj.code, board: P[mcu.type].mcu, mods });
       wd = setInterval(() => { if (worker && performance.now() - lastHb > 2000) { worker.terminate(); worker = null; gpio = {}; prevV = null;
         log('Скетч остановлен: нет ответа 2 с (бесконечный цикл без delay?).\n', 'err'); showTab('console'); } }, 500);
     }
-    $('#codePane').hidden = true; $('#codeTab').classList.remove('on');
+    if (!desktop()) { $('#codePane').hidden = true; $('#codeTab').classList.remove('on'); }
     tick();
   }
   function stop() {
     running = false; shorts = []; shortSet = new Set(); shortSig = ''; $('#shortBox').hidden = true; $('#simText').hidden = false; cancelAnimationFrame(raf); clearInterval(wd); if (worker) worker.terminate(); worker = null; gpio = {}; sim = null;
-    for (const k in meas) delete meas[k]; for (const k in checks) delete checks[k]; proj.parts.forEach(p => { delete p.burned; });
+    for (const k in meas) delete meas[k]; for (const k in checks) delete checks[k]; proj.parts.forEach(p => { delete p.burned; delete p._mod; }); links = {}; imgs = {};
     $('#run').disabled = false; $('#stop').disabled = true; $('#status').textContent = 'Остановлено'; $('#alert').hidden = true;
     render(); live(); calc();
   }
   $('#run').onclick = start; $('#stop').onclick = stop;
-  $('#codeTab').onclick = () => { const h = $('#codePane').hidden; $('#codePane').hidden = !h; $('#codeTab').classList.toggle('on', h); if (h) $('#code').focus(); };
+  $('#codeTab').onclick = () => { if (desktop()) { $('#bottom').classList.remove('min'); $('#code').focus(); return; } const h = $('#codePane').hidden; $('#codePane').hidden = !h; $('#codeTab').classList.toggle('on', h); if (h) $('#code').focus(); };
   $('#code').oninput = () => { proj.code = $('#code').value; autosave(); };
   $('#code').addEventListener('keydown', e => { if (e.key === 'Tab') { e.preventDefault(); document.execCommand('insertText', false, '  '); } });
 
@@ -327,11 +369,31 @@
   $('#projects').onchange = e => { const v = e.target.value; if (!v) return; open(v.startsWith('ex:') ? window.EXAMPLES[v.slice(3)] : (Object.prototype.hasOwnProperty.call(saved(), v.slice(3)) ? saved()[v.slice(3)] : {})); };
   $('#save').onclick = () => { let n = prompt('Название проекта:', proj.name || 'Мой проект'); if (!n) return; n = String(n).slice(0, 64); proj.name = n; proj.code = $('#code').value;
     const s = saved(); s[n] = { ...strip(proj), name: n }; localStorage.setItem(LS, JSON.stringify(s)); projList(n); $('#status').textContent = 'Сохранено: ' + n; };
-  $('#new').onclick = () => open({ parts: [], wires: [], code: 'void setup() {\n  \n}\n\nvoid loop() {\n  \n}\n' });
+  /* new-project chooser (cards built with createElement/textContent only) */
+  const NEWP = [['esp32', '📶', 'ESP32', 'Wi-Fi плата, 3,3 В, мигалка'], ['esp8266', '📡', 'ESP8266', 'NodeMCU, кнопка и светодиод'], ['uno', '🟦', 'Arduino Uno', '5 В, матрица 8×8 MAX7219'],
+    ['attiny', '🐜', 'ATtiny85 на макетке', 'DIP-8 чип, батарейка, светодиод'], ['pico', '🍓', 'Raspberry Pi Pico', '3,3 В, лента WS2812'], ['opi', '🖥', 'Orange Pi (Python + HDMI)', 'Python, монитор 1920×1080'],
+    ['analog', '🔋', 'Чистая электроника', 'Батарейка, резистор, светодиод'], ['empty', '⬜', 'Пустой', 'Чистый лист']];
+  function newDialog() { const m = $('#newModal'), g = $('#newCards'); g.textContent = '';
+    for (const [k, ic, nm, ln] of NEWP) { const b = document.createElement('button'); b.className = 'ncard'; b.dataset.kind = k;
+      const i = document.createElement('span'); i.className = 'nic'; i.textContent = ic; const t = document.createElement('b'); t.textContent = nm; const s2 = document.createElement('span'); s2.className = 'muted'; s2.textContent = ln;
+      b.append(i, t, s2); b.onclick = () => { m.hidden = true; const st = window.STARTERS && window.STARTERS[k]; open(st ? JSON.parse(JSON.stringify(st)) : { parts: [], wires: [], code: '' }); }; g.appendChild(b); }
+    m.hidden = false; }
+  $('#new').onclick = newDialog; $('#newClose').onclick = () => { $('#newModal').hidden = true; };
+  $('#newModal').addEventListener('click', e => { if (e.target.id === 'newModal') e.target.hidden = true; });
+  function openHdmi() { const o = $('#hdmiFull'), fc = $('#hdmiCanvas'); o.hidden = false; const g = fc.getContext('2d'); g.fillStyle = '#000'; g.fillRect(0, 0, 1920, 1080);
+    if (cv.hdmi) g.drawImage(cv.hdmi, 0, 0); else { g.fillStyle = '#888'; g.font = '64px sans-serif'; g.textAlign = 'center'; g.fillText('Нет сигнала', 960, 540); g.textAlign = 'start'; } }
+  $('#hdmiClose').onclick = () => { $('#hdmiFull').hidden = true; };
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') { $('#hdmiFull').hidden = true; $('#newModal').hidden = true; } });
+  /* desktop: code editor docks into the bottom panel, Serial on the right */
+  const desktop = () => window.matchMedia('(min-width: 761px)').matches;
+  function layout() { const cp = $('#codePane'), dock = $('#codeDock'); if (!dock) return;
+    if (desktop()) { if (cp.parentNode !== dock) dock.appendChild(cp); cp.hidden = false; document.body.classList.add('dock'); }
+    else { if (cp.parentNode === dock) $('#center').appendChild(cp); document.body.classList.remove('dock'); } }
+  window.matchMedia('(min-width: 761px)').addEventListener('change', layout);
   $('#export').onclick = () => { proj.code = $('#code').value; const a = document.createElement('a');
     a.href = URL.createObjectURL(new Blob([JSON.stringify({ ...strip(proj), format: 'circuitsim/1' }, null, 2)], { type: 'application/json' })); a.download = (proj.name || 'circuit') + '.json'; a.click(); };
-  $('#import').onchange = async e => { const f = e.target.files[0]; if (!f) return; try { const d = JSON.parse(await f.text());
-    if (!Array.isArray(d.parts) || !Array.isArray(d.wires)) throw new Error('неизвестный формат'); open(d); } catch (err) { alert('Не удалось импортировать: ' + err.message); } e.target.value = ''; };
+  $('#import').onchange = async e => { const f = e.target.files[0]; if (!f) return; try { if (f.size > window.SANITIZE_LIMITS.importBytes) throw new Error('файл больше 2 МБ');
+    open(parseProjectText(await f.text())); } catch (err) { alert('Не удалось импортировать: ' + err.message); } e.target.value = ''; };
   function fit() { if (!proj.parts.length) return; const xs = proj.parts.map(p => p.x), ys = proj.parts.map(p => p.y), r = svg.getBoundingClientRect();
     cam.s = 1; cam.x = r.width / 2 - (Math.min(...xs) + Math.max(...xs)) / 2; cam.y = r.height / 2 - (Math.min(...ys) + Math.max(...ys)) / 2; }
 
@@ -340,7 +402,7 @@
     const xs = pts.map(q => q[0]), ys = pts.map(q => q[1]), r = svg.getBoundingClientRect(), w = Math.max(...xs) - Math.min(...xs) + 160, h = Math.max(...ys) - Math.min(...ys) + 160;
     cam.s = Math.min(2.5, Math.max(0.25, Math.min(r.width / w, r.height / h))); cam.x = r.width / 2 - cam.s * (Math.min(...xs) + Math.max(...xs)) / 2; cam.y = r.height / 2 - cam.s * (Math.min(...ys) + Math.max(...ys)) / 2; render(); };
   lastJ = JSON.stringify(strip(proj));
-  palette(); projList(); $('#code').value = proj.code ?? DEFAULT_CODE; fit(); render(); props(); calc();
+  layout(); palette(); projList(); $('#code').value = proj.code ?? DEFAULT_CODE; fit(); render(); props(); calc();
   window.addEventListener('resize', () => { if (!running) render(); });
   window.__sim = { get proj() { return proj; }, get meas() { return meas; }, start, stop, undo, get gpio() { return gpio; }, get shorts() { return shorts; }, get cam() { return cam; }, select: id => { sel = { part: id }; props(); calc(); render(); } };
 })();

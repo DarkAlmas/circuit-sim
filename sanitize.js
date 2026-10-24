@@ -1,13 +1,16 @@
 /* Strict validation of untrusted project data (import, localStorage, examples). */
 (function () {
   const ID = /^[A-Za-z0-9_-]{1,32}$/;
-  const NUM = { V: [0, 1000], R: [0.001, 1e9], Pmax: [0.001, 1000], pos: [0, 1], Vf: [0.1, 10], Imax: [0.0001, 10], beta: [1, 2000], rInt: [0.001, 100] };
+  const NUM = { V: [0, 1000], R: [0.001, 1e9], Pmax: [0.001, 1000], pos: [0, 1], Vf: [0.1, 10], Imax: [0.0001, 10], beta: [1, 2000], rInt: [0.001, 100],
+    C: [1e-12, 1], L: [1e-9, 10], lux: [0, 100000], temp: [-40, 125], hum: [0, 100], dist: [2, 400] };
+  const KINDS = ['esp32', 'esp8266', 'uno', 'attiny', 'pico', 'opi', 'analog', 'empty'];
+  const LIMITS = { parts: 500, wires: 2000, pts: 50, code: 100000, importBytes: 2 * 1024 * 1024 };
   const num = (v, lo, hi, d) => { const n = Number(v); return Number.isFinite(n) ? Math.min(hi, Math.max(lo, n)) : d; };
   function sanitizeProject(raw) {
     const P = window.PARTS, out = { parts: [], wires: [], code: '' };
     if (!raw || typeof raw !== 'object') throw new Error('не объект');
     const ids = new Set();
-    for (const p of Array.isArray(raw.parts) ? raw.parts.slice(0, 500) : []) {
+    for (const p of Array.isArray(raw.parts) ? raw.parts.slice(0, LIMITS.parts) : []) {
       if (!p || typeof p !== 'object' || typeof p.type !== 'string' || !Object.prototype.hasOwnProperty.call(P, p.type)) continue;
       if (typeof p.id !== 'string' || !ID.test(p.id) || ids.has(p.id)) continue;
       const d = P[p.type], props = {};
@@ -22,16 +25,25 @@
     const byId = new Map(out.parts.map(p => [p.id, p])), wids = new Set();
     const end = e => { if (!e || typeof e !== 'object' || typeof e.part !== 'string' || typeof e.pin !== 'string') return null;
       const p = byId.get(e.part); if (!p || !P[p.type].pins.some(q => q.id === e.pin)) return null; return { part: e.part, pin: e.pin }; };
-    for (const w of Array.isArray(raw.wires) ? raw.wires.slice(0, 2000) : []) {
+    for (const w of Array.isArray(raw.wires) ? raw.wires.slice(0, LIMITS.wires) : []) {
       if (!w || typeof w.id !== 'string' || !ID.test(w.id) || wids.has(w.id)) continue;
       const a = end(w.a), b = end(w.b); if (!a || !b) continue;
-      const pts = Array.isArray(w.pts) ? w.pts.slice(0, 50).filter(q => Array.isArray(q) && q.length === 2 && q.every(Number.isFinite)).map(q => [q[0], q[1]]) : [];
+      const pts = Array.isArray(w.pts) ? w.pts.slice(0, LIMITS.pts).filter(q => Array.isArray(q) && q.length === 2 && q.every(Number.isFinite)).map(q => [q[0], q[1]]) : [];
       wids.add(w.id); out.wires.push({ id: w.id, a, b, pts });
     }
-    out.code = typeof raw.code === 'string' ? raw.code.slice(0, 100000) : '';
+    out.code = typeof raw.code === 'string' ? raw.code.slice(0, LIMITS.code) : '';
     if (typeof raw.name === 'string') out.name = raw.name.slice(0, 64);
+    if (typeof raw.kind === 'string' && KINDS.includes(raw.kind)) out.kind = raw.kind;
     return out;
   }
+  /* Parse untrusted JSON text (file import) with a size cap before sanitizing. */
+  function parseProjectText(text) {
+    if (typeof text !== 'string') throw new Error('не текст');
+    if (text.length > LIMITS.importBytes) throw new Error('файл больше 2 МБ');
+    const d = JSON.parse(text);
+    if (!d || !Array.isArray(d.parts) || !Array.isArray(d.wires)) throw new Error('неизвестный формат');
+    return sanitizeProject(d);
+  }
   const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-  window.sanitizeProject = sanitizeProject; window.esc = esc; window.ID_RE = ID;
+  window.sanitizeProject = sanitizeProject; window.parseProjectText = parseProjectText; window.SANITIZE_LIMITS = LIMITS; window.PROJECT_KINDS = KINDS; window.esc = esc; window.ID_RE = ID;
 })();
