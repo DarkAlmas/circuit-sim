@@ -16,7 +16,7 @@ const SHOT = process.argv[3] || '/tmp';
   ok(csp.includes("connect-src 'none'") && csp.includes("script-src 'self'") && !/unsafe-inline|unsafe-eval/.test(csp), 'CSP unchanged');
   const scripts = await pg.evaluate(() => [...document.scripts].filter(s => s.src).map(s => s.src));
   const origin = new globalThis.URL(URL).origin;
-  ok(scripts.every(s => s.startsWith(origin) && /\?v=14\.5\.5$/.test(s.src)), 'scripts are same-origin ?v=14.5.5');
+  ok(scripts.every(s => s.startsWith(origin) && /\?v=14\.5\.5$/.test(s)), 'scripts are same-origin ?v=14.5.5');
   ok(scripts.some(s => s.includes('/schematic3d.js')) && scripts.some(s => s.includes('/vendor/three/three.min.js')), 'schematic3d and vendored Three.js');
 
   await pg.click('#w3tab'); await pg.waitForTimeout(400);
@@ -131,13 +131,19 @@ const SHOT = process.argv[3] || '/tmp';
   await pg.click('#w3tab'); await pg.waitForTimeout(200);
   const back = await pg.evaluate(() => {
     const c = document.querySelector('#center').getBoundingClientRect();
-    const el = document.elementFromPoint(c.left + c.width * 0.62, c.top + c.height * 0.45);
+    const el = document.elementFromPoint(c.left + c.width * 0.55, c.top + c.height * 0.55);
+    const pane = document.querySelector('#w3pane');
     __sim.select('R1'); __sim.rotate();
     const p = __sim.proj.parts.find(x => x.id === 'R1');
     const svg = document.querySelector('[data-part="R1"]').getAttribute('transform');
-    return { w3: World3D.active, svg: !!(el && el.closest && el.closest('#svg')), rot: p.rot, transform: svg, wires: __sim.proj.wires.length };
+    return {
+      w3: World3D.active, pane: pane.hidden,
+      inCenter: !!(el && el.closest && el.closest('#center')),
+      blocked: !!(el && el.closest && el.closest('#w3pane')),
+      rot: p.rot, transform: svg, wires: __sim.proj.wires.length
+    };
   });
-  ok(!back.w3 && back.svg && back.rot === 1 && /rotate\(90\)/.test(back.transform) && back.wires === before.wires, '2D schematic is back ' + JSON.stringify(back));
+  ok(!back.w3 && back.pane && back.inCenter && !back.blocked && back.rot === 1 && /rotate\(90\)/.test(back.transform) && back.wires === before.wires, '2D schematic is back ' + JSON.stringify(back));
   ok(errs.length === 0, 'no page errors ' + errs.join(' | '));
   ok(net.length === 0, 'no off-origin requests ' + net.join(' '));
 
