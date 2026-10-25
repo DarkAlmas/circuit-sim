@@ -97,6 +97,14 @@ const SHOT = process.argv[3] || '/tmp';
   });
   ok(humSpan.onSensor >= 80 && humSpan.onSensor <= 100, 'steam on the DHT → ' + humSpan.onSensor);
   ok(humSpan.outside === 45, 'steam outside R50 stays at ambient 45');
+  await pg.evaluate(() => {
+    const seen = new Set();
+    for (const t of __sim.proj.world3d.stimuli) {
+      if (seen.has(t.type)) { t.x = 200; t.z = 40; }
+      else seen.add(t.type);
+    }
+    World3D.onOpen();
+  });
   const blockAt = await pg.evaluate(() => World3D.screenPos('stimulus', __sim.proj.world3d.stimuli.find(s => s.type === 'block').id));
   await pg.mouse.click(blockAt.x, blockAt.y);
   await pg.waitForTimeout(120);
