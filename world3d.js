@@ -6,6 +6,8 @@
  * dht22.temp/hum, pir.motion, and ntc.temp from the same climate sample.
  * Floating #w3tags refresh in the same call as applyReadings. Cones and spheres
  * draw only for the selected or hovered object. VL53 and TCRT stay on the robot track.
+ * v14.5.5: «Схема 3D» puts Schematic3D meshes on this table (pose from part x/y/rot).
+ * That view does not move schematic parts and does not change how readings are written.
  * Three.js is vendored (vendor/three). No network. DOM is createElement/textContent only.
  * window.World3D.getReadings() / the world3d-readings event are the solver hook. */
 (function () {
@@ -278,12 +280,20 @@
   let pickRoot = null, zoneRoot = null, ring = null, groups = new Map(), tagEls = new Map();
   let selected = null, drag = null, hoverPick = null, dirty = true, zoneKeys = [];
   let caster = null, ptr = null, hitV = null;
+  let schemaRoot = null, schemaLib = null, schemaSig = null, view = 'world';
 
   const center = $('#center');
   const btn = el('button', { type: 'button', id: 'w3tab', textContent: '3D', title: '3D-мир датчиков' });
   btn.setAttribute('aria-pressed', 'false');
   const rt = $('#rtabs'); if (rt) rt.after(btn); else if (center) center.prepend(btn);
   const pal = el('aside', { id: 'w3pal' });
+  pal.append(el('div', { className: 'w3sec', textContent: 'Вид' }));
+  const bWorld = el('button', { type: 'button', className: 'w3btn w3view on', textContent: 'Мир', title: 'Датчики и воздействия' });
+  const bSchema = el('button', { type: 'button', className: 'w3btn w3view', textContent: 'Схема 3D', title: 'Детали схемы на столе. Воздействия остаются.' });
+  bWorld.dataset.view = 'world'; bSchema.dataset.view = 'schema';
+  bWorld.setAttribute('aria-pressed', 'true'); bSchema.setAttribute('aria-pressed', 'false');
+  bWorld.onclick = () => setView('world'); bSchema.onclick = () => setView('schema');
+  pal.append(bWorld, bSchema);
   pal.append(el('div', { className: 'w3sec', textContent: 'Датчики' }));
   const SENS_UI = [['ultrasonic', 'УЗ', 'Ультразвук — расстояние до куба'], ['ldr', 'LDR', 'Фоторезистор — свет фонаря'], ['dht', 'DHT', 'Температура и влажность'], ['pir', 'PIR', 'Движение фигурки в секторе']];
   const STIM_UI = [['block', 'Куб', 'Препятствие для ультразвука'], ['flashlight', 'Фонарь', 'Свет в конусе для LDR'], ['heat', 'Тепло', 'Нагрев в радиусе для DHT'], ['humid', 'Пар', 'Влажность в радиусе для DHT'], ['mover', 'Фигурка', 'Движение для PIR']];
@@ -295,7 +305,9 @@
   const bYawL = el('button', { type: 'button', id: 'w3yawL', className: 'w3btn w3act', textContent: '↺ 15°', title: 'Повернуть датчик влево' });
   const bYawR = el('button', { type: 'button', id: 'w3yawR', className: 'w3btn w3act', textContent: '↻ 15°', title: 'Повернуть датчик вправо' });
   bReset.onclick = () => resetStimuli(); bDel.onclick = () => removeSelected(); bYawL.onclick = () => yawSelected(1); bYawR.onclick = () => yawSelected(-1);
-  const hint = el('p', { className: 'w3hint', textContent: 'ЛКМ по пустому — обзор, ПКМ — сдвиг, колесо — масштаб. Тяни объект по столу.' });
+  const HINT_WORLD = 'ЛКМ по пустому — обзор, ПКМ — сдвиг, колесо — масштаб. Тяни объект по столу.';
+  const HINT_SCHEMA = 'Детали стоят как на схеме. Воздействия можно двигать. Саму схему правь на вкладке «Схема».';
+  const hint = el('p', { className: 'w3hint', textContent: HINT_WORLD });
   const stat = el('p', { id: 'w3stat', className: 'w3hint', textContent: '' });
   pal.append(bReset, bDel, bYawL, bYawR, hint, stat);
   const stage = el('div', { id: 'w3stage' });
@@ -325,7 +337,14 @@
   function slot(i, z0) { return { x: q2(-48 + (i % 4) * 28), z: q2(z0 - Math.floor(i / 4) * 16) }; }
   function setStat(msg) {
     if (msg) { stat.textContent = msg; return; }
-    const w = world(), nS = w ? w.sensors.length : 0, nT = w ? w.stimuli.length : 0;
+    const w = world(), nT = w ? w.stimuli.length : 0;
+    if (view === 'schema') {
+      const n = proj() && Array.isArray(proj().parts) ? proj().parts.length : 0;
+      const shown = schemaRoot ? schemaRoot.children.length : 0;
+      stat.textContent = 'Схема 3D · деталей ' + n + (shown && shown < n ? ' · на столе ' + shown : '') + ' · воздействий ' + nT;
+      return;
+    }
+    const nS = w ? w.sensors.length : 0;
     stat.textContent = 'Датчиков ' + nS + ' · объектов ' + nT + (selected ? ' · ' + selected.id : '');
   }
   function syncChrome() {
@@ -374,6 +393,73 @@
     syncGroup(s, 'sensor'); commit(); return true;
   }
 
+  const SCHEMA_MAX = 160;
+  function mix(h, n) { return Math.imul(h ^ n, 16777619); }
+  function hashStr(h, s) {
+    const str = s || '';
+    for (let i = 0; i < str.length; i++) h = mix(h, str.charCodeAt(i));
+    return h;
+  }
+  function schemaHash(parts) {
+    let h = 2166136261;
+    const n = Math.min(parts.length, SCHEMA_MAX);
+    for (let i = 0; i < n; i++) {
+      const p = parts[i];
+      h = hashStr(h, p && p.id);
+      h = hashStr(h, p && p.type);
+      h = mix(h, Math.round(p && p.x || 0));
+      h = mix(h, Math.round(p && p.y || 0));
+      h = mix(h, ((p && p.rot) | 0) & 3);
+    }
+    return mix(h, parts.length);
+  }
+  function applyView() {
+    const schema = view === 'schema';
+    if (schemaRoot) schemaRoot.visible = schema;
+    if (pickRoot) for (const c of pickRoot.children) if (c.userData && c.userData.role === 'sensor') c.visible = !schema;
+    if (tags) tags.hidden = schema;
+    if (bWorld) { bWorld.classList.toggle('on', !schema); bWorld.setAttribute('aria-pressed', schema ? 'false' : 'true'); }
+    if (bSchema) { bSchema.classList.toggle('on', schema); bSchema.setAttribute('aria-pressed', schema ? 'true' : 'false'); }
+    if (hint) hint.textContent = schema ? HINT_SCHEMA : HINT_WORLD;
+    if (ring && schema && selected && selected.role === 'sensor') ring.visible = false;
+    syncChrome();
+  }
+  function clearSchema() {
+    if (!schemaRoot) return;
+    while (schemaRoot.children.length) schemaRoot.remove(schemaRoot.children[0]);
+  }
+  function refreshSchema(force) {
+    if (view !== 'schema' || !schemaRoot || !schemaLib || !window.Schematic3D) return;
+    const parts = (proj() && Array.isArray(proj().parts)) ? proj().parts : [];
+    const sig = schemaHash(parts);
+    if (!force && sig === schemaSig) return;
+    schemaSig = sig;
+    clearSchema();
+    const S = window.Schematic3D;
+    const n = Math.min(parts.length, SCHEMA_MAX);
+    for (let i = 0; i < n; i++) {
+      const p = parts[i];
+      if (!p || typeof p !== 'object') continue;
+      let g;
+      try { g = S.build(schemaLib, p); } catch (e) { continue; }
+      const at = S.pose(p);
+      g.position.set(at.x, at.y, at.z);
+      g.rotation.y = at.yaw;
+      g.userData.role = 'schematic';
+      g.userData.id = p.id;
+      g.userData.type = p.type;
+      schemaRoot.add(g);
+    }
+  }
+  function setView(next) {
+    if (next !== 'world' && next !== 'schema') return;
+    view = next;
+    if (active && !renderer) boot();
+    applyView();
+    if (view === 'schema') refreshSchema(true);
+    else { updateSel(); if (active) syncTags(); }
+  }
+
   function boot() {
     if (renderer) return true;
     const THREE = window.THREE;
@@ -399,6 +485,8 @@
         const leg = new THREE.Mesh(new THREE.BoxGeometry(6, 72, 6), legMat); leg.position.set(x, 36, z); scene.add(leg);
       }
       pickRoot = new THREE.Group(); zoneRoot = new THREE.Group(); scene.add(pickRoot, zoneRoot);
+      schemaRoot = new THREE.Group(); schemaRoot.visible = false; schemaRoot.frustumCulled = false; scene.add(schemaRoot);
+      if (window.Schematic3D && window.Schematic3D.createLib) schemaLib = window.Schematic3D.createLib(THREE);
       ring = new THREE.Mesh(new THREE.RingGeometry(8, 10.5, 28), new THREE.MeshBasicMaterial({ color: 0xffd34d, side: THREE.DoubleSide }));
       ring.rotation.x = -Math.PI / 2; ring.position.y = TABLE_Y + 0.3; ring.visible = false; scene.add(ring);
       controls = new THREE.OrbitControls(camera, canvas);
@@ -417,7 +505,9 @@
   }
   function loop() {
     if (!active || !renderer) { raf = 0; return; }
-    controls.update(); renderer.render(scene, camera); syncTags();
+    controls.update();
+    if (view === 'schema') refreshSchema(false);
+    renderer.render(scene, camera); syncTags();
     raf = requestAnimationFrame(loop);
   }
   function show(on) {
@@ -431,7 +521,8 @@
     }
     if (!boot()) return;
     if (controls) controls.enabled = true;
-    resize(); if (dirty) rebuild(); else syncAll();
+    resize(); if (dirty) rebuild(); else { syncAll(); applyView(); }
+    if (view === 'schema') refreshSchema(true);
     applyReadings(proj()); updateZones(); syncChrome();
     if (!raf) loop(); else if (renderer && camera) { renderer.render(scene, camera); syncTags(); }
     requestAnimationFrame(() => { if (active) resize(); });
@@ -546,7 +637,7 @@
       const g = makeStim(t.type); g.userData = { role: 'stimulus', id: t.id, type: t.type }; pickRoot.add(g); groups.set('stimulus:' + t.id, g); syncGroup(t, 'stimulus');
     }
     if (selected && !groups.has(selected.role + ':' + selected.id)) selected = null;
-    rebuildTags(); updateSel(); updateZones(); dirty = false; syncChrome();
+    rebuildTags(); updateSel(); updateZones(); applyView(); dirty = false; syncChrome();
   }
   function syncGroup(o, role) {
     const g = groups.get(role + ':' + o.id); if (!g) return;
@@ -602,7 +693,10 @@
     const w = world(); if (!w) { zoneKeys = []; return; }
     const byId = new Map(last.sensors.map(r => [r.id, r]));
     const keys = [];
-    for (const item of focusList()) if (drawZone(item, byId)) keys.push(item.role + ':' + item.obj.id);
+    for (const item of focusList()) {
+      if (view === 'schema' && item.role === 'sensor') continue;
+      if (drawZone(item, byId)) keys.push(item.role + ':' + item.obj.id);
+    }
     zoneKeys = keys.sort();
   }
   function zoneSphere(o, r, color) {
@@ -612,7 +706,8 @@
   function updateSel() {
     if (!ring) return;
     const w = world(), o = selected && w ? (selected.role === 'sensor' ? w.sensors : w.stimuli).find(x => x.id === selected.id) : null;
-    ring.visible = !!o; if (o) ring.position.set(o.x, TABLE_Y + 0.35, o.z);
+    ring.visible = !!o && !(view === 'schema' && selected.role === 'sensor');
+    if (o) ring.position.set(o.x, TABLE_Y + 0.35, o.z);
   }
   function hotSensor(id) {
     return (hoverPick && hoverPick.role === 'sensor' && hoverPick.id === id) || (selected && selected.role === 'sensor' && selected.id === id);
@@ -645,7 +740,7 @@
       if (center !== raw) node.style.left = center + 'px';
     }
   }
-  syncTags = () => { if (!active) return; paintTags(); placeTags(); };
+  syncTags = () => { if (!active || view === 'schema') return; paintTags(); placeTags(); };
   function ndc(e) {
     const r = canvas.getBoundingClientRect();
     ptr.x = ((e.clientX - r.left) / Math.max(1, r.width)) * 2 - 1;
@@ -717,7 +812,23 @@
   if (window.ResizeObserver && stage) new ResizeObserver(() => { if (active) resize(); }).observe(stage);
 
   api.show = show;
-  api.onOpen = () => { dirty = true; selected = null; hoverPick = null; drag = null; if (active) { rebuild(); applyReadings(proj()); updateZones(); } };
+  api.onOpen = () => {
+    dirty = true; schemaSig = null; selected = null; hoverPick = null; drag = null;
+    if (active) { rebuild(); if (view === 'schema') refreshSchema(true); applyReadings(proj()); updateZones(); }
+  };
+  api.setView = setView;
+  api.schemaCount = () => schemaRoot ? schemaRoot.children.length : 0;
+  api.schemaDetail = () => !schemaRoot ? [] : schemaRoot.children.map(c => ({
+    id: c.userData.id, type: c.userData.type, kind: c.userData.kind, n: c.children.length,
+    x: c.position.x, y: c.position.y, z: c.position.z, yaw: c.rotation.y
+  }));
+  api.schemaScreen = id => {
+    if (!schemaRoot) return null;
+    const g = schemaRoot.children.find(c => c.userData && c.userData.id === id);
+    if (!g) return null;
+    return screenOf({ x: g.position.x, y: g.position.y + 8, z: g.position.z });
+  };
+  Object.defineProperty(api, 'view', { get() { return view; } });
   api.zoneKeys = () => zoneKeys.slice();
   api.removeSelected = removeSelected;
   api.yawSelected = yawSelected;
