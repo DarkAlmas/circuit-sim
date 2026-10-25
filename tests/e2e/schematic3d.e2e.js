@@ -1,4 +1,4 @@
-// v14.5.6: «Схема 3D» loads on the existing table, poses match, stimuli and the 2D canvas stay.
+// v14.5.7: «Схема 3D» loads on the existing table, poses match, stimuli and the 2D canvas stay.
 const { chromium } = require('playwright-core'); const assert = require('assert');
 const URL = process.argv[2] || 'http://localhost:8765/';
 const SHOT = process.argv[3] || '/tmp';
@@ -16,7 +16,7 @@ const SHOT = process.argv[3] || '/tmp';
   ok(csp.includes("connect-src 'none'") && csp.includes("script-src 'self'") && !/unsafe-inline|unsafe-eval/.test(csp), 'CSP unchanged');
   const scripts = await pg.evaluate(() => [...document.scripts].filter(s => s.src).map(s => s.src));
   const origin = new globalThis.URL(URL).origin;
-  ok(scripts.every(s => s.startsWith(origin) && /\?v=14\.5\.6$/.test(s)), 'scripts are same-origin ?v=14.5.6');
+  ok(scripts.every(s => s.startsWith(origin) && /\?v=14\.5\.7$/.test(s)), 'scripts are same-origin ?v=14.5.7');
   ok(scripts.some(s => s.includes('/schematic3d.js')) && scripts.some(s => s.includes('/vendor/three/three.min.js')), 'schematic3d and vendored Three.js');
 
   await pg.click('#w3tab'); await pg.waitForTimeout(400);
