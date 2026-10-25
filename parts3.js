@@ -39,19 +39,29 @@
   /* Inputs are read from the previous frame as a duty (pin voltage / logic level); a per-input sigma-delta turns
    * analogWrite duty into on/off frames so the motor (with inertia) averages it like real PWM. */
   function hbridge(cfg) {
-    const all = [...cfg.ins, ...cfg.en];
+    const all = [...cfg.ins, ...cfg.en, ...(cfg.stby ? [cfg.stby] : [])];
+    const pulls = [...cfg.ins, ...cfg.en];
     return { name: cfg.name, group: 'Активные', prefix: 'U', pins: cfg.pins, box: cfg.box, vmax: p => p._vs || 0,
       draw: (p, st) => cfg.draw(p, st),
       stamp(p, ctx) {
         const g = ctx.n(p, 'GND'), vs = ctx.n(p, cfg.vs), duty = p._duty || {}, acc = p._acc || (p._acc = {}), lv = {}, dv = {};
-        for (const k of all) { const n = ctx.n(p, k); if (ok(n)) ctx.add({ type: 'R', a: n, b: ok(g) ? g : 0, R: 1e6 }); }
-        for (const k of all) { let d = duty[k]; if (d == null) d = cfg.en.includes(k) && !(ctx.wired ? ctx.wired(p, k) : ok(ctx.n(p, k))) ? 1 : 0;
+        for (const id of cfg.gnds || []) { const n = ctx.n(p, id); if (ok(n) && ok(g) && n !== g) ctx.add({ type: 'R', a: n, b: g, R: 0.01 }); }
+        for (const k of pulls) { const n = ctx.n(p, k); if (ok(n)) ctx.add({ type: 'R', a: n, b: ok(g) ? g : 0, R: 1e6 }); }
+        // STBY: 100 kΩ pull-up to logic high. NC pins are not in `all` and get no elements.
+        if (cfg.stby) { const n = ctx.n(p, cfg.stby); if (ok(n)) { const pu = ctx.node(); ctx.add({ type: 'V', p: pu, n: ok(g) ? g : 0, V: ctx.vio || 3.3 }); ctx.add({ type: 'R', a: pu, b: n, R: 1e5 }); } }
+        for (const k of all) { let d = duty[k]; if (d == null) d = (cfg.en.includes(k) || k === cfg.stby) && !(ctx.wired ? ctx.wired(p, k) : ok(ctx.n(p, k))) ? 1 : 0;
           dv[k] = clamp01(d); acc[k] = (acc[k] || 0) + dv[k]; lv[k] = acc[k] >= 0.5 ? 1 : 0; acc[k] -= lv[k]; }
+        const wiredStby = !!(cfg.stby && ctx.wired && ctx.wired(p, cfg.stby));
+        const dStby = cfg.stby ? duty[cfg.stby] : null;
+        // Unwired pin sits HIGH on the pull-up. A wired pin drives only after it has been measured HIGH.
+        const stbyHigh = !cfg.stby || !wiredStby || (dStby != null && dStby >= 0.5);
+        p._stby = stbyHigh;
         p._lv = lv; const outs = cfg.outs.flat(); for (const o of outs) ctx.add({ type: 'R', a: ctx.n(p, o), b: ok(g) ? g : 0, R: 1e7 });
         const rec = [], sub = { ...ctx, add: el => { const i = ctx.add(el); rec.push([i, el]); return i; } };
         p._rec = rec; p._ch = [];
         const powered = ok(vs) && (p._vs || 0) >= cfg.vmin && !p.burned;
         if (powered) cfg.outs.forEach(([oa, ob], c) => { const [i1, i2] = cfg.ins.slice(2 * c, 2 * c + 2), en = cfg.en[c] ? lv[cfg.en[c]] : 1;
+          if (cfg.stby && !stbyHigh) { p._ch[c] = 'ожидание'; D.hbridge(sub, vs, ctx.n(p, oa), ctx.n(p, ob), 0, 0, cfg.kind, false); return; }
           const s1 = lv[i1] && en, s2 = lv[i2] && en; p._ch[c] = !en ? 'выкл' : s1 && !s2 ? 'вперёд' : !s1 && s2 ? 'назад' : 'тормоз';
           if (cfg.coast(cfg.en[c] ? dv[cfg.en[c]] > 0.01 : 1, dv[i1] > 0.01, dv[i2] > 0.01)) { p._ch[c] = 'свободный ход'; return; }
           p._imax = D.hbridge(sub, vs, ctx.n(p, oa), ctx.n(p, ob), s1, s2, cfg.kind).imax; });
@@ -67,6 +77,7 @@
         pinI[cfg.vs] = -Is; pinI.GND = Is; if (cfg.reg && p._r5 != null) pinI['5V'] = sol.currents[p._r5] || 0;
         const peak = Math.max(0, ...cfg.outs.flat().map(o => Math.abs(pinI[o])));
         const extra = {}; cfg.outs.forEach((_, c) => { extra['Канал ' + 'AB'[c]] = p._ch[c] || (p._vs < cfg.vmin ? 'нет питания' : '—'); });
+        if (cfg.stby) extra.STBY = p._stby === false ? 'LOW, выходы отключены' : 'HIGH';
         return { U: p._vs, I: Is, P: Math.abs(p._vs * Is), pinI, peak, extra };
       },
       check(p, m, ctx) {
@@ -86,14 +97,31 @@
       <rect x="-22" y="-48" width="44" height="34" fill="#111" stroke="#000"/>${[0, 1, 2, 3, 4, 5, 6].map(k => `<rect x="${-20 + k * 6}" y="-56" width="4" height="10" fill="#555"/>`).join('')}<text x="0" y="-28" class="tiny lightt">L298N</text>
       <circle cx="-48" cy="28" r="3" fill="${(p._vs || 0) > 4.5 ? '#f33' : '#400'}"/>${lbls(l298pins.filter(q => q.y > 0), -14)}<text x="-58" y="-40" class="tiny lightt">A</text><text x="58" y="-40" class="tiny lightt">B</text>
       <text x="0" y="0" class="tiny lightt">${(p._ch || []).map((s, c) => 'AB'[c] + ': ' + s).join('  ')}</text>` });
-  const drvpins = [pin('AO1', -60, -20, 'AO1: мотор A'), pin('AO2', -60, 0, 'AO2: мотор A'), pin('BO2', -60, 20, 'BO2: мотор B'), pin('BO1', -60, 40, 'BO1: мотор B'),
-    pin('AIN1', 60, -20, 'AIN1: ШИМ/направление A'), pin('AIN2', 60, 0, 'AIN2: ШИМ/направление A'), pin('BIN2', 60, 20, 'BIN2: ШИМ/направление B'), pin('BIN1', 60, 40, 'BIN1: ШИМ/направление B'),
-    pin('VM', -20, 60, 'VM: питание моторов 2,7–10,8 В'), pin('GND', 20, 60, 'GND: общий минус с платой')];
+  const col = (rows, x, dy = 18) => { const y0 = -((rows.length - 1) * dy) / 2; return rows.map((r, i) => pin(r.id, x, y0 + i * dy, r.hint, r.label || r.id)); };
+  const drvpins = [...col([
+    { id: 'VM', hint: 'VM: питание моторов 2,7–10,8 В' },
+    { id: 'NC1', label: 'NC', hint: 'NC: не подключён' },
+    { id: 'GND', hint: 'GND: общий минус с платой' },
+    { id: 'AO1', hint: 'AO1: мотор A' },
+    { id: 'AO2', hint: 'AO2: мотор A' },
+    { id: 'BO2', hint: 'BO2: мотор B' },
+    { id: 'BO1', hint: 'BO1: мотор B' },
+  ], -70), ...col([
+    { id: 'NC2', label: 'NC', hint: 'NC: не подключён' },
+    { id: 'AIN2', hint: 'AIN2: ШИМ/направление A' },
+    { id: 'AIN1', hint: 'AIN1: ШИМ/направление A' },
+    { id: 'STBY', hint: 'STBY: HIGH — мосты работают (внутренняя подтяжка вверх); LOW — оба канала в ожидании, выходы отключены' },
+    { id: 'BIN1', hint: 'BIN1: ШИМ/направление B' },
+    { id: 'BIN2', hint: 'BIN2: ШИМ/направление B' },
+    { id: 'NC3', label: 'NC', hint: 'NC: не подключён' },
+    { id: 'GND2', label: 'GND', hint: 'GND: общий минус с платой' },
+  ], 70)];
   P.drv8833 = hbridge({ name: 'Драйвер моторов DRV8833 (2 канала)', short: 'DRV8833', kind: 'drv8833', vs: 'VM', vmin: 2.7, vrec: 10.8, vabs: 11.8,
-    ins: ['AIN1', 'AIN2', 'BIN1', 'BIN2'], en: [], outs: [['AO1', 'AO2'], ['BO1', 'BO2']], coast: (en, a, b) => !a && !b, pins: drvpins, box: [-64, -36, 128, 100],
-    draw: p => `${legsX(drvpins.filter(q => q.y < 60))}${legs(drvpins.filter(q => q.y === 60))}<rect x="-50" y="-32" width="100" height="84" rx="3" fill="#6b2fb3" stroke="#3a136b"/><rect x="-12" y="-6" width="24" height="24" fill="#111"/>
-      <text x="0" y="-18" class="tiny lightt">DRV8833</text>${drvpins.filter(q => q.y < 60).map(q => `<text x="${q.x < 0 ? -46 : 46}" y="${q.y + 3}" class="tiny lightt" text-anchor="${q.x < 0 ? 'start' : 'end'}">${q.id}</text>`).join('')}
-      <text x="0" y="34" class="tiny lightt">${(p._ch || []).map((s, c) => 'AB'[c] + ': ' + s).join(' ')}</text>${lbls(drvpins.filter(q => q.y === 60), -14)}` });
+    ins: ['AIN1', 'AIN2', 'BIN1', 'BIN2'], en: [], stby: 'STBY', gnds: ['GND2'], outs: [['AO1', 'AO2'], ['BO1', 'BO2']], coast: (en, a, b) => !a && !b, pins: drvpins, box: [-78, -80, 156, 160],
+    draw: p => { const ch = p._ch || [], stt = ch.length ? (ch.every(s => s === ch[0]) ? ch[0] : ch.map((s, c) => 'AB'[c] + ': ' + s).join('  ')) : '';
+      return `${legsX(drvpins)}<rect x="-56" y="-74" width="112" height="148" rx="3" fill="#e2231a" stroke="#7a0e12"/><rect x="-14" y="-18" width="28" height="28" rx="1" fill="#1a1a1a"/>
+      <text x="0" y="-28" class="tiny lightt">DRV8833</text>${drvpins.map(q => `<text x="${q.x < 0 ? q.x + 16 : q.x - 16}" y="${q.y + 3}" class="tiny lightt">${q.label}</text>`).join('')}
+      <text x="0" y="26" class="tiny lightt">${stt}</text>`; } });
 
   /* ---------- Li-ion 103450 ---------- */
   P.liion = { name: 'Аккумулятор Li-ion 103450 (3,7 В, 2000 мА·ч)', group: 'Питание', prefix: 'BT', props: { soc: 80 }, source: { plus: 'p', minus: 'n' }, vmax: 4.2, srcV: p => fN((p._st && p._st.V) || D.ocv(+p.props.soc / 100), 2) + ' В',
@@ -161,6 +189,63 @@
     measure(p, sol, ctx) { const m = pwrMeas(p, sol, ctx); m.powered = !p.burned && m.U >= 1.9 && m.U <= 3.6; return m; },
     check(p, m, ctx) { if (m.U > 3.6) { if (!p.burned) { p.burned = true; ctx.dirty(); } return { level: 'burn', msg: `NRF24L01 сгорел: питание ${fN(m.U, 1)} В — допустимо только 1,9–3,6 В (подключай к 3,3 В, не к 5 В!)` }; }
       if (m.U > 0.5 && m.U < 1.9) return { level: 'warn', msg: `NRF24L01: мало питания (${fN(m.U, 1)} В)` }; } };
+
+  /* ---------- 4-channel bidirectional logic level converter (BSS138) ---------- */
+  const lvSide = col([
+    { id: 'LV1', hint: 'LV1: канал 1, низковольтная сторона' },
+    { id: 'LV2', hint: 'LV2: канал 2, низковольтная сторона' },
+    { id: 'LV3', hint: 'LV3: канал 3, низковольтная сторона' },
+    { id: 'LV4', hint: 'LV4: канал 4, низковольтная сторона' },
+    { id: 'LV', hint: 'LV: питание низкой стороны (обычно 3,3 В)' },
+    { id: 'GND', hint: 'GND: общий минус с HV и LV' },
+  ], -74);
+  const hvSide = col([
+    { id: 'HV1', hint: 'HV1: канал 1, высоковольтная сторона' },
+    { id: 'HV2', hint: 'HV2: канал 2, высоковольтная сторона' },
+    { id: 'HV3', hint: 'HV3: канал 3, высоковольтная сторона' },
+    { id: 'HV4', hint: 'HV4: канал 4, высоковольтная сторона' },
+    { id: 'HV', hint: 'HV: питание высокой стороны (обычно 5 В)' },
+  ], 74);
+  const lspins = [...lvSide, ...hvSide];
+  const CHS = [1, 2, 3, 4];
+  P.lvlshift = { name: 'Преобразователь логических уровней, 4 канала (двунаправленный)', group: 'Интерфейсы', prefix: 'U', pins: lspins, box: [-82, -64, 164, 128],
+    draw: p => `${legsX(lspins)}<rect x="-60" y="-58" width="120" height="112" rx="3" fill="#1357b8" stroke="#0a2f6e"/>
+      ${[0, 1, 2, 3].map(i => `<rect x="${-34 + i * 18}" y="-8" width="12" height="16" rx="1" fill="#111"/>`).join('')}
+      <text x="0" y="-24" class="tiny lightt">LV ↔ HV</text><text x="0" y="24" class="tiny lightt">4 канала</text><text x="0" y="36" class="tiny lightt">${p._pwr ? 'двунаправленный' : ''}</text>
+      ${lspins.map(q => `<text x="${q.x < 0 ? q.x + 16 : q.x - 16}" y="${q.y + 3}" class="tiny lightt">${q.label}</text>`).join('')}`,
+    stamp(p, ctx) {
+      const g = ctx.n(p, 'GND'), hv = ctx.n(p, 'HV'), lv = ctx.n(p, 'LV');
+      const pairs = CHS.map(i => [ctx.n(p, 'LV' + i), ctx.n(p, 'HV' + i)]);
+      p._sh = D.levelShift(ctx, hv, lv, pairs, !!(p._pwr && ok(g) && ok(hv) && ok(lv)));
+    },
+    measure(p, sol, ctx) {
+      const Uhv = vd(p, ctx, 'HV', 'GND'), Ulv = vd(p, ctx, 'LV', 'GND');
+      const tied = pin => ctx.wired ? ctx.wired(p, pin) : ok(ctx.n(p, pin));
+      const rails = tied('HV') && tied('LV') && tied('GND');
+      const pwr = rails && Ulv > 1.5 && Uhv > 2.0;
+      p._rails = { hv: tied('HV'), lv: tied('LV'), gnd: tied('GND'), Uhv, Ulv };
+      p._pwr = pwr;
+      const pinI = { HV: 0, LV: 0, GND: 0 };
+      const extra = { HV: fN(Uhv, 2) + ' В', LV: fN(Ulv, 2) + ' В', 'Режим': pwr ? 'двунаправленный сдвиг' : 'нет питания (нужны HV, LV и GND)' };
+      for (const i of CHS) {
+        pinI['LV' + i] = 0; pinI['HV' + i] = 0;
+        extra['Канал ' + i] = pwr ? fN(vd(p, ctx, 'LV' + i, 'GND'), 2) + ' В ↔ ' + fN(vd(p, ctx, 'HV' + i, 'GND'), 2) + ' В' : 'отключён';
+      }
+      const els = (p._sh && p._sh.els) || [];
+      for (let k = 0; k < els.length; k++) {
+        const ch = els[k], i = CHS[k], iL = sol.currents[ch.rL] || 0, iH = sol.currents[ch.rH] || 0, mos = sol.currents[ch.m] || { id: 0, is: 0 };
+        pinI['LV' + i] = (mos.is || 0) - iL; pinI['HV' + i] = (mos.id || 0) - iH; pinI.LV += iL; pinI.HV += iH;
+      }
+      pinI.GND = -(pinI.HV + pinI.LV + CHS.reduce((s, i) => s + pinI['LV' + i] + pinI['HV' + i], 0));
+      return { U: Uhv, I: Math.abs(pinI.HV) + Math.abs(pinI.LV), P: Math.abs(Uhv * pinI.HV) + Math.abs(Ulv * pinI.LV), pinI, powered: pwr, extra };
+    },
+    check(p) {
+      const r = p._rails; if (!r) return;
+      const n = (r.hv ? 1 : 0) + (r.lv ? 1 : 0) + (r.gnd ? 1 : 0);
+      if (n > 0 && n < 3) return { level: 'warn', msg: 'Преобразователь уровней: подключи HV, LV и GND — без всех трёх каналы отключены' };
+      if (n === 3 && !p._pwr) return { level: 'warn', msg: `Преобразователь уровней: мало питания (LV ${fN(r.Ulv, 1)} В, HV ${fN(r.Uhv, 1)} В)` };
+      if (r.Uhv > 6.5 || r.Ulv > 6.5) return { level: 'warn', msg: `Преобразователь уровней: питание ${fN(Math.max(r.Uhv, r.Ulv), 1)} В — модуль рассчитан на логику до 5–6 В` };
+    } };
 
   /* ---------- ESP32-C3 SuperMini ---------- */
   const C3_L = ['5V', 'GND', '3V3', 'G4', 'G3', 'G2', 'G1', 'G0'], C3_R = ['G5', 'G6', 'G7', 'G8', 'G9', 'G10', 'G20', 'G21'];

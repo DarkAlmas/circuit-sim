@@ -21,6 +21,7 @@
   mi('pmExamples', '📂 Проекты и примеры', () => { const s = $('#projects'); s.focus(); try { s.showPicker && s.showPicker(); } catch (e) { /* not allowed without gesture in some browsers */ } });
   mi('pmExport', '⬇ Экспорт', () => $('#export').click());
   mi('pmImport', '⬆ Импорт', () => $('#import').click());
+  mi('pmSettings', '⚙ Настройки', () => { const s = window.__sim; if (s) s.openSettings(); });
   const bFont = mi('pmFont', '', () => { const f = font() === 14 ? 16 : 14; try { localStorage.setItem('pmFont', String(f)); } catch (e) {} applyFont(); });
   const font = () => { let f = 14; try { f = +localStorage.getItem('pmFont') === 16 ? 16 : 14; } catch (e) {} return f; };
   function applyFont() { const f = font(); body.style.setProperty('--codefs', f + 'px'); bFont.textContent = '⚙ Шрифт кода: ' + f + ' px'; }

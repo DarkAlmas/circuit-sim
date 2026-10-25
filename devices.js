@@ -38,9 +38,27 @@
     if (level) { ctx.add({ type: 'V', p: vs, n: m, V: h.vdrop }); return ctx.add({ type: 'R', a: m, b: out, R: h.ron }); }
     ctx.add({ type: 'V', p: m, n: 0, V: 0 }); ctx.add({ type: 'V', p: out, n: m, V: h.vdrop }); return null;
   }
-  function hbridge(ctx, vs, outA, outB, in1, in2, kind = 'l298n') {
+  function hbridge(ctx, vs, outA, outB, in1, in2, kind = 'l298n', stby = true) {
+    // stby false: DRV8833 standby — both outputs high-Z, no path to VM or GND
+    if (!stby) return { imax: HB[kind].imax, z: true };
     hhalf(ctx, vs, outA, in1 ? 1 : 0, kind); hhalf(ctx, vs, outB, in2 ? 1 : 0, kind);
     return { imax: HB[kind].imax };
+  }
+  // BSS138-style bidirectional level shift, one MOSFET per channel.
+  // Gate sits on the LV rail, source on LVn, drain on HVn; 10 kΩ pull-ups to each rail.
+  // on=false leaves the channels high-Z (HV, LV or GND missing).
+  function levelShift(ctx, hv, lv, pairs, on) {
+    if (!on) return { on: false, els: [] };
+    const els = [];
+    for (let i = 0; i < pairs.length; i++) {
+      const lo = pairs[i][0], hi = pairs[i][1];
+      els.push({
+        rL: ctx.add({ type: 'R', a: lv, b: lo, R: 10000 }),
+        rH: ctx.add({ type: 'R', a: hv, b: hi, R: 10000 }),
+        m: ctx.add({ type: 'M', d: hi, g: lv, s: lo, K: 0.4, Vth: 1.0, lambda: 0.01 })
+      });
+    }
+    return { on: true, els };
   }
   // простые потребители для модулей (средний ток, А)
   const LOADS = { esp32c3: 0.08, mpu6050: 0.004, nrf24pa_tx: 0.115, nrf24pa_rx: 0.045, tcrt5000: 0.02, vl53l0x: 0.019, hcsr04: 0.015 };
@@ -50,7 +68,7 @@
   // TCRT5000: выход фототранзистора, refl 0 (чёрное) … 1 (белое) → ток коллектора до 1 мА
   function tcrtCurrent(refl) { return 1e-3 * Math.max(0, Math.min(1, refl)); }
   function context() { const els = []; let n = 1; return { els, node: () => n++, nodeCount: () => n, add: e => (els.push(e), els.length - 1) }; }
-  const api = { MOTORS, motor, liion, ocv, boost, hbridge, HB, LOADS, load, tcrtCurrent, context };
+  const api = { MOTORS, motor, liion, ocv, boost, hbridge, HB, LOADS, load, tcrtCurrent, context, levelShift };
   if (typeof module !== 'undefined' && module.exports) module.exports = api; else root.Devices = api;
 })(typeof window !== 'undefined' ? window : globalThis);
 
