@@ -229,3 +229,22 @@ test('PIR motion is written even when the prop is missing, and NTC takes DHT tem
   assert.equal(proj.parts[1].props.hum, 90);
   assert.equal(proj.parts[2].props.motion, true);
 });
+
+test('tag screen X stays to the right of a left palette and above the anchor', () => {
+  const stage = { left: 168, top: 40, right: 980, bottom: 760 };
+  const pal = { left: 0, top: 40, right: 168, bottom: 760 };
+  const min = S.tagMinScreen(stage, pal);
+  assert.equal(min, 176);
+  const half = 72;
+  const raw = 20;
+  const center = S.clampTagX(raw, half, stage.left, min);
+  assert.ok(stage.left + raw - half < min, 'unclamped PIR label would sit under the palette');
+  assert.ok(stage.left + center - half >= min - 1e-6);
+  assert.equal(S.clampTagX(240, half, stage.left, min), 240);
+  const phoneStage = { left: 0, top: 92, right: 390, bottom: 760 };
+  const phonePal = { left: 0, top: 760, right: 390, bottom: 820 };
+  assert.equal(S.tagMinScreen(phoneStage, phonePal), 8);
+  const over = { left: 0, top: 40, right: 168, bottom: 760 };
+  const overStage = { left: 0, top: 40, right: 980, bottom: 760 };
+  assert.equal(S.tagMinScreen(overStage, over), 176);
+});
