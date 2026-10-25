@@ -1,4 +1,4 @@
-// Settings UI: hold menu defaults off, three controls, prefs persist, junk localStorage is dropped. ?v=14.4.
+// Settings UI: hold menu defaults off, three controls, prefs persist, junk localStorage is dropped. ?v=14.4.1.
 const { chromium } = require('playwright-core'); const assert = require('assert');
 const URL = process.argv[2] || 'http://localhost:8765/';
 (async () => {
@@ -10,11 +10,20 @@ const URL = process.argv[2] || 'http://localhost:8765/';
   await pg.goto(URL); await pg.evaluate(() => localStorage.clear()); await pg.reload(); await pg.waitForTimeout(300);
   const ok = (c, m) => { assert.ok(c, m); console.log('✓', m); };
 
-  ok(await pg.evaluate(() => [...document.scripts].every(s => !s.src || /\?v=14\.4$/.test(s.src)) && /style\.css\?v=14\.4/.test(document.querySelector('link[rel=stylesheet]').href)), 'cache stays ?v=14.4');
+  ok(await pg.evaluate(() => [...document.scripts].every(s => !s.src || /\?v=14\.4\.1$/.test(s.src)) && /style\.css\?v=14\.4\.1$/.test(document.querySelector('link[rel=stylesheet]').href)), 'cache stays ?v=14.4.1');
   const csp = await pg.evaluate(() => document.querySelector('meta[http-equiv="Content-Security-Policy"]').content);
   ok(csp.startsWith("default-src 'self'") && csp.includes("script-src 'self'") && !/unsafe-inline/.test(csp), 'CSP unchanged');
   const UI_KEYS = 'canvasProps,codeFont,holdMenu,labelFont,showDelBtn,showWireBtn';
   ok(await pg.evaluate(() => __sim.ui.holdMenu === false && __sim.ui.canvasProps === true && __sim.ui.labelFont === 'normal' && __sim.ui.showWireBtn === true && __sim.ui.showDelBtn === true && __sim.ui.codeFont === 14), 'defaults: hold off, canvas props on, wire and delete on, code font 14');
+  const codeFs = () => pg.evaluate(() => ({ pm: document.body.classList.contains('pm'), fs: getComputedStyle(document.querySelector('#code')).fontSize, ui: __sim.ui.codeFont }));
+  let cfs = await codeFs();
+  ok(!cfs.pm && cfs.ui === 14 && cfs.fs === '14px', 'desktop #code computed size is 14px');
+  await pg.evaluate(() => __sim.setUi({ codeFont: 16 }));
+  cfs = await codeFs();
+  ok(!cfs.pm && cfs.ui === 16 && cfs.fs === '16px', 'desktop #code is 16px after setUi({codeFont:16})');
+  await pg.evaluate(() => __sim.setUi({ codeFont: 14 }));
+  cfs = await codeFs();
+  ok(!cfs.pm && cfs.fs === '14px' && cfs.ui === 14, 'desktop #code returns to 14px');
 
   await pg.click('#simMore');
   const dlg = await pg.evaluate(() => {
@@ -102,6 +111,7 @@ const URL = process.argv[2] || 'http://localhost:8765/';
   const mc = await b.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, deviceScaleFactor: 2 });
   const ph = await mc.newPage(); ph.on('pageerror', e => errs.push(e.message));
   await ph.goto(URL); await ph.evaluate(() => localStorage.clear()); await ph.reload(); await ph.waitForTimeout(400);
+  ok(await ph.evaluate(() => document.body.classList.contains('pm') && innerWidth <= 390 && getComputedStyle(document.querySelector('#code')).fontSize === '14px'), 'phone body.pm #code is 14px at ~390px');
   await ph.tap('#pmMore'); await ph.tap('#pmSettings');
   const sheet = await ph.evaluate(() => { const box = document.querySelector('#simSettings .sbox').getBoundingClientRect(); return { hidden: document.querySelector('#simSettings').hidden, bottomGap: Math.round(innerHeight - box.bottom), w: Math.round(box.width), iw: innerWidth }; });
   ok(!sheet.hidden && sheet.bottomGap <= 2 && sheet.w >= sheet.iw - 2, 'phone settings is a bottom sheet (' + JSON.stringify(sheet) + ')');
@@ -155,8 +165,9 @@ const URL = process.argv[2] || 'http://localhost:8765/';
   await ph.evaluate(() => __sim.setUi({ showWireBtn: false, showDelBtn: false, codeFont: 16 }));
   const chrome1 = await ph.evaluate(() => { const vis = el => !!el && getComputedStyle(el).display !== 'none' && el.getBoundingClientRect().height > 0;
     return { wire: vis(document.querySelector('#mWire')), del: vis(document.querySelector('#mDel')), fs: getComputedStyle(document.body).getPropertyValue('--codefs').trim(),
+      code: getComputedStyle(document.querySelector('#code')).fontSize, pm: document.body.classList.contains('pm'),
       wireSw: document.querySelector('#setWire').getAttribute('aria-checked'), delSw: document.querySelector('#setDel').getAttribute('aria-checked') }; });
-  ok(!chrome1.wire && !chrome1.del && chrome1.fs === '16px' && chrome1.wireSw === 'false' && chrome1.delSw === 'false', 'settings hide Провод and 🗑 and set code font 16 ' + JSON.stringify(chrome1));
+  ok(!chrome1.wire && !chrome1.del && chrome1.fs === '16px' && chrome1.code === '16px' && chrome1.pm && chrome1.wireSw === 'false' && chrome1.delSw === 'false', 'settings hide Провод and 🗑 and phone #code is 16px ' + JSON.stringify(chrome1));
   await ph.evaluate(() => __sim.setUi({ showWireBtn: true, showDelBtn: true }));
   ok(await ph.evaluate(() => getComputedStyle(document.querySelector('#mWire')).display !== 'none' && getComputedStyle(document.querySelector('#mDel')).display !== 'none'), 'turning the toggles back on shows Провод and 🗑');
 
