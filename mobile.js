@@ -32,15 +32,17 @@
     else (playing() ? $('#stop') : $('#run')).click();
     sync(); };
 
-  /* tabs: Схема / Шасси / Трасса / Код */
+  /* tabs: Схема / 3D / Шасси / Трасса / Код. 3D is always available; chassis and track stay car-only. */
   const tabs = el('nav', { id: 'pmTabs' }); tabs.setAttribute('role', 'tablist');
-  const T = {}; for (const [k, t] of [['schema', 'Схема'], ['chassis', 'Шасси'], ['track', 'Трасса'], ['code', 'Код']]) {
+  const T = {}; for (const [k, t] of [['schema', 'Схема'], ['world', '3D'], ['chassis', 'Шасси'], ['track', 'Трасса'], ['code', 'Код']]) {
     const b = el('button', { textContent: t }); b.dataset.ptab = k; b.setAttribute('role', 'tab'); b.onclick = () => go(k); T[k] = b; tabs.append(b); }
   header.after(tabs);
+  const W3 = () => window.World3D;
   function go(k) { if (!body.classList.contains('pm')) return; menu.hidden = true;
     const codeOpen = body.dataset.sheet === 'code';
-    if (k === 'code') { const r = RUI(); if (r && r.tab !== 'schema') { const sb = $('#rtabs [data-rtab=schema]'); if (sb) sb.click(); } if (!codeOpen) $('#mCode').click(); }
-    else { if (codeOpen) $('#mCode').click(); else if (body.dataset.sheet) closeSheet();
+    if (k === 'code') { const r = RUI(); if (r && r.tab !== 'schema') { const sb = $('#rtabs [data-rtab=schema]'); if (sb) sb.click(); } if (W3()) W3().show(false); if (!codeOpen) $('#mCode').click(); }
+    else if (k === 'world') { if (codeOpen) $('#mCode').click(); else if (body.dataset.sheet) closeSheet(); if (W3()) W3().show(true); }
+    else { if (W3()) W3().show(false); if (codeOpen) $('#mCode').click(); else if (body.dataset.sheet) closeSheet();
       const rb = $('#rtabs [data-rtab=' + k + ']'); if (rb && !$('#rtabs').hidden) rb.click(); }
     body.dataset.ptab = k; sync(); }
 
@@ -101,9 +103,9 @@
   window.addEventListener('resize', kb);
 
   function sync() { const pm = body.classList.contains('pm'); if (!pm) return;
-    const r = RUI(), car = !$('#rtabs') || !$('#rtabs').hidden;
+    const r = RUI(), car = !$('#rtabs') || !$('#rtabs').hidden, w3 = !!(W3() && W3().active);
     T.chassis.hidden = T.track.hidden = !car;
-    let k = body.dataset.sheet === 'code' ? 'code' : (r && car && r.tab !== 'schema' ? r.tab : 'schema');
+    let k = body.dataset.sheet === 'code' ? 'code' : w3 ? 'world' : (r && car && r.tab !== 'schema' ? r.tab : 'schema');
     if (!car && (k === 'chassis' || k === 'track')) k = 'schema';
     body.dataset.ptab = k; for (const [n, b] of Object.entries(T)) { b.classList.toggle('on', n === k); b.setAttribute('aria-selected', String(n === k)); }
     const p = playing(); bPlay.textContent = p ? '⏸' : '▶'; bPlay.classList.toggle('go', !p); bPlay.setAttribute('aria-label', p ? 'Пауза' : 'Запустить');

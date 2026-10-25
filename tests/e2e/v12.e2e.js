@@ -15,8 +15,8 @@ async function phone(b, W, H) {
   const tag = `[${W}×${H}]`;
   const ok = (c, m) => { assert.ok(c, tag + ' ' + m); console.log(tag, '✓', m); };
 
-  ok(await ev(() => [...document.scripts].filter(s => s.src).every(s => /\?v=(12|13|14|14\.1|14\.2|14\.3|14\.4|14\.4\.1)$/.test(s.src)) && document.body.classList.contains('pm')), 'scripts ?v=12+, portrait UI on');
-  ok((await (await fetch(new globalThis.URL('app.js?v=14.4.1', URL))).text()).includes("new Worker('worker.js?v=14.4.1')"), 'worker cache key v=14.4.1');
+  ok(await ev(() => [...document.scripts].filter(s => s.src).every(s => /\?v=(12|13|14|14\.1|14\.2|14\.3|14\.4|14\.5)$/.test(s.src)) && document.body.classList.contains('pm')), 'scripts ?v=12+, portrait UI on');
+  ok((await (await fetch(new globalThis.URL('app.js?v=14.5', URL))).text()).includes("new Worker('worker.js?v=14.5')"), 'worker cache key v=14.5');
   // top bar 48px, tabs, bottom bar, touch targets, text size, no horizontal scroll
   const L = await ev(() => { const vis = e => { const r = e.getBoundingClientRect(); return r.width > 0 && r.height > 0 && getComputedStyle(e).visibility !== 'hidden'; };
     const btns = [...document.querySelectorAll('header button, header select, #pmTabs button, #mbar button, #pmFit')].filter(vis);
@@ -26,7 +26,7 @@ async function phone(b, W, H) {
       play: document.querySelector('#pmPlay').getBoundingClientRect(), svg: document.querySelector('#svg').getBoundingClientRect().width }; });
   console.log(tag, 'layout', JSON.stringify({ ...L, play: [Math.round(L.play.x + L.play.width / 2)] }));
   ok(L.hdr <= 50 && L.hdr >= 46, 'top bar 48px'); ok(Math.abs(L.play.x + L.play.width / 2 - W / 2) < 2, '▶ centred');
-  ok(L.tabs.join() === 'Схема,Код', 'tabs Схема/Код (no robot)'); ok(L.bar.map(b => b[0]).join('|') === '＋ Детали|〰 Провод|⚙ Свойства|↩|↪|🗑' && L.bar.every(b => b[1] >= 56), 'bottom bar: undo/redo left of delete, 56px');
+  ok(L.tabs.join() === 'Схема,3D,Код', 'tabs Схема/3D/Код (no robot)'); ok(L.bar.map(b => b[0]).join('|') === '＋ Детали|〰 Провод|⚙ Свойства|↩|↪|🗑' && L.bar.every(b => b[1] >= 56), 'bottom bar: undo/redo left of delete, 56px');
   ok(L.minBtn >= 44 && L.minFont >= 14, 'touch targets ≥44px, text ≥14px'); ok(Math.abs(L.svg - W) < 2, 'canvas full width'); ok(await noHScroll(), 'no horizontal scroll');
   // ⋯ menu
   await pg.tap('#pmMore'); ok(await pg.isVisible('#pmMenu #pmSave') && await pg.isVisible('#pmExport') && await pg.isVisible('#pmExamples'), '⋯ menu: save/export/examples');
@@ -103,7 +103,7 @@ async function phone(b, W, H) {
 
   // 6) robot: Шасси/Трасса tabs, full-width track, Kp/Kd/speed sliders and sensor values below it
   await pg.tap('#pmTabs [data-ptab=schema]'); await pg.selectOption('#projects', PID); await pg.waitForTimeout(400);
-  ok((await ev(() => [...document.querySelectorAll('#pmTabs button')].filter(b => !b.hidden).map(b => b.textContent))).join() === 'Схема,Шасси,Трасса,Код', 'robot tabs');
+  ok((await ev(() => [...document.querySelectorAll('#pmTabs button')].filter(b => !b.hidden).map(b => b.textContent))).join() === 'Схема,3D,Шасси,Трасса,Код', 'robot tabs');
   await pg.tap('#pmTabs [data-ptab=track]'); await pg.waitForTimeout(200);
   const cv = await rect('#rcanvas'), sn = await rect('#rsens'), kp = await rect('#rTkp'), sp = await rect('#rSpeed');
   ok(Math.abs(cv.w - W) < 2 && cv.h > H * 0.3, 'track full width'); ok(sn.y >= cv.b - 1 && kp.y >= cv.b && sp.y >= cv.b && kp.b <= H && sp.b <= H, 'sliders + sensors below the track');
