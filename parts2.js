@@ -227,6 +227,28 @@
       if (!onGpio('ECHO')) return { on: false, why: 'HC-SR04 не подключён: Echo не на выводе платы' };
       return { on: true };
     } };
+  /* HC-SR501: OUT is a push-pull 3.3 V / 0 V once the module has power. One frame of lag, same as the relay. */
+  P.pir = { name: 'Датчик движения HC-SR501 (PIR)', group: 'Датчики', prefix: 'U', sensor: 'pir', dataPin: 'OUT', props: { motion: false }, box: [-40, -48, 80, 96],
+    pins: [{ id: 'VCC', x: -20, y: 40, label: 'VCC', hint: 'VCC +5 В' }, { id: 'OUT', x: 0, y: 40, label: 'OUT', hint: 'OUT: HIGH при движении (digitalRead)' }, { id: 'GND', x: 20, y: 40, label: 'GND', hint: 'GND' }],
+    draw: p => { const on = !!(p.props && p.props.motion);
+      return `<path d="M-20 40 V28 M0 40 V28 M20 40 V28" class="leg"/><rect x="-34" y="-16" width="68" height="44" rx="3" fill="#1a6b3c" stroke="#0d3d22"/>
+      <ellipse cx="0" cy="-16" rx="16" ry="14" fill="${on ? '#f7f8ff' : '#c5c9d4'}" stroke="#8e96a6"/><ellipse cx="-4" cy="-20" rx="7" ry="4" fill="#fff" opacity=".45"/>
+      <circle cx="22" cy="6" r="3.2" fill="${on ? '#ff3b30' : '#4a1010'}"/><text x="0" y="14" class="tiny lightt">${on ? 'движение' : 'тихо'}</text>
+      <text x="-20" y="22" class="plabel" text-anchor="middle">VCC</text><text x="0" y="22" class="plabel" text-anchor="middle">OUT</text><text x="20" y="22" class="plabel" text-anchor="middle">GND</text>`; },
+    stamp(p, ctx) {
+      pw3(p, ctx);
+      const g = ctx.n(p, 'GND'), o = ctx.n(p, 'OUT');
+      if (p._pwr) { p._outV = true; p._out = ctx.add({ type: 'V', p: o, n: g, V: p._hot ? 3.3 : 0, rInt: 220 }); }
+      else { p._outV = false; p._out = ctx.add({ type: 'R', a: o, b: g, R: 1e7 }); }
+    },
+    measure(p, sol, ctx) {
+      const m = pw3m(p, sol, ctx), io = sol.currents[p._out] || 0;
+      if (p._outV) { m.pinI.OUT = -io; m.pinI.GND += io; } else { m.pinI.OUT = io; m.pinI.GND -= io; }
+      const hot = !!(m.powered && p.props && p.props.motion);
+      if (hot !== !!p._hot || !!m.powered !== !!p._pwr) { p._hot = hot; p._pwr = !!m.powered; ctx.dirty(); }
+      m.extra = { 'Движение': hot ? 'есть (OUT = HIGH)' : 'нет (OUT = LOW)' };
+      return m;
+    } };
 
   /* ---------- ICs ---------- */
   function vis(name, top, bot, chip, note) {
