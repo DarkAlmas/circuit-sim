@@ -78,5 +78,5 @@ test('NTC temperature follows the 3D heat sample and does not gain a humidity pr
   assert.equal(proj.parts[0].props.temp, 64);
   assert.equal('hum' in proj.parts[0].props, false);
   assert.equal(proj.parts[1].props.temp, 64);
-  assert.equal(proj.parts[1].props.hum, 73);
+  assert.equal(proj.parts[1].props.hum, 90);
 });

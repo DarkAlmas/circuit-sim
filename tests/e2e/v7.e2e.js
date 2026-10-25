@@ -5,7 +5,7 @@ const URL = process.argv[2] || 'http://localhost:8765/';
   const pg = await b.newPage({ viewport: { width: 1920, height: 1080 } }); const errs = [];
   pg.on('console', m => { if (m.type() === 'error') errs.push(m.text()); }); pg.on('pageerror', e => errs.push(e.message));
   await pg.goto(URL); await pg.waitForTimeout(400);
-  const v7 = await pg.evaluate(() => [...document.scripts].filter(s => s.src).every(s => /\?v=(7|8|9|10|11|12|13|14|14\.1|14\.2|14\.3|14\.4|14\.5|14\.5\.1)$/.test(s.src)) && !!window.Devices); console.log('scripts ?v=7 + devices.js', v7); assert.ok(v7);
+  const v7 = await pg.evaluate(() => [...document.scripts].filter(s => s.src).every(s => /\?v=(7|8|9|10|11|12|13|14|14\.1|14\.2|14\.3|14\.4|14\.5|14\.5\.1|14\.5\.3)$/.test(s.src)) && !!window.Devices); console.log('scripts ?v=7 + devices.js', v7); assert.ok(v7);
   await pg.click('#new'); const n = await pg.$$eval('.ncard', x => x.map(e => e.dataset.kind)); console.log('cards', n.join(',')); assert.ok(n.includes('esp32c3') && n.includes('line'));
   await pg.click('.ncard[data-kind="line"]'); await pg.waitForTimeout(300);
   await pg.click('#run'); await pg.waitForTimeout(2500);

@@ -82,7 +82,7 @@ test('readings: block, flashlight, heat, humid, mover', () => {
     stimuli: [{ id: 'h', type: 'heat', x: 0, y: 80, z: 0 }, { id: 'u', type: 'humid', x: 0, y: 80, z: 25 }]
   });
   assert.equal(climate.sensors[0].temp, 64);
-  assert.equal(climate.sensors[0].hum, 73);
+  assert.equal(climate.sensors[0].hum, 90);
   const see = S.compute({
     sensors: [{ id: 'p', kind: 'pir', x: 0, y: 80, z: 0, rx: 0, ry: 0 }],
     stimuli: [{ id: 'm', type: 'mover', x: 0, y: 80, z: -40 }]
@@ -134,6 +134,34 @@ test('readings: block, flashlight, heat, humid, mover', () => {
   assert.equal(wall.sensors[0].motion, false);
 });
 
+test('humid inside R50 rises well above ambient 45; outside stays ambient; heat stays linear', () => {
+  const dht = { id: 'd', kind: 'dht', x: 8, y: 82, z: 16 };
+  const humAt = (x, y, z) => S.compute({
+    sensors: [dht],
+    stimuli: [{ id: 'u', type: 'humid', x, y, z }]
+  }).sensors[0].hum;
+  assert.equal(humAt(8, 82, 16), 100, 'steam on the DHT');
+  assert.ok(humAt(8, 82, 16) >= 80);
+  // Palette slots: DHT is the 3rd sensor, steam the 4th stimulus — ~48.8 cm, still inside R50.
+  const slotted = humAt(36, 82, -24);
+  assert.ok(slotted >= 80 && slotted > 45, 'inside the sphere (' + slotted + ')');
+  assert.equal(humAt(8, 82, 16 + 49), 80);
+  assert.equal(humAt(8, 82, 16 + 50), 45);
+  assert.equal(humAt(8, 82, 16 + 80), 45);
+  const bare = S.compute({ sensors: [dht], stimuli: [] }).sensors[0];
+  assert.equal(bare.hum, 45);
+  assert.equal(bare.temp, 24);
+  const warm = z => S.compute({
+    sensors: [dht],
+    stimuli: [{ id: 'h', type: 'heat', x: 8, y: 82, z }]
+  }).sensors[0];
+  assert.equal(warm(16).temp, 64);
+  assert.equal(warm(16).hum, 45);
+  assert.equal(warm(16 + 25).temp, 44);
+  assert.equal(warm(16 + 49).temp, 24.8);
+  assert.equal(warm(16 + 50).temp, 24);
+});
+
 test('applyReadings writes HC-SR04, LDR, DHT22 and PIR, not VL53 or TCRT', () => {
   const proj = {
     parts: [
@@ -167,7 +195,7 @@ test('applyReadings writes HC-SR04, LDR, DHT22 and PIR, not VL53 or TCRT', () =>
   assert.equal(proj.parts[1].props.dist, 400);
   assert.ok(proj.parts[2].props.lux > 100);
   assert.equal(proj.parts[3].props.temp, 64);
-  assert.equal(proj.parts[3].props.hum, 73);
+  assert.equal(proj.parts[3].props.hum, 90);
   assert.equal(proj.parts[4].props.mm, 300);
   assert.equal(proj.parts[5].props.refl, 0.9);
   assert.equal(proj.parts[6].props.motion, true);
@@ -198,6 +226,6 @@ test('PIR motion is written even when the prop is missing, and NTC takes DHT tem
   assert.equal(proj.parts[0].props.temp, 64);
   assert.equal(proj.parts[0].props.hum, undefined);
   assert.equal(proj.parts[1].props.temp, 64);
-  assert.equal(proj.parts[1].props.hum, 73);
+  assert.equal(proj.parts[1].props.hum, 90);
   assert.equal(proj.parts[2].props.motion, true);
 });
