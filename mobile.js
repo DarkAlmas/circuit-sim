@@ -22,10 +22,6 @@
   mi('pmExport', '⬇ Экспорт', () => $('#export').click());
   mi('pmImport', '⬆ Импорт', () => $('#import').click());
   mi('pmSettings', '⚙ Настройки', () => { const s = window.__sim; if (s) s.openSettings(); });
-  const bFont = mi('pmFont', '', () => { const f = font() === 14 ? 16 : 14; try { localStorage.setItem('pmFont', String(f)); } catch (e) {} applyFont(); });
-  const font = () => { let f = 14; try { f = +localStorage.getItem('pmFont') === 16 ? 16 : 14; } catch (e) {} return f; };
-  function applyFont() { const f = font(); body.style.setProperty('--codefs', f + 'px'); bFont.textContent = '⚙ Шрифт кода: ' + f + ' px'; }
-  applyFont();
   body.append(menu);
   bMore.onclick = e => { e.stopPropagation(); menu.hidden = !menu.hidden; };
   document.addEventListener('pointerdown', e => { if (!menu.hidden && !menu.contains(e.target) && e.target !== bMore) menu.hidden = true; });
@@ -115,7 +111,10 @@
     const sk = selKey(); if (sk && sk !== lastSel && k === 'schema' && body.dataset.sheet !== 'parts' && body.dataset.sheet !== 'props') { $('#mProps').click(); requestAnimationFrame(reveal); }
     lastSel = sk; }
 
-  function apply() { const on = mq.matches; body.classList.toggle('pm', on);
+  /* ↩/↪ live in the header on desktop; on the phone scheme bar they sit immediately left of 🗑. */
+  function placeHist() { const u = $('#undo'), r = $('#redo'), del = $('#mDel'), more = $('#simMore'); if (!u || !r || !del || !more) return;
+    if (body.classList.contains('pm')) del.before(u, r); else more.before(u, r); }
+  function apply() { const on = mq.matches; body.classList.toggle('pm', on); placeHist();
     if (on) { body.dataset.ptab = body.dataset.ptab || 'schema'; kb(); sync(); } else { menu.hidden = true; delete body.dataset.ptab; }
     window.dispatchEvent(new Event('resize')); }
   mq.addEventListener ? mq.addEventListener('change', apply) : mq.addListener(apply);

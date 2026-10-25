@@ -152,6 +152,7 @@ body.pm #mbar{display:flex;gap:4px;padding:4px 6px calc(4px + env(safe-area-inse
 body.pm #mbar button{min-height:56px;font-size:14px}
 body.pm #mCode{display:none}
 body.pm #mDel{display:block;flex:0 0 56px}
+body.hide-wire #mWire,body.hide-del #mDel{display:none!important}
 body.pm:not([data-ptab=schema]) #mbar{display:none}
 /* sheets */
 body.pm .pmHandle{display:flex;flex:0 0 28px;justify-content:center;align-items:center;height:28px;touch-action:none;cursor:grab;position:sticky;top:0;background:inherit;z-index:2}
@@ -196,6 +197,9 @@ body.pm button,body.pm select,body.pm input{touch-action:manipulation}
 label.rdir[hidden],.rgrp button[hidden]{display:none}body.pm .rcard{min-height:44px}body.pm .rtpl input{min-height:44px;font-size:14px}
 /* v14.3 settings: ⋯ → «Настройки симулятора». Phone = bottom sheet, desktop = centered modal. */
 #simMore{margin-left:8px;min-width:36px;padding:5px 8px;font-size:20px;line-height:1}
+#undo,#redo{min-width:36px;padding:5px 8px;font-size:18px;line-height:1}
+body.pm #mbar button{min-width:44px;overflow:hidden;white-space:nowrap}
+body.pm #mbar #undo,body.pm #mbar #redo{flex:0 0 44px;padding:0;font-size:20px}
 #simSettings .sbox{width:min(480px,94vw)}
 .srow{display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:48px;padding:8px 0;border-bottom:1px solid #2a3242}
 .srow>span{font-size:15px}

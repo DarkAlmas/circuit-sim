@@ -6,7 +6,7 @@ const EX = 'ex:Пример: мигание светодиодом (ESP32)';
   const mc = await b.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, deviceScaleFactor: 2 }); const pg = await mc.newPage();
   pg.on('console', m => { if (m.type() === 'error') errs.push(m.text()); }); pg.on('pageerror', e => errs.push(e.message));
   await pg.goto(URL); await pg.waitForTimeout(300);
-  const v8 = await pg.evaluate(() => [...document.scripts].filter(s => s.src).every(s => /\?v=(8|9|10|11|12|13|14|14\.1|14\.2|14\.3)$/.test(s.src))); console.log('scripts ?v=8', v8); assert.ok(v8);
+  const v8 = await pg.evaluate(() => [...document.scripts].filter(s => s.src).every(s => /\?v=(8|9|10|11|12|13|14|14\.1|14\.2|14\.3|14\.4)$/.test(s.src))); console.log('scripts ?v=8', v8); assert.ok(v8);
   const cdp = await mc.newCDPSession(pg);
   const load = async () => { await pg.selectOption('#projects', EX); await pg.waitForTimeout(250); };
   const mid = (id, f = 0.5) => pg.evaluate(([id, f]) => { const el = document.querySelector(`.whit[data-wire="${id}"]`), L = el.getTotalLength(), q = el.getPointAtLength(L * f), m = el.getScreenCTM(); return [q.x * m.a + m.e, q.y * m.d + m.f]; }, [id, f]);
@@ -14,9 +14,9 @@ const EX = 'ex:Пример: мигание светодиодом (ESP32)';
   const wires = () => pg.evaluate(() => window.__sim.proj.wires.map(w => w.id).join(','));
   const sel = () => pg.evaluate(() => window.__sim.sel && window.__sim.sel.wire);
   // layout: full-screen canvas + bottom bar with 44px buttons, sheets hidden
-  const lay = await pg.evaluate(() => { const s = document.querySelector('#svg').getBoundingClientRect(), bar = [...document.querySelectorAll('#mbar button')].map(x => x.getBoundingClientRect().height).filter(h => h > 0); // v12: portrait bar = Детали·Провод·Свойства·🗑
+  const lay = await pg.evaluate(() => { const s = document.querySelector('#svg').getBoundingClientRect(), bar = [...document.querySelectorAll('#mbar button')].map(x => x.getBoundingClientRect().height).filter(h => h > 0); // portrait bar = Детали·Провод·Свойства·↩·↪·🗑
     return { w: s.width, h: s.height, bar, left: getComputedStyle(document.querySelector('#left')).display, sw: document.documentElement.scrollWidth }; });
-  console.log('mobile layout', JSON.stringify(lay)); assert.ok(lay.w >= 380 && lay.h > 450 && lay.bar.length === 4 && lay.bar.every(h => h >= 44) && lay.left === 'none' && lay.sw <= 390);
+  console.log('mobile layout', JSON.stringify(lay)); assert.ok(lay.w >= 380 && lay.h > 450 && lay.bar.length === 6 && lay.bar.every(h => h >= 44) && lay.left === 'none' && lay.sw <= 390);
   await pg.tap('#mParts'); assert.equal(await pg.evaluate(() => getComputedStyle(document.querySelector('#left')).display), 'block'); await pg.tap('#mParts');
   await load();
   // 1) tap beside the line (7px off, misses the 3px stroke) selects the wire; no floating #wireDel (menu stays closed). Delete is in «Свойства провода».
