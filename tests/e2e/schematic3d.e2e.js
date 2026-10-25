@@ -1,4 +1,4 @@
-// v14.5.6: «Схема 3D» loads on the existing table, poses match, stimuli and the 2D canvas stay.
+// v14.5.7: «Схема 3D» loads on the existing table, poses match, stimuli and the 2D canvas stay.
 const { chromium } = require('playwright-core'); const assert = require('assert');
 const URL = process.argv[2] || 'http://localhost:8765/';
 const SHOT = process.argv[3] || '/tmp';
@@ -16,7 +16,7 @@ const SHOT = process.argv[3] || '/tmp';
   ok(csp.includes("connect-src 'none'") && csp.includes("script-src 'self'") && !/unsafe-inline|unsafe-eval/.test(csp), 'CSP unchanged');
   const scripts = await pg.evaluate(() => [...document.scripts].filter(s => s.src).map(s => s.src));
   const origin = new globalThis.URL(URL).origin;
-  ok(scripts.every(s => s.startsWith(origin) && /\?v=14\.5\.6$/.test(s)), 'scripts are same-origin ?v=14.5.6');
+  ok(scripts.every(s => s.startsWith(origin) && /\?v=14\.5\.7$/.test(s)), 'scripts are same-origin ?v=14.5.7');
   ok(scripts.some(s => s.includes('/schematic3d.js')) && scripts.some(s => s.includes('/vendor/three/three.min.js')), 'schematic3d and vendored Three.js');
 
   await pg.click('#w3tab'); await pg.waitForTimeout(400);
@@ -129,6 +129,55 @@ const SHOT = process.argv[3] || '/tmp';
     return { temp: read.temp, prop: part.props.temp, hum: part.props.hum, view: World3D.view };
   });
   ok(climate.view === 'world' && climate.temp > 24 && climate.prop === climate.temp && climate.hum === 45, 'heat still writes DHT props ' + JSON.stringify(climate));
+
+  await pg.click('#w3pal button[data-view=schema]'); await pg.waitForTimeout(250);
+  const live = await pg.evaluate(() => {
+    if (World3D.paintLive) World3D.paintLive();
+    const rows = World3D.schemaLive();
+    const dht = rows.find(r => r.id === 'U3');
+    const ldr = rows.find(r => r.id === 'R9');
+    const sonar = rows.find(r => r.id === 'U2');
+    const wires = World3D.schemaWireInfo();
+    const read = document.querySelector('#w3read');
+    return {
+      running: __sim.running, view: World3D.view, active: World3D.active,
+      dist: World3D.viewDistance(),
+      temp: dht && dht.live && dht.live.temp,
+      warm: dht && dht.live && dht.live.warm,
+      ldrStand: ldr && ldr.live && ldr.live.stand && ldr.live.stand.flashlight,
+      sonarStand: sonar && sonar.live && sonar.live.stand && sonar.live.stand.block,
+      sag: wires.some(w => w.y < Schematic3D.WIRE_Y - 0.05),
+      power: wires.some(w => w.r === Schematic3D.WIRE_POWER_R),
+      signal: wires.some(w => w.r === Schematic3D.WIRE_R),
+      read: read && !read.hidden && read.textContent
+    };
+  });
+  console.log('live', JSON.stringify(live));
+  ok(live.view === 'schema' && live.active && !live.running && live.temp > 24 && live.warm > 0, 'schema DHT follows the heat reading ' + JSON.stringify(live));
+  ok(live.sag && live.power && live.signal, 'wires sag and power leads are thicker');
+  ok(live.dist > 20 && live.dist < 170, 'schema camera fits closer than the old wide shot ' + live.dist);
+  ok(live.ldrStand === true && live.sonarStand === false, 'local stand-in only when that stimulus is missing');
+  ok(live.read && /DHT/.test(live.read) && /стоп/.test(live.read), 'schema readout without leaving 3D ' + live.read);
+
+  await pg.click('#run');
+  let blinked = null;
+  for (let i = 0; i < 25 && !(blinked && blinked.lit); i++) {
+    await pg.waitForTimeout(200);
+    blinked = await pg.evaluate(() => {
+      if (World3D.paintLive) World3D.paintLive();
+      const row = World3D.schemaLive().find(r => r.id === 'D1');
+      return { lit: !!(row && row.live && row.live.lit), running: __sim.running, view: World3D.view, active: World3D.active, read: document.querySelector('#w3read').textContent };
+    });
+  }
+  console.log('blink', JSON.stringify(blinked));
+  ok(blinked && blinked.running && blinked.active && blinked.view === 'schema' && blinked.lit, 'sim keeps running in Схема 3D and the LED lights ' + JSON.stringify(blinked));
+  ok(blinked.read && /симуляция/.test(blinked.read), 'readout says the sim is live');
+  await pg.click('#w3pal button[data-view=world]'); await pg.waitForTimeout(200);
+  const still = await pg.evaluate(() => ({ running: __sim.running, view: World3D.view, active: World3D.active }));
+  ok(still.running && still.active && still.view === 'world', 'world mode does not stop the sim ' + JSON.stringify(still));
+  await pg.click('#stop'); await pg.waitForTimeout(150);
+  ok(await pg.evaluate(() => __sim.running === false && World3D.active), 'stop leaves the 3D view open');
+  await pg.click('#w3pal button[data-view=schema]'); await pg.waitForTimeout(150);
 
   await pg.click('#w3tab'); await pg.waitForTimeout(200);
   const back = await pg.evaluate(() => {

@@ -480,7 +480,10 @@
     if (sel && sel.part && part(sel.part) && !!part(sel.part).burned !== !!$('#fix')) props();
     $('#status').textContent = shorts.length ? 'Пауза: короткое замыкание' : `Симуляция · t=${simTime.toFixed(2)} с · ${b.circuit.nodeCount} узлов · ${sol.iter} итер. Ньютона`;
     render(); live(); calc();
-    if (window.World3D && World3D.active) syncSensorWidgets();
+    if (window.World3D && World3D.active) {
+      syncSensorWidgets();
+      if (typeof World3D.paintLive === 'function') { try { World3D.paintLive(); } catch (e) { /* 3D tint follows the next frame */ } }
+    }
     raf = requestAnimationFrame(tick);
   }
   let simState = { vC: {}, iL: {} }, simTime = 0, lastT = 0;
@@ -527,7 +530,7 @@
   /* sketch worker lifecycle: a crashed/hung worker (exception, OOM, infinite loop) is torn down, a fresh idle
    * worker is created right away, the console explains what happened, and the next Run uses the fresh worker. */
   let spare = null, crashes = 0;
-  const newWorker = () => new Worker('worker.js?v=14.5.6');
+  const newWorker = () => new Worker('worker.js?v=14.5.7');
   function takeWorker() { const w = spare || newWorker(); spare = null; return w; }
   function crash(msg) { if (!worker) return; worker.onmessage = worker.onerror = null; try { worker.terminate(); } catch (e) {} worker = null; gpio = {}; prevV = null; crashes++;
     try { spare = newWorker(); } catch (e) { spare = null; }
@@ -734,5 +737,14 @@
   lastJ = JSON.stringify(strip(proj)); syncHist();
   layout(); palette(); projList(); $('#code').value = proj.code ?? DEFAULT_CODE; fit(); applyUi(); render(); props(); calc();
   window.addEventListener('resize', () => { if (!running) render(); });
-  window.__sim = { fit: () => { fit(); render(); }, del: () => del(), rotate: () => rotate(), get proj() { return proj; }, get running() { return running; }, changed() { changed(); }, select(id) { sel = id && part(id) ? { part: id } : null; render(); props(); }, get sel() { return sel; }, get wireMode() { return wireMode; }, get armed() { return armed; }, get meas() { return meas; }, start, stop, undo, redo, get gpio() { return gpio; }, get shorts() { return shorts; }, get crashes() { return crashes; }, get simTime() { return simTime; }, get hasWorker() { return !!worker; }, get worker() { return worker; }, get hasSpare() { return !!spare; }, get rf() { return rf; }, get extra() { return Object.keys(extra); }, codeFor: id => setCodeTarget(id), get cam() { return cam; }, render: () => render(), select: id => { sel = { part: id }; props(); calc(); render(); }, openSettings, setUi, get ui() { return ui; } };
+  function liveOf(id) {
+    const p = part(id); if (!p) return null;
+    const d = P[p.type] || {}, bi = d.builtin ?? 2, dk = d.display, link = links[p.id], g = gpioOf(p.id)[bi];
+    return {
+      I: meas[p.id] && meas[p.id].I, m: meas[p.id] || null, burned: !!p.burned, running,
+      led2: !!(running && g && g.mode === 'OUTPUT' && (d.ledInv ? !(g.val > 0) : g.val > 0)),
+      mod: dk ? p._mod : null, on: link ? link.on : undefined, anim: animT[p.id] || 0
+    };
+  }
+  window.__sim = { fit: () => { fit(); render(); }, del: () => del(), rotate: () => rotate(), get proj() { return proj; }, get running() { return running; }, changed() { changed(); }, select(id) { sel = id && part(id) ? { part: id } : null; render(); props(); }, get sel() { return sel; }, get wireMode() { return wireMode; }, get armed() { return armed; }, get meas() { return meas; }, liveOf, start, stop, undo, redo, get gpio() { return gpio; }, get shorts() { return shorts; }, get crashes() { return crashes; }, get simTime() { return simTime; }, get hasWorker() { return !!worker; }, get worker() { return worker; }, get hasSpare() { return !!spare; }, get rf() { return rf; }, get extra() { return Object.keys(extra); }, codeFor: id => setCodeTarget(id), get cam() { return cam; }, render: () => render(), select: id => { sel = { part: id }; props(); calc(); render(); }, openSettings, setUi, get ui() { return ui; } };
 })();

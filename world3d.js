@@ -8,6 +8,8 @@
  * draw only for the selected or hovered object. VL53 and TCRT stay on the robot track.
  * v14.5.5: «Схема 3D» puts Schematic3D meshes on this table (pose from part x/y/rot).
  * v14.5.6: passive silhouettes and wire tubes join that view. Stimulus math is untouched.
+ * v14.5.7: «Схема 3D» stays on the running sim. Meshes repaint from the same readings
+ * and measure() the 2D view uses. Stimulus math below is unchanged.
  * That view does not move schematic parts and does not change how readings are written.
  * Three.js is vendored (vendor/three). No network. DOM is createElement/textContent only.
  * window.World3D.getReadings() / the world3d-readings event are the solver hook. */
@@ -282,6 +284,7 @@
   let selected = null, drag = null, hoverPick = null, dirty = true, zoneKeys = [];
   let caster = null, ptr = null, hitV = null;
   let schemaRoot = null, schemaLib = null, schemaSig = null, view = 'world';
+  let camHeld = false, savedWorldCam = null;
 
   const center = $('#center');
   const btn = el('button', { type: 'button', id: 'w3tab', textContent: '3D', title: '3D-мир датчиков' });
@@ -307,10 +310,11 @@
   const bYawR = el('button', { type: 'button', id: 'w3yawR', className: 'w3btn w3act', textContent: '↻ 15°', title: 'Повернуть датчик вправо' });
   bReset.onclick = () => resetStimuli(); bDel.onclick = () => removeSelected(); bYawL.onclick = () => yawSelected(1); bYawR.onclick = () => yawSelected(-1);
   const HINT_WORLD = 'ЛКМ по пустому — обзор, ПКМ — сдвиг, колесо — масштаб. Тяни объект по столу.';
-  const HINT_SCHEMA = 'Детали стоят как на схеме. Воздействия можно двигать. Саму схему правь на вкладке «Схема».';
+  const HINT_SCHEMA = 'Симуляция идёт и здесь. Детали живые. Воздействия можно двигать. Саму схему правь на вкладке «Схема».';
   const hint = el('p', { className: 'w3hint', textContent: HINT_WORLD });
   const stat = el('p', { id: 'w3stat', className: 'w3hint', textContent: '' });
-  pal.append(bReset, bDel, bYawL, bYawR, hint, stat);
+  const readEl = el('p', { id: 'w3read', hidden: true, textContent: '' });
+  pal.append(bReset, bDel, bYawL, bYawR, hint, stat, readEl);
   const stage = el('div', { id: 'w3stage' });
   const canvas = el('canvas', { id: 'w3cv' });
   const tags = el('div', { id: 'w3tags' });
@@ -485,14 +489,50 @@
         if (wg) schemaRoot.add(wg);
       } catch (e) { /* a bad tube must not drop the parts already on the table */ }
     }
+    if (!camHeld) fitSchema();
+  }
+  function rememberWorldCam() {
+    if (!camera || !controls || savedWorldCam) return;
+    savedWorldCam = {
+      px: camera.position.x, py: camera.position.y, pz: camera.position.z,
+      tx: controls.target.x, ty: controls.target.y, tz: controls.target.z
+    };
+  }
+  function restoreWorldCam() {
+    if (!savedWorldCam || !camera || !controls) return;
+    camera.position.set(savedWorldCam.px, savedWorldCam.py, savedWorldCam.pz);
+    controls.target.set(savedWorldCam.tx, savedWorldCam.ty, savedWorldCam.tz);
+    savedWorldCam = null;
+    controls.update();
+  }
+  function fitSchema() {
+    if (!camera || !controls || !window.Schematic3D || typeof Schematic3D.fitView !== 'function') return;
+    const pts = schemaPartNodes().map(g => ({ x: g.position.x, z: g.position.z }));
+    const fit = Schematic3D.fitView(pts);
+    if (!fit) return;
+    controls.target.set(fit.target.x, fit.target.y, fit.target.z);
+    camera.position.set(fit.position.x, fit.position.y, fit.position.z);
+    camera.updateProjectionMatrix();
+    controls.update();
   }
   function setView(next) {
     if (next !== 'world' && next !== 'schema') return;
+    if (next === view) return;
+    const prev = view;
     view = next;
     if (active && !renderer) boot();
     applyView();
-    if (view === 'schema') refreshSchema(true);
-    else { updateSel(); if (active) syncTags(); }
+    if (view === 'schema') {
+      camHeld = false;
+      rememberWorldCam();
+      refreshSchema(true);
+      fitSchema();
+    } else {
+      if (prev === 'schema') restoreWorldCam();
+      updateSel();
+      if (active) syncTags();
+    }
+    if (readEl) readEl.hidden = view !== 'schema';
   }
 
   function boot() {
@@ -508,7 +548,7 @@
       camera = new THREE.PerspectiveCamera(48, 1, 0.5, 2000);
       // Sensors face −Z, stimuli sit in front of them. Look from that side
       // so a click on a stimulus is not swallowed by the sensor behind it.
-      camera.position.set(95, 118, -175);
+      camera.position.set(70, 96, -132);
       scene.add(new THREE.AmbientLight(0xffffff, 0.72));
       const sun = new THREE.DirectionalLight(0xfff7ee, 0.85); sun.position.set(60, 140, 80); scene.add(sun);
       const floor = new THREE.Mesh(new THREE.PlaneGeometry(520, 520), new THREE.MeshStandardMaterial({ color: 0xc8c6c2, roughness: 0.95 }));
@@ -525,8 +565,9 @@
       ring = new THREE.Mesh(new THREE.RingGeometry(8, 10.5, 28), new THREE.MeshBasicMaterial({ color: 0xffd34d, side: THREE.DoubleSide }));
       ring.rotation.x = -Math.PI / 2; ring.position.y = TABLE_Y + 0.3; ring.visible = false; scene.add(ring);
       controls = new THREE.OrbitControls(camera, canvas);
-      controls.target.set(0, 48, 0); controls.enableDamping = true; controls.dampingFactor = 0.08;
-      controls.maxPolarAngle = Math.PI / 2 - 0.06; controls.minDistance = 36; controls.maxDistance = 420;
+      controls.target.set(0, 58, 0); controls.enableDamping = true; controls.dampingFactor = 0.08;
+      controls.maxPolarAngle = Math.PI / 2 - 0.06; controls.minDistance = 18; controls.maxDistance = 420;
+      controls.addEventListener('start', () => { camHeld = true; });
       controls.mouseButtons.LEFT = THREE.MOUSE.ROTATE; controls.mouseButtons.RIGHT = THREE.MOUSE.PAN;
       controls.update();
       caster = new THREE.Raycaster(); ptr = new THREE.Vector2(); hitV = new THREE.Vector3();
@@ -542,6 +583,7 @@
     if (!active || !renderer) { raf = 0; return; }
     controls.update();
     if (view === 'schema') refreshSchema(false);
+    paintLive();
     renderer.render(scene, camera); syncTags();
     raf = requestAnimationFrame(loop);
   }
@@ -557,8 +599,8 @@
     if (!boot()) return;
     if (controls) controls.enabled = true;
     resize(); if (dirty) rebuild(); else { syncAll(); applyView(); }
-    if (view === 'schema') refreshSchema(true);
-    applyReadings(proj()); updateZones(); syncChrome();
+    if (view === 'schema') { refreshSchema(true); if (!camHeld) fitSchema(); }
+    applyReadings(proj()); updateZones(); paintLive(); syncChrome();
     if (!raf) loop(); else if (renderer && camera) { renderer.render(scene, camera); syncTags(); }
     requestAnimationFrame(() => { if (active) resize(); });
   }
@@ -575,6 +617,7 @@
   function mat(color, extra) { return new window.THREE.MeshStandardMaterial(Object.assign({ color, roughness: 0.72, metalness: 0.04 }, extra || {})); }
   function mesh(geo, color, extra) { return new window.THREE.Mesh(geo, mat(color, extra)); }
   function aimNegZ(obj, fwd) { obj.quaternion.setFromUnitVectors(new window.THREE.Vector3(0, 0, -1), new window.THREE.Vector3(fwd[0], fwd[1], fwd[2])); }
+  function mute(o) { o.raycast = function () {}; return o; }
 
   function makeSensor(kind) {
     const THREE = window.THREE, g = new THREE.Group();
@@ -582,23 +625,35 @@
       case 'ultrasonic': {
         g.add(mesh(new THREE.BoxGeometry(22, 10, 12), 0x1d4fd0));
         for (const x of [-6, 6]) { const eye = mesh(new THREE.CylinderGeometry(3.1, 3.1, 2, 14), 0xd5d8de); eye.rotation.x = Math.PI / 2; eye.position.set(x, 0, -6.2); g.add(eye);
-          const pup = mesh(new THREE.CylinderGeometry(1.5, 1.5, 1.2, 12), 0x1a1d24); pup.rotation.x = Math.PI / 2; pup.position.set(x, 0, -7.2); g.add(pup); }
+          const pup = mesh(new THREE.CylinderGeometry(1.5, 1.5, 1.2, 12), 0x1a1d24); pup.rotation.x = Math.PI / 2; pup.position.set(x, 0, -7.2); pup.userData.fx = 'eye'; g.add(pup); }
+        const beam = mute(mesh(new THREE.CylinderGeometry(0.7, 0.7, 1, 8), 0x4c7dff, { transparent: true, opacity: 0.4, emissive: 0x4c7dff, emissiveIntensity: 0.25 }));
+        beam.rotation.x = -Math.PI / 2; beam.userData.fx = 'beam'; beam.position.set(0, 0, -8); g.add(beam);
+        const cube = mute(mesh(new THREE.BoxGeometry(4.2, 4.2, 4.2), 0x9aa3b2));
+        cube.userData.fx = 'standin'; cube.userData.stand = 'block'; cube.visible = false; cube.position.set(12, 2, -4); g.add(cube);
         break;
       }
       case 'ldr': {
-        const disc = mesh(new THREE.CylinderGeometry(6, 6, 2.4, 20), 0xe8c89a); disc.position.y = 0; g.add(disc);
+        const disc = mesh(new THREE.CylinderGeometry(6, 6, 2.4, 20), 0xe8c89a); disc.position.y = 0; disc.userData.fx = 'disc'; g.add(disc);
         for (const z of [-2.2, 0, 2.2]) { const line = mesh(new THREE.BoxGeometry(8, 0.5, 0.7), 0xb33); line.position.set(0, 1.3, z); g.add(line); }
+        const lamp = mute(mesh(new THREE.SphereGeometry(1.7, 12, 8), 0xfff2a8, { emissive: 0xfff2a8, emissiveIntensity: 0.25 }));
+        lamp.userData.fx = 'standin'; lamp.userData.stand = 'flashlight'; lamp.visible = false; lamp.position.set(0, 8, 0); g.add(lamp);
         break;
       }
       case 'dht': {
-        g.add(mesh(new THREE.BoxGeometry(12, 16, 8), 0xf4f4f4));
+        const body = mesh(new THREE.BoxGeometry(12, 16, 8), 0xf4f4f4); body.userData.fx = 'body'; g.add(body);
         for (let i = 0; i < 4; i++) { const slit = mesh(new THREE.BoxGeometry(8, 0.6, 0.5), 0xb9c0c8); slit.position.set(0, 4 - i * 2.4, -4.1); g.add(slit); }
+        const flame = mute(mesh(new THREE.ConeGeometry(1.6, 4.2, 8), 0xff9f1c, { emissive: 0xff9f1c, emissiveIntensity: 0.35 }));
+        flame.userData.fx = 'standin'; flame.userData.stand = 'heat'; flame.visible = false; flame.position.set(8, 6, 0); g.add(flame);
+        const puff = mute(mesh(new THREE.SphereGeometry(1.8, 10, 8), 0xd7f3ff, { transparent: true, opacity: 0.55 }));
+        puff.userData.fx = 'standin'; puff.userData.stand = 'humid'; puff.visible = false; puff.position.set(-8, 7, 0); g.add(puff);
         break;
       }
       case 'pir': {
         g.add(mesh(new THREE.BoxGeometry(14, 4, 10), 0xe6e6ea));
-        const dome = mesh(new THREE.SphereGeometry(5, 16, 12, 0, Math.PI * 2, 0, Math.PI / 2), 0xf7f7fb, { transparent: true, opacity: 0.9 });
-        dome.position.y = 2; g.add(dome);
+        const dome = mesh(new THREE.SphereGeometry(5, 16, 12, 0, Math.PI * 2, 0, Math.PI / 2), 0xf7f7fb, { transparent: true, opacity: 0.9, emissive: 0x000000, emissiveIntensity: 0 });
+        dome.position.y = 2; dome.userData.fx = 'dome'; g.add(dome);
+        const fig = mute(mesh(new THREE.BoxGeometry(2.2, 5, 1.4), 0x3d5a80));
+        fig.userData.fx = 'standin'; fig.userData.stand = 'mover'; fig.visible = false; fig.position.set(0, 3, -10); g.add(fig);
         break;
       }
       default: unknown(kind);
@@ -846,7 +901,125 @@
   window.addEventListener('resize', () => { if (active) resize(); });
   if (window.ResizeObserver && stage) new ResizeObserver(() => { if (active) resize(); }).observe(stage);
 
+  function stimulusPresent() {
+    const w = world();
+    const have = { block: false, flashlight: false, heat: false, humid: false, mover: false };
+    if (w && Array.isArray(w.stimuli)) {
+      for (const t of w.stimuli) if (t && Object.prototype.hasOwnProperty.call(have, t.type)) have[t.type] = true;
+    }
+    return have;
+  }
+  function schemaReadout() {
+    const sim = window.__sim;
+    const running = !!(sim && sim.running);
+    const parts = (proj() && Array.isArray(proj().parts)) ? proj().parts : [];
+    const bits = [];
+    const num = v => { const n = +v; return Number.isFinite(n) ? n : 0; };
+    for (const p of parts) {
+      if (!p || bits.length >= 6) break;
+      const pr = p.props || {};
+      if (p.type === 'led' || p.type === 'rgbled') {
+        let st = { running };
+        if (sim && typeof sim.liveOf === 'function') { try { st = sim.liveOf(p.id) || st; } catch (e) { /* the line still lists other parts */ } }
+        const v = window.Schematic3D && Schematic3D.liveVisual ? Schematic3D.liveVisual(p, st) : null;
+        if (v && v.lit) bits.push(p.id + ' светит');
+      } else if (p.type === 'hcsr04') bits.push('УЗ ' + Math.round(num(pr.dist)) + ' см');
+      else if (p.type === 'ldr') bits.push('LDR ' + Math.round(num(pr.lux)) + ' лк');
+      else if (p.type === 'dht22') bits.push('DHT ' + num(pr.temp).toFixed(1) + '°C ' + Math.round(num(pr.hum)) + '%');
+      else if (p.type === 'ntc') bits.push('NTC ' + num(pr.temp).toFixed(1) + '°C');
+      else if (p.type === 'pir') bits.push('PIR ' + (pr.motion ? 'движение' : 'тихо'));
+      else if (p.type === 'vl53l0x') bits.push('VL53 ' + Math.round(num(pr.mm)) + ' мм');
+      else if (p.type === 'buzzer' && sim && typeof sim.liveOf === 'function') {
+        let st = null; try { st = sim.liveOf(p.id); } catch (e) { st = null; }
+        if (st && st.running && st.m && st.m.I > 0.005) bits.push(p.id + ' звук');
+      }
+    }
+    return (running ? '● симуляция' : 'стоп') + (bits.length ? ' · ' + bits.join(' · ') : '');
+  }
+  function setEm(mesh, hex, intensity) {
+    const mat = mesh && mesh.material;
+    if (!mat) return;
+    if (mat.emissive && typeof mat.emissive.setHex === 'function') mat.emissive.setHex(hex);
+    else mat.emissive = hex;
+    mat.emissiveIntensity = intensity;
+  }
+  function paintSchemaLive() {
+    if (!schemaRoot || !window.Schematic3D || typeof Schematic3D.liveVisual !== 'function' || typeof Schematic3D.applyLive !== 'function') return;
+    const project = proj();
+    const parts = project && Array.isArray(project.parts) ? project.parts : [];
+    const byId = new Map();
+    for (const p of parts) if (p && p.id) byId.set(p.id, p);
+    const have = stimulusPresent();
+    const sim = window.__sim;
+    const now = typeof performance !== 'undefined' && performance.now ? performance.now() : 0;
+    for (const g of schemaPartNodes()) {
+      const p = byId.get(g.userData.id);
+      if (!p) continue;
+      let st = { running: !!(sim && sim.running), stimuli: have, now };
+      if (sim && typeof sim.liveOf === 'function') {
+        try {
+          const live = sim.liveOf(p.id);
+          if (live) st = Object.assign({}, live, { stimuli: have, now });
+        } catch (e) { /* props and the fallback state still paint */ }
+      } else if (sim && sim.meas && sim.meas[p.id]) st.m = sim.meas[p.id];
+      try { Schematic3D.applyLive(g, Schematic3D.liveVisual(p, st)); } catch (e) { /* one part must not blank the table */ }
+    }
+  }
+  function paintWorldLive() {
+    if (!groups || !groups.size) return;
+    const have = stimulusPresent();
+    const byId = new Map(last.sensors.map(r => [r.id, r]));
+    const THREE = window.THREE;
+    for (const [key, g] of groups) {
+      if (key.indexOf('sensor:') !== 0 || !g) continue;
+      const r = byId.get(key.slice(7));
+      if (!r) continue;
+      g.traverse(m => {
+        const fx = m.userData && m.userData.fx;
+        if (!fx) return;
+        if (fx === 'eye' && r.kind === 'ultrasonic') setEm(m, 0x4c7dff, r.dist < 390 ? 0.8 : 0.12);
+        else if (fx === 'beam' && r.kind === 'ultrasonic') {
+          const len = Math.min(70, Math.max(6, +r.dist || 6));
+          if (m.scale && m.scale.set) m.scale.set(1, len, 1);
+          m.position.z = -8 - len / 2;
+          setEm(m, 0x4c7dff, r.dist < 390 ? 0.55 : 0.12);
+        } else if (fx === 'disc' && r.kind === 'ldr') {
+          const glow = Math.max(0, Math.min(1, Math.log10(Math.max(1, (r.lux || 0) + 1)) / 4.2));
+          setEm(m, 0xfff1c2, glow);
+        } else if (fx === 'body' && r.kind === 'dht' && m.material && m.material.color && m.material.color.setHex) {
+          const warm = Math.max(0, Math.min(1, ((r.temp || 0) - 18) / 42));
+          m.material.color.setHex(0xf4f4f4);
+          if (THREE && m.material.color.lerp) m.material.color.lerp(new THREE.Color(0xe07a2f), warm);
+        } else if (fx === 'dome' && r.kind === 'pir') setEm(m, 0xff3b30, r.motion ? 0.85 : 0);
+        else if (fx === 'standin') {
+          const name = m.userData.stand;
+          const show = !!(name && !have[name]);
+          m.visible = show;
+          if (!show) return;
+          if (name === 'flashlight') setEm(m, 0xfff2a8, Math.max(0, Math.min(1, Math.log10(Math.max(1, (r.lux || 0) + 1)) / 4.2)));
+          else if (name === 'heat') {
+            const k = 0.65 + Math.max(0, Math.min(1, ((r.temp || 0) - 18) / 42));
+            if (m.scale && m.scale.set) m.scale.set(k, k, k);
+            setEm(m, 0xff9f1c, k);
+          } else if (name === 'humid' && m.material) m.material.opacity = 0.25 + 0.6 * Math.max(0, Math.min(1, ((r.hum || 0) - 40) / 60));
+          else if (name === 'block') setEm(m, 0x4c7dff, r.dist < 390 ? 0.5 : 0);
+          else if (name === 'mover') setEm(m, 0xffd34d, r.motion ? 0.75 : 0);
+        }
+      });
+    }
+  }
+  function paintLive() {
+    try { paintWorldLive(); } catch (e) { /* world tint must not stop the frame */ }
+    if (view !== 'schema') {
+      if (readEl) readEl.hidden = true;
+      return;
+    }
+    try { paintSchemaLive(); } catch (e) { /* schematic tint must not stop the frame */ }
+    if (readEl) { readEl.hidden = false; readEl.textContent = schemaReadout(); }
+  }
+
   api.show = show;
+  api.paintLive = paintLive;
   api.onOpen = () => {
     dirty = true; schemaSig = null; selected = null; hoverPick = null; drag = null;
     if (active) { rebuild(); if (view === 'schema') refreshSchema(true); applyReadings(proj()); updateZones(); }
@@ -861,6 +1034,21 @@
     if (!schemaRoot) return 0;
     const g = schemaRoot.children.find(c => c.userData && c.userData.role === 'wires');
     return g ? g.children.length : 0;
+  };
+  api.schemaWireInfo = () => {
+    if (!schemaRoot) return [];
+    const g = schemaRoot.children.find(c => c.userData && c.userData.role === 'wires');
+    if (!g) return [];
+    return g.children.map(c => ({
+      y: c.position.y,
+      r: c.userData && c.userData.r,
+      sag: c.userData && c.userData.sag
+    }));
+  };
+  api.schemaLive = () => schemaPartNodes().map(c => ({ id: c.userData.id, type: c.userData.type, live: c.userData.live || null }));
+  api.viewDistance = () => {
+    if (!camera || !controls || !camera.position.distanceTo) return 0;
+    return camera.position.distanceTo(controls.target);
   };
   api.schemaScreen = id => {
     if (!schemaRoot) return null;

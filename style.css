@@ -273,6 +273,8 @@ body.pm #w3tab{display:none!important}
 .w3tag{position:absolute;transform:translate(-50%,-130%);background:rgba(20,26,36,.92);color:#e8eef8;border:1px solid #39435a;border-radius:8px;padding:3px 8px;font:12px/1.35 ui-monospace,monospace;white-space:nowrap}
 .w3tag.on{border-color:#ffd34d}
 .w3hint{color:#8a94a8;font-size:12px;margin:6px 0 0}
+#w3read{color:#d5deee;font-size:12px;line-height:1.35;margin:8px 0 0}
+body.pm #w3read:not([hidden]){flex:1 0 100%}
 #w3fail{position:absolute;left:12px;right:12px;top:52px;background:#1a2030;color:#e8eef8;padding:10px 12px;border-radius:8px;z-index:2}
 @media (max-width:899px){#w3tab{min-height:44px}#w3pal button{min-height:44px}}
 /* v14.5.2: phone keeps the 3D view full width; the palette is a chip row under it. */

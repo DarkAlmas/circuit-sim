@@ -1,4 +1,4 @@
-// v14.5.6: schematic pose, passive silhouettes, wire tubes. No DOM, no WebGL, no new sanitize fields.
+// v14.5.7: schematic pose, passive silhouettes, sagging wires, live visuals. No DOM, no WebGL, no new sanitize fields.
 const test = require('node:test'), assert = require('node:assert');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -59,21 +59,33 @@ test('boards and world3d sensors keep their schematic footprints', () => {
 });
 
 function fakeThree() {
+  function Vec() {
+    this.x = 0; this.y = 0; this.z = 0;
+    this.set = (x, y, z) => { this.x = x; this.y = y; this.z = z; };
+  }
   function Mesh(geo, material) {
     this.geometry = geo; this.material = material; this.userData = {};
-    this.position = { set() {} };
+    this.position = new Vec();
+    this.scale = new Vec(); this.scale.set(1, 1, 1);
     this.rotation = { x: 0, y: 0, z: 0 };
     this.quaternion = { setFromUnitVectors() {} };
+    this.visible = true;
   }
   function Group() {
-    this.children = []; this.userData = {};
-    this.position = { set() {} };
-    this.rotation = { y: 0 };
+    this.children = []; this.userData = {}; this.visible = true;
+    this.position = new Vec();
+    this.scale = new Vec(); this.scale.set(1, 1, 1);
+    this.rotation = { x: 0, y: 0, z: 0 };
     this.add = c => { this.children.push(c); };
   }
   function Vector3() {}
   function Geo() {}
-  function Mat(o) { this.color = o && o.color; }
+  function Mat(o) {
+    this.color = o && o.color;
+    this.emissive = o && o.emissive || 0;
+    this.emissiveIntensity = o && o.emissiveIntensity || 0;
+    this.opacity = o && o.opacity == null ? 1 : o.opacity;
+  }
   return {
     Group, Mesh, Vector3,
     BoxGeometry: Geo, CylinderGeometry: Geo, SphereGeometry: Geo, TorusGeometry: Geo,
@@ -181,9 +193,94 @@ test('wire tubes follow sanitized pin endpoints and bend points', () => {
   assert.deepEqual(S.wirePoints(s.parts, { a: { part: 'R1', pin: 'missing' }, b: { part: 'R2', pin: 'a' } }), []);
   const lib = S.createLib(fakeThree());
   const tubes = S.buildWires(lib, s.parts, s.wires);
-  assert.equal(tubes.children.length, 3);
+  assert.ok(tubes.children.length >= 3, 'sag splits a span into more than one tube');
   assert.equal(tubes.children[0].material.color, 0x4c7dff);
-  assert.equal(tubes.children[2].material.color, S.WIRE_NEUTRAL);
+  assert.ok(tubes.children.some(c => c.material.color === S.WIRE_NEUTRAL));
+  assert.ok(tubes.children.some(c => c.position.y < S.WIRE_Y - 0.05), 'a span dips below the pin plane');
+  assert.ok(tubes.children.every(c => c.userData.r === S.WIRE_R));
+  const arc = S.sagPoints({ x: 0, y: S.WIRE_Y, z: 0 }, { x: 12, y: S.WIRE_Y, z: 0 });
+  assert.equal(arc[0].y, S.WIRE_Y);
+  assert.equal(arc[arc.length - 1].y, S.WIRE_Y);
+  assert.ok(arc[1].y < S.WIRE_Y);
+  assert.equal(S.wireRadius({ color: 'красный', a: { pin: 'a' }, b: { pin: 'b' } }), S.WIRE_POWER_R);
+  assert.equal(S.wireRadius({ color: 'чёрный', a: { pin: '2' }, b: { pin: 'a' } }), S.WIRE_POWER_R);
+  assert.equal(S.wireRadius({ a: { pin: 'GND' }, b: { pin: 'b' } }), S.WIRE_POWER_R);
+  assert.equal(S.wireRadius({ a: { pin: '3V3' }, b: { pin: '15' } }), S.WIRE_POWER_R);
+  assert.equal(S.wireRadius({ a: { pin: 'GND2' }, b: { pin: 'a' } }), S.WIRE_POWER_R);
+  assert.equal(S.wireRadius({ color: 'синий', a: { pin: 'a' }, b: { pin: 'b' } }), S.WIRE_R);
+  assert.ok(S.WIRE_POWER_R > S.WIRE_R);
+  const power = S.buildWires(lib, s.parts, [{ id: 'wp', a: { part: 'R1', pin: 'a' }, b: { part: 'R2', pin: 'b' }, color: 'красный' }]);
+  assert.ok(power.children.length >= 1 && power.children.every(c => c.userData.r === S.WIRE_POWER_R && c.material.color === 0xe5484d));
+});
+
+test('live visuals follow the same readings the 2D view already uses', () => {
+  const lit = S.liveVisual({ type: 'led', props: { color: 'зелёный' } }, { running: true, m: { I: 0.01 } });
+  assert.equal(lit.lit, true);
+  assert.ok(lit.glow > 0.5 && lit.glow <= 1);
+  assert.equal(lit.color, 0x30ff50);
+  const dark = S.liveVisual({ type: 'led', props: { color: 'красный' } }, { running: false, m: { I: 0.02 } });
+  assert.equal(dark.lit, false);
+  assert.equal(dark.glow, 0);
+  const burned = S.liveVisual({ type: 'led', burned: true, props: { color: 'красный' } }, { running: true, m: { I: 0.02 } });
+  assert.equal(burned.lit, false);
+  const rgb = S.liveVisual({ type: 'rgbled' }, { running: true, m: { ch: [0.012, 0, 0] } });
+  assert.equal(rgb.lit, true);
+  assert.equal(rgb.color, 0xff0000);
+  const pir = S.liveVisual({ type: 'pir', props: { motion: true } }, {});
+  assert.equal(pir.motion, true);
+  assert.equal(pir.glow, 1);
+  const quiet = S.liveVisual({ type: 'pir', props: { motion: false } }, {});
+  assert.equal(quiet.motion, false);
+  const hot = S.liveVisual({ type: 'dht22', props: { temp: 60, hum: 90 } }, {});
+  const room = S.liveVisual({ type: 'dht22', props: { temp: 24, hum: 45 } }, {});
+  assert.ok(hot.warm > room.warm && hot.wet > room.wet);
+  assert.notEqual(hot.color, room.color);
+  const bright = S.liveVisual({ type: 'ldr', props: { lux: 8000 } }, {});
+  const dim = S.liveVisual({ type: 'ldr', props: { lux: 10 } }, {});
+  assert.ok(bright.glow > dim.glow);
+  const near = S.liveVisual({ type: 'hcsr04', props: { dist: 20 } }, {});
+  const far = S.liveVisual({ type: 'hcsr04', props: { dist: 300 } }, {});
+  assert.ok(near.beamLen < far.beamLen);
+  assert.equal(near.hit, true);
+  assert.equal(far.hit, true);
+  const miss = S.liveVisual({ type: 'hcsr04', props: { dist: 400 } }, {});
+  assert.equal(miss.hit, false);
+  const buzz = S.liveVisual({ type: 'buzzer' }, { running: true, m: { I: 0.02 }, now: 0 });
+  assert.equal(buzz.on, true);
+  assert.equal(S.liveVisual({ type: 'buzzer' }, { running: false, m: { I: 0.02 } }).on, false);
+  assert.equal(S.liveVisual({ type: 'motor' }, { running: true, anim: 90 }).spin, 90);
+  assert.equal(S.liveVisual({ type: 'servo' }, { on: true, mod: { a: 30 } }).angle, 30);
+  assert.equal(S.liveVisual({ type: 'servo' }, { on: false, mod: { a: 30 } }).angle, 90);
+  const withBlock = S.liveVisual({ type: 'hcsr04', props: { dist: 40 } }, { stimuli: { block: true, flashlight: true, heat: true, humid: true, mover: true } });
+  assert.equal(withBlock.stand.block, false);
+  const noBlock = S.liveVisual({ type: 'hcsr04', props: { dist: 40 } }, { stimuli: { block: false } });
+  assert.equal(noBlock.stand.block, true);
+  const lib = S.createLib(fakeThree());
+  const led = S.build(lib, { type: 'led', props: { color: 'красный' } });
+  const lens = led.children.find(c => c.userData.fx === 'lens');
+  assert.ok(lens, 'LED keeps a lens to light');
+  S.applyLive(led, S.liveVisual({ type: 'led', props: { color: 'красный' } }, { running: true, m: { I: 0.015 } }));
+  assert.equal(led.userData.live.lit, true);
+  assert.ok(lens.material.emissiveIntensity > 0.5);
+  assert.equal(lens.material.emissive, 0xff3030);
+  const halo = led.children.find(c => c.userData.fx === 'halo');
+  assert.equal(halo.visible, true);
+  S.applyLive(led, S.liveVisual({ type: 'led', props: { color: 'красный' } }, { running: false }));
+  assert.equal(halo.visible, false);
+  assert.equal(lens.material.emissiveIntensity, 0);
+  const pirMesh = S.build(lib, { type: 'pir' });
+  S.applyLive(pirMesh, S.liveVisual({ type: 'pir', props: { motion: true } }, { stimuli: { mover: false } }));
+  const dome = pirMesh.children.find(c => c.userData.fx === 'dome');
+  const fig = pirMesh.children.find(c => c.userData.stand === 'mover');
+  assert.ok(dome.material.emissiveIntensity > 0.5);
+  assert.equal(fig.visible, true);
+  S.applyLive(pirMesh, S.liveVisual({ type: 'pir', props: { motion: false } }, { stimuli: { mover: true } }));
+  assert.equal(fig.visible, false);
+  const fit = S.fitView([{ x: -10, z: -8 }, { x: 14, z: 6 }]);
+  assert.ok(fit && fit.position.y > S.TABLE_Y && fit.dist >= 46 && fit.dist <= 210);
+  const wide = S.fitView([{ x: -90, z: -40 }, { x: 90, z: 40 }]);
+  assert.ok(wide.dist > fit.dist);
+  assert.equal(S.fitView([]), null);
 });
 
 test('source stays local and procedural', () => {
