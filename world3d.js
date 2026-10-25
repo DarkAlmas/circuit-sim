@@ -1,7 +1,8 @@
-/* v14.5: 3D sensor world. Place sensors and drag stimuli; approximate readings
- * land on the schematic parts the 2D sim already uses (hcsr04.dist, ldr.lux,
- * dht22.temp/hum, and a PIR part if one exists). VL53 and TCRT stay on the
- * robot track — this scaffold does not write them.
+/* v14.5.1: 3D sensor world. Stimulus zones are unchanged (US cone 12°/400 cm,
+ * flashlight 22°/140 cm, heat|humid spheres R50, PIR 40°/280 cm, table 86×46).
+ * Readings land on schematic props in kind order: hcsr04.dist, ldr.lux,
+ * dht22.temp/hum, pir.motion, and ntc.temp from the same climate sample.
+ * VL53 and TCRT stay on the robot track.
  * Three.js is vendored (vendor/three). No network. DOM is createElement/textContent only.
  * window.World3D.getReadings() / the world3d-readings event are the solver hook. */
 (function () {
@@ -15,7 +16,9 @@
   const REST = { ultrasonic: 6, ldr: 4, dht: 8, pir: 7, block: 9, flashlight: 7, heat: 8, humid: 8, mover: 11 };
   const SENSOR_Z = 16, STIM_Z = -24;
   const FLASH_DIR = norm([0, -0.15, 1]);
-  const PART_KIND = { hcsr04: 'ultrasonic', ldr: 'ldr', dht22: 'dht' };
+  const FLASH_I = 800000; // lux·cm²: about 500 lx at 40 cm on the beam axis, before ambient
+  const MOVER_R = 6; // figurine body, cm — the cone test uses the body, not only the origin
+  const PART_KIND = { hcsr04: 'ultrasonic', ldr: 'ldr', dht22: 'dht', ntc: 'ntc', pir: 'pir' };
 
   function norm(v) { const l = Math.hypot(v[0], v[1], v[2]) || 1; return [v[0] / l, v[1] / l, v[2] / l]; }
   function forward(rx, ry) {
@@ -34,23 +37,88 @@
     }
     return t0;
   }
-  /* 0 outside; otherwise (1 - distance/range) * (1 - angle/halfAngle). */
-  function coneGain(apex, axis, ang, range, p) {
-    const v = [p[0] - apex[0], p[1] - apex[1], p[2] - apex[2]];
-    const dist = Math.hypot(v[0], v[1], v[2]);
-    if (dist < 1e-6 || dist > range) return 0;
-    const along = (v[0] * axis[0] + v[1] * axis[1] + v[2] * axis[2]) / dist;
-    const a = Math.acos(Math.min(1, Math.max(-1, along)));
-    if (a > ang) return 0;
-    return (1 - dist / range) * (1 - a / ang);
-  }
   function sphereGain(c, r, p) {
     const d = Math.hypot(p[0] - c[0], p[1] - c[1], p[2] - c[2]);
     return d >= r ? 0 : 1 - d / r;
   }
+  function dot(a, b) { return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]; }
+  function sub(a, b) { return [a[0] - b[0], a[1] - b[1], a[2] - b[2]]; }
   function xyz(o) { return [+o.x || 0, +o.y || 0, +o.z || 0]; }
   function clamp(v, lo, hi) { return Math.min(hi, Math.max(lo, v)); }
+  function aabbOf(o, h) { const c = xyz(o); return [[c[0] - h, c[1] - h, c[2] - h], [c[0] + h, c[1] + h, c[2] + h]]; }
+  function closestOnAabb(p, b0, b1) {
+    return [Math.min(b1[0], Math.max(b0[0], p[0])), Math.min(b1[1], Math.max(b0[1], p[1])), Math.min(b1[2], Math.max(b0[2], p[2]))];
+  }
   function unknown(v) { throw new Error('world3d: ' + v); }
+
+  /* Segment a→b crosses a block. Endpoints themselves do not count (sensor or stimulus inside a cube). */
+  function segmentBlocked(a, b, blocks) {
+    const v = sub(b, a), len = Math.hypot(v[0], v[1], v[2]);
+    if (len < 1e-6) return false;
+    const dir = [v[0] / len, v[1] / len, v[2] / len];
+    for (const block of blocks) {
+      const [b0, b1] = aabbOf(block, BLOCK / 2);
+      const t = rayAabb(a, dir, b0, b1, len);
+      if (t != null && t > 0.4 && t < len - 0.4) return true;
+    }
+    return false;
+  }
+  /* First echo inside the 12° beam: boresight ray, else the ray toward the nearest point of the cube that still lies in the cone. */
+  function sonarDist(origin, fwd, blocks) {
+    let best = SONAR_R;
+    const consider = dir => {
+      if (!dir) return;
+      for (const block of blocks) {
+        const [b0, b1] = aabbOf(block, BLOCK / 2);
+        const t = rayAabb(origin, dir, b0, b1, best);
+        if (t != null && t < best) best = t;
+      }
+    };
+    consider(fwd);
+    for (const block of blocks) {
+      const [b0, b1] = aabbOf(block, BLOCK / 2);
+      const q = closestOnAabb(origin, b0, b1);
+      const v = sub(q, origin);
+      const dist = Math.hypot(v[0], v[1], v[2]);
+      if (dist < 1e-6) { best = 0; continue; }
+      const dir = [v[0] / dist, v[1] / dist, v[2] / dist];
+      const along = dot(dir, fwd);
+      const ang = Math.acos(clamp(along, -1, 1));
+      if (ang <= SONAR_ANG + 1e-4) consider(dir);
+      else if (along > 0) {
+        const perp = [dir[0] - fwd[0] * along, dir[1] - fwd[1] * along, dir[2] - fwd[2] * along];
+        const pl = Math.hypot(perp[0], perp[1], perp[2]);
+        if (pl > 1e-8) {
+          const ca = Math.cos(SONAR_ANG), sa = Math.sin(SONAR_ANG);
+          consider([fwd[0] * ca + perp[0] / pl * sa, fwd[1] * ca + perp[1] / pl * sa, fwd[2] * ca + perp[2] / pl * sa]);
+        }
+      }
+    }
+    return best;
+  }
+  /* Spotlight: hard cutoff at the cone, cosine window to the rim, inverse-square, then clamp. */
+  function spotLux(apex, axis, ang, range, p) {
+    const v = sub(p, apex), dist = Math.hypot(v[0], v[1], v[2]);
+    if (dist < 1e-6 || dist > range) return 0;
+    const along = dot(v, axis) / dist;
+    if (along <= Math.cos(ang)) return 0;
+    const g = (along - Math.cos(ang)) / (1 - Math.cos(ang));
+    const d = Math.max(dist, 4);
+    return FLASH_I * g / (d * d);
+  }
+  /* Figurine is a small body. Motion if that body meets the PIR cone and nothing solid is in the way. */
+  function moverSeen(apex, fwd, center, blocks) {
+    const v = sub(center, apex), dist = Math.hypot(v[0], v[1], v[2]);
+    if (dist <= MOVER_R) return true;
+    if (segmentBlocked(apex, center, blocks)) return false;
+    const along = dot(v, fwd);
+    const a = Math.acos(clamp(along / dist, -1, 1));
+    const extra = Math.asin(clamp(MOVER_R / dist, 0, 1));
+    if (a > PIR_ANG + extra) return false;
+    if (along < -MOVER_R) return false;
+    if (dist - MOVER_R > PIR_R) return false;
+    return true;
+  }
 
   function compute(world) {
     const sensors = world && Array.isArray(world.sensors) ? world.sensors : [];
@@ -66,18 +134,17 @@
       const kind = s.kind, p = xyz(s), fwd = forward(s.rx, s.ry);
       switch (kind) {
         case 'ultrasonic': {
-          let dist = SONAR_R;
-          for (const b of blocks) {
-            const c = xyz(b), h = BLOCK / 2;
-            const t = rayAabb(p, fwd, [c[0] - h, c[1] - h, c[2] - h], [c[0] + h, c[1] + h, c[2] + h], SONAR_R);
-            if (t != null && t < dist) dist = t;
-          }
+          const dist = sonarDist(p, fwd, blocks);
           out.push({ id: s.id, kind, dist: Math.round(clamp(dist, 2, SONAR_R)) });
           break;
         }
         case 'ldr': {
           let lux = AMB.lux;
-          for (const L of lights) lux += 8000 * coneGain(xyz(L), FLASH_DIR, FLASH_ANG, FLASH_R, p);
+          for (const L of lights) {
+            const apex = xyz(L);
+            if (segmentBlocked(apex, p, blocks)) continue;
+            lux += spotLux(apex, FLASH_DIR, FLASH_ANG, FLASH_R, p);
+          }
           out.push({ id: s.id, kind, lux: Math.round(clamp(lux, 0, 100000)) });
           break;
         }
@@ -90,7 +157,7 @@
         }
         case 'pir': {
           let motion = false;
-          for (const m of movers) if (coneGain(p, fwd, PIR_ANG, PIR_R, xyz(m)) > 0) { motion = true; break; }
+          for (const m of movers) if (moverSeen(p, fwd, xyz(m), blocks)) { motion = true; break; }
           out.push({ id: s.id, kind, motion });
           break;
         }
@@ -102,20 +169,26 @@
 
   function partKind(type) {
     if (PART_KIND[type]) return PART_KIND[type];
-    if (type === 'pir') return 'pir';
     const d = window.PARTS && window.PARTS[type];
-    if (d && d.sensor === 'pir') return 'pir';
+    if (!d) return type === 'pir' ? 'pir' : null;
+    if (d.sensor === 'pir' || type === 'pir') return 'pir';
+    if (d.sensor === 'sonar') return 'ultrasonic';
+    if (d.sensor === 'dht') return 'dht';
     return null;
   }
   function writePart(p, r) {
-    if (!p.props || typeof p.props !== 'object') return false;
+    if (!p.props || typeof p.props !== 'object' || Array.isArray(p.props)) {
+      if (r.kind !== 'pir') return false;
+      p.props = {};
+    }
     let changed = false;
     const set = (k, v) => { if (p.props[k] !== v) { p.props[k] = v; changed = true; } };
     switch (r.kind) {
       case 'ultrasonic': set('dist', r.dist); break;
       case 'ldr': set('lux', r.lux); break;
       case 'dht': set('temp', r.temp); set('hum', r.hum); break;
-      case 'pir': if (Object.prototype.hasOwnProperty.call(p.props, 'motion')) set('motion', !!r.motion); break;
+      case 'ntc': set('temp', r.temp); break;
+      case 'pir': set('motion', !!r.motion); break;
       default: unknown(r.kind);
     }
     return changed;
@@ -129,12 +202,21 @@
       const readings = compute(p && p.world3d);
       last = readings;
       if (p && Array.isArray(p.parts)) {
+        // Same kind, schematic order: 1st ultrasonic sensor → 1st HC-SR04, and so on.
+        // NTC is not a 3D kind; it copies temperature from the DHT sample at the same index.
         const buckets = { ultrasonic: [], ldr: [], dht: [], pir: [] };
-        for (const part of p.parts) { const k = partKind(part.type); if (k) buckets[k].push(part); }
+        const ntcs = [];
+        for (const part of p.parts) {
+          const k = partKind(part.type);
+          if (k === 'ntc') ntcs.push(part);
+          else if (k && buckets[k]) buckets[k].push(part);
+        }
         const used = { ultrasonic: 0, ldr: 0, dht: 0, pir: 0 };
+        let ntcUsed = 0;
         for (const r of readings.sensors) {
           const part = buckets[r.kind] && buckets[r.kind][used[r.kind]++];
           if (part) writePart(part, r);
+          if (r.kind === 'dht' && ntcs[ntcUsed]) writePart(ntcs[ntcUsed++], { kind: 'ntc', temp: r.temp });
         }
       }
       const sig = sigOf(readings);

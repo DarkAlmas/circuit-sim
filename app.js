@@ -164,6 +164,7 @@
           h += `<label class="prop">Сопротивление<span class="rrow"><input data-k="R" type="number" min="0" step="any" value="${esc(+(pr.R / u[1]).toPrecision(6))}"><select id="runit">${RUNITS.map(x => `<option value="${x[1]}"${x === u ? ' selected' : ''}>${x[0]}</option>`).join('')}</select>
             <select id="e12"><option value="">E12…</option>${E12V.map(v => `<option value="${v}"${v === pr.R ? ' selected' : ''}>${esc(fmtUnit(v, 'Ом'))}</option>`).join('')}</select></span></label>
             <div class="bands">${resistorBands(pr.R).map(c => `<svg viewBox="0 0 10 20"><rect width="10" height="20" fill="${c}"/></svg>`).join('')}</div>`; }
+        else if (k === 'motion') h += `<label class="prop">Движение <input data-k="motion" type="checkbox"${pr.motion ? ' checked' : ''}></label>`;
         else if (SLIDERS[k]) { const [nm, u, lo, hi, stp] = SLIDERS[k]; h += `<label class="prop">${nm}: <b class="sv" data-sv="${k}">${esc(pr[k])}</b> ${u}<input data-k="${k}" type="range" min="${lo}" max="${hi}" step="${stp}" value="${esc(pr[k])}"></label>`; }
         else { const ui = PROP_UI[k] || [k, '', 'any']; h += `<label class="prop">${ui[0]}${ui[1] ? ', ' + ui[1] : ''}<input data-k="${k}" type="${k === 'pos' ? 'range' : 'number'}" step="${ui[2]}" ${k === 'pos' ? 'min="0" max="1"' : 'min="0"'} value="${esc(pr[k])}"></label>`; }
       } }
@@ -173,7 +174,9 @@
       <div id="extra" class="live"></div>
       <div class="row"><button id="rot">⟳ Повернуть (R)</button><a href="#" id="showCalc" class="link">Показать расчёт</a></div>`;
     el.innerHTML = h;
-    el.querySelectorAll('input[data-k]').forEach(i => { i.oninput = () => { const k = i.dataset.k; let v = +i.value; if (!Number.isFinite(v)) return;
+    el.querySelectorAll('input[data-k]').forEach(i => { i.oninput = () => { const k = i.dataset.k;
+      if (i.type === 'checkbox') { p.props[k] = i.checked; commitProp(); return; }
+      let v = +i.value; if (!Number.isFinite(v)) return;
       if (k === 'R') v *= +$('#runit').value; p.props[k] = SLIDERS[k] ? v : Math.max(k === 'R' || k === 'rInt' ? 0.001 : 0, v); const sv = el.querySelector(`[data-sv="${k}"]`); if (sv) sv.textContent = String(v);
       if (k === 'R') { const bs = el.querySelectorAll('.bands rect'); resistorBands(p.props.R).forEach((c, j) => bs[j].setAttribute('fill', c)); }
       commitProp(); }; });
@@ -404,10 +407,28 @@
   $('#redo').onclick = () => { if (!locked()) redo(); };
 
   /* ---------- simulation ---------- */
+  function syncSensorWidgets() {
+    const p = sel && part(sel.part); if (!p || !p.props) return;
+    const el = $('#props'); if (!el) return;
+    for (const i of el.querySelectorAll('input[data-k]')) {
+      const k = i.dataset.k;
+      if (!Object.prototype.hasOwnProperty.call(p.props, k) || document.activeElement === i) continue;
+      if (i.type === 'checkbox') { const on = !!p.props[k]; if (i.checked !== on) i.checked = on; }
+      else { const s = String(p.props[k]); if (i.value !== s) i.value = s; }
+      const sv = el.querySelector(`[data-sv="${k}"]`);
+      if (sv && sv.textContent !== String(p.props[k])) sv.textContent = String(p.props[k]);
+    }
+  }
+  window.addEventListener('world3d-readings', () => {
+    if (!window.World3D || !World3D.active) return;
+    syncSensorWidgets();
+    if (!running) render();
+  });
   function tick() {
     const mcus = proj.parts.filter(p => P[p.type].mcu), gpioBy = {}; for (const id in extra) gpioBy[id] = extra[id].gpio; if (mcus[0]) gpioBy[mcus[0].id] = gpio;
-    // v14.5: 3D world writes approximate sensor props; the robot track (next line) still owns distance while it is driving.
-    if (window.World3D) World3D.applyReadings(proj);
+    // v14.5.1: 3D tab open → stimulus readings own the sensor props. Tab closed → sliders stay as the student left them.
+    // The robot track (next line) still owns distance while it is driving.
+    if (window.World3D && World3D.active) World3D.applyReadings(proj);
     // v9: move the robot car first (motor rpm from the previous frame), so this frame's stamp already sees the new sensor readings
     if (window.RobotUI) RobotUI.onTick(proj, Math.min(0.05, Math.max(1e-4, lastT ? (performance.now() - lastT) / 1000 : 1 / 60)));
     const b = Netlist.build(proj, gpio, { gpioBy, vio: mcus[0] ? P[mcus[0].type].vio : 3.3 });
@@ -459,6 +480,7 @@
     if (sel && sel.part && part(sel.part) && !!part(sel.part).burned !== !!$('#fix')) props();
     $('#status').textContent = shorts.length ? 'Пауза: короткое замыкание' : `Симуляция · t=${simTime.toFixed(2)} с · ${b.circuit.nodeCount} узлов · ${sol.iter} итер. Ньютона`;
     render(); live(); calc();
+    if (window.World3D && World3D.active) syncSensorWidgets();
     raf = requestAnimationFrame(tick);
   }
   let simState = { vC: {}, iL: {} }, simTime = 0, lastT = 0;
@@ -505,7 +527,7 @@
   /* sketch worker lifecycle: a crashed/hung worker (exception, OOM, infinite loop) is torn down, a fresh idle
    * worker is created right away, the console explains what happened, and the next Run uses the fresh worker. */
   let spare = null, crashes = 0;
-  const newWorker = () => new Worker('worker.js?v=14.5');
+  const newWorker = () => new Worker('worker.js?v=14.5.1');
   function takeWorker() { const w = spare || newWorker(); spare = null; return w; }
   function crash(msg) { if (!worker) return; worker.onmessage = worker.onerror = null; try { worker.terminate(); } catch (e) {} worker = null; gpio = {}; prevV = null; crashes++;
     try { spare = newWorker(); } catch (e) { spare = null; }

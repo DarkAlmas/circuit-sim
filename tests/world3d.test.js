@@ -98,6 +98,40 @@ test('readings: block, flashlight, heat, humid, mover', () => {
     stimuli: [{ id: 'm', type: 'mover', x: 80, y: 80, z: -10 }]
   });
   assert.equal(wide.sensors[0].motion, false);
+  const cone = S.compute({
+    sensors: [{ id: 's1', kind: 'ultrasonic', x: 0, y: 80, z: 0, rx: 0, ry: 0 }],
+    stimuli: [{ id: 't1', type: 'block', x: 18, y: 80, z: -80 }]
+  });
+  assert.equal(cone.sensors[0].dist, 72, 'block inside the 12° beam but off the boresight');
+  const near = S.compute({
+    sensors: [{ id: 'r', kind: 'ldr', x: 0, y: 80, z: 20 }],
+    stimuli: [{ id: 'l', type: 'flashlight', x: 0, y: 80, z: -20 }]
+  });
+  const far = S.compute({
+    sensors: [{ id: 'r', kind: 'ldr', x: 0, y: 80, z: 20 }],
+    stimuli: [{ id: 'l', type: 'flashlight', x: 0, y: 80, z: -80 }]
+  });
+  const past = S.compute({
+    sensors: [{ id: 'r', kind: 'ldr', x: 0, y: 80, z: 20 }],
+    stimuli: [{ id: 'l', type: 'flashlight', x: 0, y: 80, z: -130 }]
+  });
+  assert.ok(near.sensors[0].lux > far.sensors[0].lux && far.sensors[0].lux > 100, near.sensors[0].lux + ' / ' + far.sensors[0].lux);
+  assert.equal(past.sensors[0].lux, 100);
+  const shade = S.compute({
+    sensors: [{ id: 'r', kind: 'ldr', x: 0, y: 80, z: 20 }],
+    stimuli: [{ id: 'l', type: 'flashlight', x: 0, y: 80, z: -40 }, { id: 'b', type: 'block', x: 0, y: 80, z: -10 }]
+  });
+  assert.equal(shade.sensors[0].lux, 100);
+  const body = S.compute({
+    sensors: [{ id: 'p', kind: 'pir', x: 0, y: 80, z: 0, rx: 0, ry: 0 }],
+    stimuli: [{ id: 'm', type: 'mover', x: 36, y: 80, z: -40 }]
+  });
+  assert.equal(body.sensors[0].motion, true, 'figurine body enters the 40° cone');
+  const wall = S.compute({
+    sensors: [{ id: 'p', kind: 'pir', x: 0, y: 80, z: 0, rx: 0, ry: 0 }],
+    stimuli: [{ id: 'm', type: 'mover', x: 0, y: 80, z: -40 }, { id: 'b', type: 'block', x: 0, y: 80, z: -20 }]
+  });
+  assert.equal(wall.sensors[0].motion, false);
 });
 
 test('applyReadings writes HC-SR04, LDR, DHT22 and PIR, not VL53 or TCRT', () => {
@@ -139,4 +173,31 @@ test('applyReadings writes HC-SR04, LDR, DHT22 and PIR, not VL53 or TCRT', () =>
   assert.equal(proj.parts[6].props.motion, true);
   assert.equal(readings.sensors.length, 5);
   assert.deepEqual(S.getReadings().sensors.map(s => s.kind), []);
+});
+
+test('PIR motion is written even when the prop is missing, and NTC takes DHT temperature', () => {
+  const proj = {
+    parts: [
+      { id: 'N1', type: 'ntc', props: { temp: 25 } },
+      { id: 'U3', type: 'dht22', props: { temp: 24, hum: 45 } },
+      { id: 'P1', type: 'pir', props: {} }
+    ],
+    world3d: {
+      sensors: [
+        { id: 'd', kind: 'dht', x: 0, y: 80, z: 0 },
+        { id: 'p', kind: 'pir', x: 0, y: 80, z: 0, rx: 0, ry: 0 }
+      ],
+      stimuli: [
+        { id: 'h', type: 'heat', x: 0, y: 80, z: 0 },
+        { id: 'u', type: 'humid', x: 0, y: 80, z: 25 },
+        { id: 'm', type: 'mover', x: 0, y: 80, z: -40 }
+      ]
+    }
+  };
+  S.applyReadings(proj);
+  assert.equal(proj.parts[0].props.temp, 64);
+  assert.equal(proj.parts[0].props.hum, undefined);
+  assert.equal(proj.parts[1].props.temp, 64);
+  assert.equal(proj.parts[1].props.hum, 73);
+  assert.equal(proj.parts[2].props.motion, true);
 });
