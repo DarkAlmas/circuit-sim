@@ -274,6 +274,11 @@ body.pm #w3tab{display:none!important}
 .w3hint{color:#8a94a8;font-size:12px;margin:6px 0 0}
 #w3fail{position:absolute;left:12px;right:12px;top:52px;background:#1a2030;color:#e8eef8;padding:10px 12px;border-radius:8px;z-index:2}
 @media (max-width:899px){#w3tab{min-height:44px}#w3pal button{min-height:44px}}
-body.pm #w3pal{width:112px;flex-basis:112px;padding:6px}
-body.pm #w3pal button{min-height:44px;font-size:13px;padding:4px 6px}
+/* v14.5.2: phone keeps the 3D view full width; the palette is a chip row under it. */
+body.pm #w3pane{flex-direction:column;min-height:0}
+body.pm #w3stage{order:1;flex:1 1 auto;min-height:0}
+body.pm #w3pal{order:2;width:auto;max-width:100%;min-width:0;flex:0 0 auto;flex-basis:auto;flex-direction:row;align-items:center;gap:6px;overflow-x:auto;overflow-y:hidden;padding:6px 8px calc(6px + env(safe-area-inset-bottom))}
+body.pm #w3pal .w3sec{flex:0 0 auto;margin:0 0 0 8px;white-space:nowrap}
+body.pm #w3pal button{flex:0 0 auto;min-height:44px;font-size:13px;padding:4px 10px;text-align:center;white-space:nowrap;margin-top:0}
+body.pm #w3pal .w3act{margin-top:0}
 body.pm .w3hint{display:none}

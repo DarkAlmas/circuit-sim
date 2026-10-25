@@ -5,7 +5,7 @@ const URL = process.argv[2] || 'http://localhost:8765/';
   const pg = await b.newPage({ viewport: { width: 1920, height: 1080 } }); const errs = [];
   pg.on('console', m => { if (m.type() === 'error') errs.push(m.text()); }); pg.on('pageerror', e => errs.push(e.message));
   await pg.goto(URL); await pg.waitForTimeout(300);
-  const v6 = await pg.evaluate(() => [...document.scripts].filter(s => s.src).every(s => /\?v=(6|7|8|9|10|11|12|13|14|14\.1|14\.2|14\.3|14\.4|14\.5|14\.5\.1|14\.5\.3)$/.test(s.src))); console.log('all scripts ?v=6', v6); assert.ok(v6);
+  const v6 = await pg.evaluate(() => [...document.scripts].filter(s => s.src).every(s => /\?v=(6|7|8|9|10|11|12|13|14|14\.1|14\.2|14\.3|14\.4|14\.5|14\.5\.1|14\.5\.2|14\.5\.3)$/.test(s.src))); console.log('all scripts ?v=6', v6); assert.ok(v6);
   const card = async k => { await pg.click('#new'); await pg.click(`.ncard[data-kind="${k}"]`); await pg.waitForTimeout(200); };
   const con = () => pg.$eval('#console', e => e.textContent).catch(() => pg.evaluate(() => document.body.innerText));
   // 1) huge typed array / buffer / Array are refused inside the worker

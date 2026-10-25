@@ -16,7 +16,7 @@ const SHOT = process.argv[3] || '/tmp';
   ok(csp.includes("connect-src 'none'") && csp.includes("script-src 'self'") && !/unsafe-inline|unsafe-eval/.test(csp), 'CSP unchanged');
   const scripts = await pg.evaluate(() => [...document.scripts].filter(s => s.src).map(s => s.src));
   const origin = new globalThis.URL(URL).origin;
-  ok(scripts.every(s => s.startsWith(origin) && /\?v=14\.5\.3$/.test(s)), 'scripts are same-origin ?v=14.5.3');
+  ok(scripts.every(s => s.startsWith(origin) && /\?v=14\.5\.2$/.test(s)), 'scripts are same-origin ?v=14.5.2');
   ok(scripts.some(s => s.includes('/vendor/three/three.min.js')), 'Three.js vendored');
   ok(await pg.evaluate(() => [...document.querySelectorAll('#rtabs button')].map(b => b.textContent).join() === 'Схема,Шасси,Трасса'), 'robot tabs unchanged');
   ok(await pg.evaluate(() => !!document.querySelector('#undo') && !!document.querySelector('#redo') && !!document.querySelector('#simMore') && !!document.querySelector('#setHold')), 'undo and hold-menu chrome still present');
@@ -36,6 +36,14 @@ const SHOT = process.argv[3] || '/tmp';
   });
   await pg.click('#w3tab'); await pg.waitForTimeout(400);
   ok(await pg.evaluate(() => World3D.active && !document.querySelector('#w3pane').hidden && document.querySelector('#w3fail').hidden), '3D pane open, WebGL ok');
+  const desk = await pg.evaluate(() => {
+    const pal = document.querySelector('#w3pal').getBoundingClientRect();
+    const stage = document.querySelector('#w3stage').getBoundingClientRect();
+    const reset = document.querySelector('#w3reset');
+    return { dir: getComputedStyle(document.querySelector('#w3pal')).flexDirection, palRight: pal.right, stageLeft: stage.left, palW: pal.width, palH: pal.height, label: reset.textContent, title: reset.title };
+  });
+  ok(desk.dir === 'column' && desk.palH > desk.palW && desk.palRight <= desk.stageLeft + 1, 'desktop palette stays a left column ' + JSON.stringify(desk));
+  ok(desk.label === 'Сброс воздействий' && desk.title === 'Сброс воздействий', 'reset label is Сброс воздействий');
   const kinds = ['ultrasonic', 'ldr', 'dht', 'pir'];
   const types = ['block', 'flashlight', 'heat', 'humid', 'mover'];
   for (const k of kinds) await pg.click(`#w3pal button[data-kind="${k}"]`);
@@ -58,6 +66,20 @@ const SHOT = process.argv[3] || '/tmp';
   ok(placed.lux > 100, 'flashlight raises LDR lux (' + placed.lux + ')');
   ok(placed.temp > 24, 'heat raises DHT temp (' + placed.temp + ')');
   ok(placed.hum >= 80, 'default steam is inside R50 and raises humidity (' + placed.hum + ')');
+  const live = await pg.evaluate(() => {
+    const dht = __sim.proj.world3d.sensors.find(s => s.kind === 'dht');
+    const heat = __sim.proj.world3d.stimuli.find(s => s.type === 'heat');
+    const part = __sim.proj.parts.find(p => p.type === 'dht22');
+    const tag = document.querySelector('#w3tags .w3tag[data-id="' + dht.id + '"]');
+    const prev = { x: heat.x, y: heat.y, z: heat.z, temp: part.props.temp, text: tag.textContent };
+    heat.x = dht.x; heat.y = dht.y; heat.z = dht.z;
+    World3D.applyReadings(__sim.proj);
+    const temp = part.props.temp, text = tag.textContent;
+    heat.x = prev.x; heat.y = prev.y; heat.z = prev.z;
+    World3D.applyReadings(__sim.proj);
+    return { prevTemp: prev.temp, temp, text, restored: part.props.temp, same: text.includes(Number(temp).toFixed(1)) };
+  });
+  ok(live.temp > live.prevTemp && live.same && live.restored === live.prevTemp, 'DHT tag matches the reading in the same applyReadings call ' + JSON.stringify(live));
   ok(placed.mm === 300, 'VL53 millimeters left alone');
   const humSpan = await pg.evaluate(() => {
     const dht = __sim.proj.world3d.sensors.find(s => s.kind === 'dht');
@@ -116,6 +138,40 @@ const SHOT = process.argv[3] || '/tmp';
   });
   ok(motion.read === true && motion.prop === true && motion.label, 'mover inside the PIR cone sets props.motion');
 
+  await pg.evaluate(() => {
+    const w = __sim.proj.world3d;
+    const pir = w.sensors.find(s => s.kind === 'pir');
+    const flash = w.stimuli.find(s => s.type === 'flashlight');
+    pir.x = 0; pir.y = 81; pir.z = -10;
+    for (const t of w.stimuli) { t.x = 78; t.y = 81; t.z = 30; }
+    flash.x = 48; flash.y = 81; flash.z = -10;
+    World3D.onOpen();
+  });
+  const z0 = await pg.evaluate(() => World3D.zoneKeys());
+  ok(z0.length === 0, 'zones stay off until something is selected or hovered ' + JSON.stringify(z0));
+  await pg.waitForTimeout(200);
+  const pirAt = await pg.evaluate(() => World3D.screenPos('sensor', __sim.proj.world3d.sensors.find(s => s.kind === 'pir').id));
+  await pg.mouse.click(pirAt.x, pirAt.y);
+  await pg.waitForTimeout(80);
+  const z1 = await pg.evaluate(() => {
+    const id = __sim.proj.world3d.sensors.find(s => s.kind === 'pir').id;
+    return { keys: World3D.zoneKeys(), id };
+  });
+  ok(z1.keys.length === 1 && z1.keys[0] === 'sensor:' + z1.id, 'only the selected PIR cone ' + JSON.stringify(z1));
+  const flashAt = await pg.evaluate(() => World3D.screenPos('stimulus', __sim.proj.world3d.stimuli.find(s => s.type === 'flashlight').id));
+  await pg.mouse.move(flashAt.x, flashAt.y);
+  await pg.waitForTimeout(80);
+  const z2 = await pg.evaluate(() => {
+    const pir = __sim.proj.world3d.sensors.find(s => s.kind === 'pir').id;
+    const flash = __sim.proj.world3d.stimuli.find(s => s.type === 'flashlight').id;
+    return { keys: World3D.zoneKeys(), want: ['sensor:' + pir, 'stimulus:' + flash].sort() };
+  });
+  ok(JSON.stringify(z2.keys) === JSON.stringify(z2.want), 'hover adds only that stimulus zone ' + JSON.stringify(z2));
+  await pg.mouse.move(8, 8);
+  await pg.waitForTimeout(80);
+  const z3 = await pg.evaluate(() => World3D.zoneKeys());
+  ok(z3.length === 1 && z3[0] === z1.keys[0], 'leaving the canvas drops the hover zone ' + JSON.stringify(z3));
+
   const saved = await pg.evaluate(() => JSON.parse(JSON.stringify(__sim.proj.world3d)));
   await pg.reload(); await pg.waitForTimeout(400);
   const loaded = await pg.evaluate(() => {
@@ -127,7 +183,32 @@ const SHOT = process.argv[3] || '/tmp';
   ok(loaded.dist === 400 && loaded.mm === 300, 'saved HC-SR04 distance survived reload, VL53 did not');
   await pg.click('#w3tab'); await pg.waitForTimeout(300);
   await pg.click('#w3reset');
-  ok(await pg.evaluate(() => __sim.proj.world3d.stimuli.length === 0 && __sim.proj.world3d.sensors.length === 4), 'reset clears stimuli only');
+  ok(await pg.evaluate(() => {
+    const w = __sim.proj.world3d, dht = __sim.proj.parts.find(p => p.type === 'dht22'), pir = __sim.proj.parts.find(p => p.type === 'pir');
+    return w.stimuli.length === 0 && w.sensors.length === 4 && dht.props.temp === 24 && dht.props.hum === 45 && pir.props.motion === false;
+  }), 'reset clears stimuli only and readings return to ambient');
+  const readTag = () => pg.evaluate(() => {
+    const pir = __sim.proj.world3d.sensors.find(s => s.kind === 'pir');
+    const tag = document.querySelector('#w3tags .w3tag[data-id="' + pir.id + '"]');
+    const cv = document.querySelector('#w3cv').getBoundingClientRect();
+    const pr = document.querySelector('#w3pal').getBoundingClientRect();
+    const sp = World3D.screenPos('sensor', pir.id);
+    const tr = tag.getBoundingClientRect();
+    const visible = !!(sp && !tag.hidden && tr.width > 8 && tr.top > cv.top && tr.bottom < cv.bottom && tr.left < cv.right);
+    return { visible, left: tr.left, top: tr.top, palRight: pr.right, sy: sp ? sp.y : 0, sx: sp ? sp.x : 0, anchorLeft: sp ? sp.x - tr.width / 2 : 0, cvTop: cv.top, cvBottom: cv.bottom };
+  });
+  const clipped = c => c.visible && c.anchorLeft < c.palRight + 8;
+  let clip = await readTag();
+  const panFrom = await pg.evaluate(() => { const r = document.querySelector('#w3cv').getBoundingClientRect(); return { x: r.left + r.width * 0.62, y: r.top + r.height * 0.62 }; });
+  for (let i = 0; i < 8 && !clipped(clip); i++) {
+    await pg.mouse.move(panFrom.x, panFrom.y);
+    await pg.mouse.down({ button: 'right' });
+    await pg.mouse.move(panFrom.x - 140, panFrom.y, { steps: 4 });
+    await pg.mouse.up({ button: 'right' });
+    await pg.waitForTimeout(80);
+    clip = await readTag();
+  }
+  ok(clipped(clip) && clip.left >= clip.palRight + 8 - 1 && clip.top < clip.sy, 'PIR tag stays right of the palette and above the sensor ' + JSON.stringify(clip));
 
   await pg.click('#w3tab'); await pg.waitForTimeout(200);
   const back = await pg.evaluate(() => {
@@ -154,10 +235,19 @@ const SHOT = process.argv[3] || '/tmp';
   await ph.tap('#pmTabs [data-ptab=world]'); await ph.waitForTimeout(400);
   const lay = await ph.evaluate(() => {
     const cv = document.querySelector('#w3cv').getBoundingClientRect();
+    const pal = document.querySelector('#w3pal').getBoundingClientRect();
+    const stage = document.querySelector('#w3stage').getBoundingClientRect();
     const btn = document.querySelector('#w3pal button').getBoundingClientRect();
-    return { w: cv.width, h: cv.height, bh: btn.height, on: World3D.active };
+    const btns = [...document.querySelectorAll('#w3pal button')].slice(0, 2).map(b => b.getBoundingClientRect());
+    return {
+      w: cv.width, h: cv.height, bh: btn.height, on: World3D.active,
+      dir: getComputedStyle(document.querySelector('#w3pal')).flexDirection,
+      palTop: pal.top, stageBottom: stage.bottom, palW: pal.width, palH: pal.height,
+      row: Math.abs(btns[0].top - btns[1].top) < 6 && btns[1].left > btns[0].right - 4
+    };
   });
   ok(lay.on && lay.w > 200 && lay.h > 200 && lay.bh >= 44, 'phone 3D canvas ' + JSON.stringify(lay));
+  ok(lay.dir === 'row' && lay.row && lay.palW > lay.palH && lay.palTop + 2 >= lay.stageBottom, 'phone palette is a bottom chip row ' + JSON.stringify(lay));
   await ph.screenshot({ path: SHOT + '/world3d-phone.png' });
   await b.close();
   console.log('world3d e2e ok');

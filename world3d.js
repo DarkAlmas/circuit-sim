@@ -1,10 +1,11 @@
-/* v14.5.3: 3D sensor world. Stimulus zones are unchanged (US cone 12°/400 cm,
+/* v14.5.2: 3D sensor world. Stimulus math is unchanged (US cone 12°/400 cm,
  * flashlight 22°/140 cm, heat|humid spheres R50, PIR 40°/280 cm, table 86×46).
  * Humidity stays obvious anywhere inside the R50 steam sphere (about 80% at the
  * rim, 100% at the source, ambient 45% outside). Heat keeps the linear falloff.
  * Readings land on schematic props in kind order: hcsr04.dist, ldr.lux,
  * dht22.temp/hum, pir.motion, and ntc.temp from the same climate sample.
- * VL53 and TCRT stay on the robot track.
+ * Floating #w3tags refresh in the same call as applyReadings. Cones and spheres
+ * draw only for the selected or hovered object. VL53 and TCRT stay on the robot track.
  * Three.js is vendored (vendor/three). No network. DOM is createElement/textContent only.
  * window.World3D.getReadings() / the world3d-readings event are the solver hook. */
 (function () {
@@ -55,6 +56,20 @@
     return [Math.min(b1[0], Math.max(b0[0], p[0])), Math.min(b1[1], Math.max(b0[1], p[1])), Math.min(b1[2], Math.max(b0[2], p[2]))];
   }
   function unknown(v) { throw new Error('world3d: ' + v); }
+  /* Left palette: tag's screen-left stays at palette.right + 8. A bottom chip row is not a left strip. */
+  function tagMinScreen(stage, pal) {
+    const palW = Math.max(0, pal.right - pal.left), palH = Math.max(0, pal.bottom - pal.top);
+    const vertical = pal.bottom > stage.top + 8 && pal.top < stage.bottom - 8;
+    const leftCol = vertical && palW > 40 && pal.right <= stage.left + 2 && palH >= 44;
+    const leftOver = vertical && palW > 40 && palH > palW && pal.left <= stage.left + 2 && pal.right < stage.left + (stage.right - stage.left) * 0.5;
+    if (leftCol || leftOver) return pal.right + 8;
+    return stage.left + 8;
+  }
+  function clampTagX(center, half, stageLeft, minScreen) {
+    const screenLeft = stageLeft + center - half;
+    if (!(screenLeft < minScreen)) return center;
+    return minScreen - stageLeft + half;
+  }
 
   /* Segment a→b crosses a block. Endpoints themselves do not count (sensor or stimulus inside a cube). */
   function segmentBlocked(a, b, blocks) {
@@ -205,6 +220,7 @@
   function sigOf(r) { return r.sensors.map(s => [s.id, s.kind, s.dist, s.lux, s.temp, s.hum, s.motion].join(':')).join('|'); }
 
   let last = { sensors: [] }, lastSig = '';
+  let syncTags = () => {};
   function applyReadings(p) {
     try {
       const readings = compute(p && p.world3d);
@@ -232,6 +248,7 @@
         lastSig = sig;
         if (typeof window.dispatchEvent === 'function' && typeof window.CustomEvent === 'function') window.dispatchEvent(new CustomEvent('world3d-readings', { detail: clone(readings) }));
       }
+      try { syncTags(); } catch (e) { /* the overlay must not drop a reading */ }
       return clone(readings);
     } catch (e) { return { sensors: [] }; }
   }
@@ -240,6 +257,8 @@
     KINDS, TYPES,
     compute,
     applyReadings,
+    tagMinScreen,
+    clampTagX,
     getReadings() { const p = window.__sim && window.__sim.proj; return applyReadings(p || { parts: [], world3d: null }); },
     get active() { return false; },
     show() {},
@@ -257,7 +276,7 @@
   const lim = () => window.WORLD3D_LIMITS || { sensors: 32, stimuli: 48 };
   let active = false, renderer = null, scene = null, camera = null, controls = null, raf = 0;
   let pickRoot = null, zoneRoot = null, ring = null, groups = new Map(), tagEls = new Map();
-  let selected = null, drag = null, hoverId = null, dirty = true;
+  let selected = null, drag = null, hoverPick = null, dirty = true, zoneKeys = [];
   let caster = null, ptr = null, hitV = null;
 
   const center = $('#center');
@@ -271,7 +290,7 @@
   for (const [k, t, title] of SENS_UI) { const b = el('button', { type: 'button', className: 'w3btn w3k-' + k, textContent: t, title }); b.dataset.kind = k; b.onclick = () => addSensor(k); pal.append(b); }
   pal.append(el('div', { className: 'w3sec', textContent: 'Воздействия' }));
   for (const [k, t, title] of STIM_UI) { const b = el('button', { type: 'button', className: 'w3btn w3k-' + k, textContent: t, title }); b.dataset.type = k; b.onclick = () => addStim(k); pal.append(b); }
-  const bReset = el('button', { type: 'button', id: 'w3reset', className: 'w3btn w3act', textContent: 'Сброс', title: 'Убрать все воздействия' });
+  const bReset = el('button', { type: 'button', id: 'w3reset', className: 'w3btn w3act', textContent: 'Сброс воздействий', title: 'Сброс воздействий' });
   const bDel = el('button', { type: 'button', id: 'w3del', className: 'w3btn w3act', textContent: 'Удалить', title: 'Удалить выбранное' });
   const bYawL = el('button', { type: 'button', id: 'w3yawL', className: 'w3btn w3act', textContent: '↺ 15°', title: 'Повернуть датчик влево' });
   const bYawR = el('button', { type: 'button', id: 'w3yawR', className: 'w3btn w3act', textContent: '↻ 15°', title: 'Повернуть датчик вправо' });
@@ -313,7 +332,11 @@
     const sens = !!(selected && selected.role === 'sensor');
     bYawL.disabled = bYawR.disabled = !sens; bDel.disabled = !selected; setStat();
   }
-  function commit() { applyReadings(proj()); paintTags(); const s = window.__sim; if (s && s.changed) s.changed(); syncChrome(); }
+  function commit() {
+    applyReadings(proj()); updateZones();
+    const s = window.__sim; if (s && s.changed) s.changed(); syncChrome();
+    if (active && renderer && camera) { renderer.render(scene, camera); syncTags(); }
+  }
 
   function addSensor(kind) {
     if (!KINDS.includes(kind)) return;
@@ -348,7 +371,7 @@
     let deg = Math.round((s.ry || 0) * 180 / Math.PI / 15) * 15 + sign * 15;
     while (deg > 180) deg -= 360; while (deg < -180) deg += 360;
     s.ry = Math.round(deg * Math.PI / 180 * 10000) / 10000;
-    syncGroup(s, 'sensor'); updateZones(); commit(); return true;
+    syncGroup(s, 'sensor'); commit(); return true;
   }
 
   function boot() {
@@ -394,7 +417,7 @@
   }
   function loop() {
     if (!active || !renderer) { raf = 0; return; }
-    controls.update(); renderer.render(scene, camera); placeTags();
+    controls.update(); renderer.render(scene, camera); syncTags();
     raf = requestAnimationFrame(loop);
   }
   function show(on) {
@@ -408,9 +431,9 @@
     }
     if (!boot()) return;
     if (controls) controls.enabled = true;
-    resize(); if (dirty) rebuild(); else { syncAll(); updateZones(); }
-    applyReadings(proj()); paintTags(); syncChrome();
-    if (!raf) loop();
+    resize(); if (dirty) rebuild(); else syncAll();
+    applyReadings(proj()); updateZones(); syncChrome();
+    if (!raf) loop(); else if (renderer && camera) { renderer.render(scene, camera); syncTags(); }
     requestAnimationFrame(() => { if (active) resize(); });
   }
 
@@ -531,12 +554,21 @@
     if (role === 'sensor') aimNegZ(g, forward(o.rx, o.ry));
   }
   function syncAll() { const w = world(); if (!w) return; for (const s of w.sensors) syncGroup(s, 'sensor'); for (const t of w.stimuli) syncGroup(t, 'stimulus'); updateSel(); }
-  function focusObj() {
-    const w = world(); if (!w) return null;
-    const id = (drag && drag.id) || (selected && selected.id);
-    const role = (drag && drag.role) || (selected && selected.role);
-    if (!id) return null;
-    return role === 'sensor' ? w.sensors.find(s => s.id === id) : w.stimuli.find(s => s.id === id);
+  function focusList() {
+    const w = world(); if (!w) return [];
+    const seen = new Set(), out = [];
+    const add = (role, id) => {
+      if (!role || id == null || id === '') return;
+      const key = role + '\0' + id;
+      if (seen.has(key)) return;
+      const obj = (role === 'sensor' ? w.sensors : w.stimuli).find(o => o && o.id === id);
+      if (!obj) return;
+      seen.add(key); out.push({ role, obj });
+    };
+    if (hoverPick) add(hoverPick.role, hoverPick.id);
+    if (drag) add(drag.role, drag.id);
+    if (selected) add(selected.role, selected.id);
+    return out;
   }
   function zoneCone(len, ang, color) {
     const THREE = window.THREE;
@@ -544,34 +576,34 @@
     geo.translate(0, -len / 2, 0); geo.rotateX(Math.PI / 2);
     return new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.32, depthWrite: false, side: THREE.DoubleSide }));
   }
+  function pushCone(obj, len, ang, color, dir) {
+    const cone = zoneCone(len, ang, color);
+    cone.position.set(obj.x, obj.y, obj.z); aimNegZ(cone, dir); zoneRoot.add(cone);
+  }
+  function drawZone(item, byId) {
+    const o = item.obj;
+    if (item.role === 'sensor' && o.kind === 'ultrasonic') {
+      const dist = (byId.get(o.id) && byId.get(o.id).dist) || SONAR_VIS;
+      pushCone(o, Math.min(SONAR_VIS, Math.max(8, dist)), SONAR_ANG, 0x4c7dff, forward(o.rx, o.ry));
+      return true;
+    }
+    if (item.role === 'sensor' && o.kind === 'pir') {
+      pushCone(o, Math.min(160, PIR_R), PIR_ANG, 0xb388ff, forward(o.rx, o.ry));
+      return true;
+    }
+    if (item.role === 'stimulus' && o.type === 'flashlight') { pushCone(o, FLASH_R, FLASH_ANG, 0xf5d76e, FLASH_DIR); return true; }
+    if (item.role === 'stimulus' && o.type === 'heat') { zoneRoot.add(zoneSphere(o, HEAT_R, 0xe85d04)); return true; }
+    if (item.role === 'stimulus' && o.type === 'humid') { zoneRoot.add(zoneSphere(o, HUM_R, 0x3ec6e0)); return true; }
+    return false;
+  }
   function updateZones() {
-    if (!zoneRoot) return;
+    if (!zoneRoot) { zoneKeys = []; return; }
     clearGroup(zoneRoot);
-    const w = world(); if (!w) return;
-    const foc = focusObj();
-    const stim = foc && foc.type ? foc : null;
-    const sens = foc && foc.kind ? foc : null;
-    const showU = (stim && stim.type === 'block') || (sens && sens.kind === 'ultrasonic');
-    const showL = (stim && stim.type === 'flashlight') || (sens && sens.kind === 'ldr');
-    const showH = (stim && stim.type === 'heat') || (sens && sens.kind === 'dht');
-    const showM = (stim && stim.type === 'humid') || (sens && sens.kind === 'dht');
-    const showP = (stim && stim.type === 'mover') || (sens && sens.kind === 'pir');
+    const w = world(); if (!w) { zoneKeys = []; return; }
     const byId = new Map(last.sensors.map(r => [r.id, r]));
-    if (showU) for (const s of w.sensors) if (s.kind === 'ultrasonic') {
-      const dist = (byId.get(s.id) && byId.get(s.id).dist) || SONAR_VIS;
-      const cone = zoneCone(Math.min(SONAR_VIS, Math.max(8, dist)), SONAR_ANG, 0x4c7dff);
-      cone.position.set(s.x, s.y, s.z); aimNegZ(cone, forward(s.rx, s.ry)); zoneRoot.add(cone);
-    }
-    if (showL) for (const t of w.stimuli) if (t.type === 'flashlight') {
-      const cone = zoneCone(FLASH_R, FLASH_ANG, 0xf5d76e);
-      cone.position.set(t.x, t.y, t.z); aimNegZ(cone, FLASH_DIR); zoneRoot.add(cone);
-    }
-    if (showH) for (const t of w.stimuli) if (t.type === 'heat') zoneRoot.add(zoneSphere(t, HEAT_R, 0xe85d04));
-    if (showM) for (const t of w.stimuli) if (t.type === 'humid') zoneRoot.add(zoneSphere(t, HUM_R, 0x3ec6e0));
-    if (showP) for (const s of w.sensors) if (s.kind === 'pir') {
-      const cone = zoneCone(Math.min(160, PIR_R), PIR_ANG, 0xb388ff);
-      cone.position.set(s.x, s.y, s.z); aimNegZ(cone, forward(s.rx, s.ry)); zoneRoot.add(cone);
-    }
+    const keys = [];
+    for (const item of focusList()) if (drawZone(item, byId)) keys.push(item.role + ':' + item.obj.id);
+    zoneKeys = keys.sort();
   }
   function zoneSphere(o, r, color) {
     const m = new window.THREE.Mesh(new window.THREE.SphereGeometry(r, 20, 14), new window.THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.22, depthWrite: false }));
@@ -582,17 +614,22 @@
     const w = world(), o = selected && w ? (selected.role === 'sensor' ? w.sensors : w.stimuli).find(x => x.id === selected.id) : null;
     ring.visible = !!o; if (o) ring.position.set(o.x, TABLE_Y + 0.35, o.z);
   }
+  function hotSensor(id) {
+    return (hoverPick && hoverPick.role === 'sensor' && hoverPick.id === id) || (selected && selected.role === 'sensor' && selected.id === id);
+  }
   function paintTags() {
     for (const [id, node] of tagEls) {
       const r = last.sensors.find(s => s.id === id);
       if (!r) { node.hidden = true; continue; }
       try { node.textContent = labelOf(r); } catch (e) { node.textContent = id; }
-      node.classList.toggle('on', id === hoverId || (selected && selected.id === id));
+      node.classList.toggle('on', hotSensor(id));
     }
   }
   function placeTags() {
     if (!camera) return;
     const w = stage.getBoundingClientRect();
+    const pr = pal.getBoundingClientRect();
+    const minScreen = tagMinScreen(w, pr);
     const THREE = window.THREE, v = new THREE.Vector3();
     const data = world();
     for (const [id, node] of tagEls) {
@@ -601,10 +638,14 @@
       v.set(s.x, s.y + 12, s.z).project(camera);
       if (v.z > 1) { node.hidden = true; continue; }
       node.hidden = false;
-      node.style.left = (v.x * 0.5 + 0.5) * w.width + 'px';
+      const raw = (v.x * 0.5 + 0.5) * w.width;
+      node.style.left = raw + 'px';
       node.style.top = (-v.y * 0.5 + 0.5) * w.height + 'px';
+      const center = clampTagX(raw, node.offsetWidth / 2, w.left, minScreen);
+      if (center !== raw) node.style.left = center + 'px';
     }
   }
+  syncTags = () => { if (!active) return; paintTags(); placeTags(); };
   function ndc(e) {
     const r = canvas.getBoundingClientRect();
     ptr.x = ((e.clientX - r.left) / Math.max(1, r.width)) * 2 - 1;
@@ -632,10 +673,10 @@
   canvas.addEventListener('pointerdown', e => {
     if (!active || !renderer || e.button > 0) return;
     const hit = pick(e);
-    if (!hit) { selected = null; hoverId = null; updateSel(); updateZones(); syncChrome(); paintTags(); return; }
+    if (!hit) { selected = null; hoverPick = null; updateSel(); updateZones(); syncChrome(); paintTags(); return; }
     e.preventDefault(); e.stopImmediatePropagation();
     if (controls) controls.enabled = false;
-    selected = { role: hit.role, id: hit.id }; hoverId = hit.id;
+    selected = { role: hit.role, id: hit.id }; hoverPick = { role: hit.role, id: hit.id };
     const obj = (hit.role === 'sensor' ? world().sensors : world().stimuli).find(o => o.id === hit.id);
     drag = { pid: e.pointerId, role: hit.role, id: hit.id, y: obj ? obj.y : TABLE_Y };
     updateSel(); updateZones(); syncChrome(); paintTags();
@@ -651,10 +692,16 @@
       o.x = q2(clamp(p.x, -TABLE_HX + 8, TABLE_HX - 8));
       o.z = q2(clamp(p.z, -TABLE_HZ + 8, TABLE_HZ - 8));
       syncGroup(o, drag.role); updateSel();
-      applyReadings(proj()); updateZones(); paintTags();
+      applyReadings(proj()); updateZones();
+      if (renderer && camera) renderer.render(scene, camera);
+      syncTags();
       return;
     }
-    const hit = pick(e); hoverId = hit && hit.role === 'sensor' ? hit.id : null; paintTags();
+    const hit = pick(e);
+    const next = hit ? { role: hit.role, id: hit.id } : null;
+    const same = !!hoverPick === !!next && (!next || (hoverPick.role === next.role && hoverPick.id === next.id));
+    if (!same) { hoverPick = next; updateZones(); }
+    paintTags();
   });
   function endDrag(e) {
     if (!drag || (e && e.pointerId != null && e.pointerId !== drag.pid)) return;
@@ -662,11 +709,16 @@
   }
   canvas.addEventListener('pointerup', endDrag);
   canvas.addEventListener('pointercancel', endDrag);
+  canvas.addEventListener('pointerleave', () => {
+    if (!active || drag || !hoverPick) return;
+    hoverPick = null; updateZones(); paintTags();
+  });
   window.addEventListener('resize', () => { if (active) resize(); });
   if (window.ResizeObserver && stage) new ResizeObserver(() => { if (active) resize(); }).observe(stage);
 
   api.show = show;
-  api.onOpen = () => { dirty = true; selected = null; drag = null; if (active) { rebuild(); applyReadings(proj()); paintTags(); } };
+  api.onOpen = () => { dirty = true; selected = null; hoverPick = null; drag = null; if (active) { rebuild(); applyReadings(proj()); updateZones(); } };
+  api.zoneKeys = () => zoneKeys.slice();
   api.removeSelected = removeSelected;
   api.yawSelected = yawSelected;
   api.screenPos = (role, id) => { const w = world(); if (!w) return null; const o = (role === 'sensor' ? w.sensors : w.stimuli).find(x => x.id === id); return screenOf(o); };
