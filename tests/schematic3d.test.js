@@ -181,9 +181,47 @@ test('wire tubes follow sanitized pin endpoints and bend points', () => {
   assert.deepEqual(S.wirePoints(s.parts, { a: { part: 'R1', pin: 'missing' }, b: { part: 'R2', pin: 'a' } }), []);
   const lib = S.createLib(fakeThree());
   const tubes = S.buildWires(lib, s.parts, s.wires);
-  assert.equal(tubes.children.length, 3);
-  assert.equal(tubes.children[0].material.color, 0x4c7dff);
-  assert.equal(tubes.children[2].material.color, S.WIRE_NEUTRAL);
+  const spans = tubes.children.filter(c => c.userData.kind === 'span');
+  const joints = tubes.children.filter(c => c.userData.kind === 'joint');
+  assert.ok(spans.length > 3, 'each span is an arc, not one straight tube');
+  assert.equal(joints.length, 5, 'a metal joint at every anchor');
+  assert.ok(spans.some(c => c.userData.sag > 0 && c.userData.y < S.WIRE_Y), 'the middle of a span sags');
+  assert.equal(spans[0].material.color, 0x4c7dff);
+  assert.equal(spans[0].userData.r, S.WIRE_R);
+  assert.ok(spans.some(c => c.material.color === S.WIRE_NEUTRAL));
+  const arc = S.sagSpan({ x: 0, y: S.WIRE_Y, z: 0 }, { x: 12, y: S.WIRE_Y, z: 0 });
+  assert.equal(arc[0].y, S.WIRE_Y);
+  assert.equal(arc[arc.length - 1].y, S.WIRE_Y);
+  assert.ok(arc[2].sag > 0 && arc[2].y < S.WIRE_Y);
+});
+
+test('unnamed wires take the schematic stroke; power is thicker', () => {
+  require('../netlist.js');
+  const raw = {
+    parts: [
+      { id: 'V1', type: 'dc', x: 0, y: 0, rot: 0, props: { V: 5, rInt: 0.1 } },
+      { id: 'R1', type: 'resistor', x: 120, y: 0, rot: 0, props: { R: 220, Pmax: 0.25 } }
+    ],
+    wires: [
+      { id: 'wp', a: { part: 'V1', pin: 'p' }, b: { part: 'R1', pin: 'a' } },
+      { id: 'wg', a: { part: 'V1', pin: 'n' }, b: { part: 'R1', pin: 'b' } }
+    ]
+  };
+  const s = global.window.sanitizeProject(raw);
+  const plus = S.wireLook(s.parts, s.wires, s.wires[0]);
+  const gnd = S.wireLook(s.parts, s.wires, s.wires[1]);
+  assert.equal(plus.role, 'plus');
+  assert.equal(plus.color, S.WIRE_PLUS);
+  assert.equal(plus.r, S.WIRE_R_POWER);
+  assert.ok(plus.r > S.WIRE_R);
+  assert.equal(gnd.role, 'gnd');
+  assert.equal(gnd.color, S.WIRE_GND);
+  assert.equal(gnd.r, S.WIRE_R);
+  const tubes = S.buildWires(S.createLib(fakeThree()), s.parts, s.wires);
+  const spans = tubes.children.filter(c => c.userData.kind === 'span');
+  assert.ok(spans.some(c => c.material.color === S.WIRE_PLUS && c.userData.r === S.WIRE_R_POWER));
+  assert.ok(spans.some(c => c.material.color === S.WIRE_GND && c.userData.r === S.WIRE_R));
+  assert.equal(/https?:\/\//.test(JSON.stringify(s)), false);
 });
 
 test('source stays local and procedural', () => {

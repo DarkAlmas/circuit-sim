@@ -16,7 +16,7 @@ const SHOT = process.argv[3] || '/tmp';
   ok(csp.includes("connect-src 'none'") && csp.includes("script-src 'self'") && !/unsafe-inline|unsafe-eval/.test(csp), 'CSP unchanged');
   const scripts = await pg.evaluate(() => [...document.scripts].filter(s => s.src).map(s => s.src));
   const origin = new globalThis.URL(URL).origin;
-  ok(scripts.every(s => s.startsWith(origin) && /\?v=14\.5\.6$/.test(s)), 'scripts are same-origin ?v=14.5.6');
+  ok(scripts.every(s => s.startsWith(origin) && /\?v=14\.5\.7$/.test(s)), 'scripts are same-origin ?v=14.5.7');
   ok(scripts.some(s => s.includes('/vendor/three/three.min.js')), 'Three.js vendored');
   ok(await pg.evaluate(() => [...document.querySelectorAll('#rtabs button')].map(b => b.textContent).join() === 'Схема,Шасси,Трасса'), 'robot tabs unchanged');
   ok(await pg.evaluate(() => !!document.querySelector('#undo') && !!document.querySelector('#redo') && !!document.querySelector('#simMore') && !!document.querySelector('#setHold')), 'undo and hold-menu chrome still present');
@@ -61,7 +61,8 @@ const SHOT = process.argv[3] || '/tmp';
     label: document.querySelector('#w3tags .w3tag').textContent
   }));
   console.log('placed', JSON.stringify(placed));
-  ok(placed.s.join() === kinds.join() && placed.t.join() === types.join(), 'four sensors and five stimuli');
+  ok(placed.s.slice(0, 4).join() === kinds.join() && placed.t.slice(0, 5).join() === types.join(), 'opening 3D pairs the board, then the buttons append ' + placed.s.join() + ' / ' + placed.t.join());
+  ok(placed.s.length === kinds.length * 2 && placed.t.length === types.length * 2, 'palette buttons still append one of each');
   ok(placed.dist === 31 && /31 см/.test(placed.label), 'ultrasonic hits the cube, label shows cm');
   ok(placed.lux > 100, 'flashlight raises LDR lux (' + placed.lux + ')');
   ok(placed.temp > 24, 'heat raises DHT temp (' + placed.temp + ')');
@@ -179,13 +180,13 @@ const SHOT = process.argv[3] || '/tmp';
     return { world: s.world3d, dist: __sim.proj.parts.find(p => p.id === 'U2').props.dist, mm: __sim.proj.parts.find(p => p.id === 'V9').props.mm };
   });
   ok(JSON.stringify(loaded.world.sensors.map(s => s.kind)) === JSON.stringify(saved.sensors.map(s => s.kind)), 'reload keeps sensors');
-  ok(loaded.world.stimuli.length === 5 && loaded.world.stimuli.every(t => ['block', 'flashlight', 'heat', 'humid', 'mover'].includes(t.type)), 'reload keeps stimuli via sanitize');
+  ok(loaded.world.stimuli.length === saved.stimuli.length && loaded.world.stimuli.every(t => ['block', 'flashlight', 'heat', 'humid', 'mover', 'tape'].includes(t.type)) && types.every(t => loaded.world.stimuli.some(s => s.type === t)), 'reload keeps stimuli via sanitize');
   ok(loaded.dist === 400 && loaded.mm === 300, 'saved HC-SR04 distance survived reload, VL53 did not');
   await pg.click('#w3tab'); await pg.waitForTimeout(300);
   await pg.click('#w3reset');
   ok(await pg.evaluate(() => {
     const w = __sim.proj.world3d, dht = __sim.proj.parts.find(p => p.type === 'dht22'), pir = __sim.proj.parts.find(p => p.type === 'pir');
-    return w.stimuli.length === 0 && w.sensors.length === 4 && dht.props.temp === 24 && dht.props.hum === 45 && pir.props.motion === false;
+    return w.stimuli.length === 0 && w.sensors.length === 8 && dht.props.temp === 24 && dht.props.hum === 45 && pir.props.motion === false;
   }), 'reset clears stimuli only and readings return to ambient');
   const readTag = () => pg.evaluate(() => {
     const pir = __sim.proj.world3d.sensors.find(s => s.kind === 'pir');
@@ -210,6 +211,24 @@ const SHOT = process.argv[3] || '/tmp';
   }
   ok(clipped(clip) && clip.left >= clip.palRight + 8 - 1 && clip.top < clip.sy, 'PIR tag stays right of the palette and above the sensor ' + JSON.stringify(clip));
 
+  await pg.click('#w3run'); await pg.waitForTimeout(350);
+  const ran = await pg.evaluate(() => ({
+    running: __sim.running,
+    view: World3D.view,
+    live: document.querySelector('#w3live').textContent,
+    bar: document.querySelector('#w3run').textContent
+  }));
+  ok(ran.running && ran.view === 'world' && /Симуляция/.test(ran.live) && /HC-SR04/.test(ran.live) && ran.bar === '■ Стоп', 'run stays in the world view ' + JSON.stringify(ran));
+  await pg.click('#w3pal button[data-view=schema]'); await pg.waitForTimeout(250);
+  const inSchema = await pg.evaluate(() => ({
+    running: __sim.running,
+    view: World3D.view,
+    live: document.querySelector('#w3live').textContent
+  }));
+  ok(inSchema.running && inSchema.view === 'schema' && /Симуляция/.test(inSchema.live) && /HC-SR04/.test(inSchema.live), 'the same run is visible in Схема 3D ' + JSON.stringify(inSchema));
+  await pg.click('#w3run'); await pg.waitForTimeout(150);
+  ok(await pg.evaluate(() => !__sim.running && document.querySelector('#w3run').textContent === '▶ Запустить'), 'stop from 3D');
+  await pg.click('#w3pal button[data-view=world]');
   await pg.click('#w3tab'); await pg.waitForTimeout(200);
   const back = await pg.evaluate(() => {
     const c = document.querySelector('#center').getBoundingClientRect();

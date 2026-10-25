@@ -431,6 +431,8 @@
     if (window.World3D && World3D.active) World3D.applyReadings(proj);
     // v9: move the robot car first (motor rpm from the previous frame), so this frame's stamp already sees the new sensor readings
     if (window.RobotUI) RobotUI.onTick(proj, Math.min(0.05, Math.max(1e-4, lastT ? (performance.now() - lastT) / 1000 : 1 / 60)));
+    // Tape and the MPU figurine. The track (line above) keeps TCRT / VL53 / IMU while it is driving.
+    if (window.World3D && World3D.active && World3D.applyBoard) World3D.applyBoard(proj);
     const b = Netlist.build(proj, gpio, { gpioBy, vio: mcus[0] ? P[mcus[0].type].vio : 3.3 });
     // transient step: real time between frames (clamped), state re-keyed by owner part + ordinal so it survives netlist changes
     const now = performance.now(), dt = Math.min(0.05, Math.max(1e-4, lastT ? (now - lastT) / 1000 : 1 / 60)); lastT = now;
@@ -480,7 +482,7 @@
     if (sel && sel.part && part(sel.part) && !!part(sel.part).burned !== !!$('#fix')) props();
     $('#status').textContent = shorts.length ? 'Пауза: короткое замыкание' : `Симуляция · t=${simTime.toFixed(2)} с · ${b.circuit.nodeCount} узлов · ${sol.iter} итер. Ньютона`;
     render(); live(); calc();
-    if (window.World3D && World3D.active) syncSensorWidgets();
+    if (window.World3D && World3D.active) { syncSensorWidgets(); if (World3D.syncLive) World3D.syncLive(); }
     raf = requestAnimationFrame(tick);
   }
   let simState = { vC: {}, iL: {} }, simTime = 0, lastT = 0;
@@ -527,7 +529,7 @@
   /* sketch worker lifecycle: a crashed/hung worker (exception, OOM, infinite loop) is torn down, a fresh idle
    * worker is created right away, the console explains what happened, and the next Run uses the fresh worker. */
   let spare = null, crashes = 0;
-  const newWorker = () => new Worker('worker.js?v=14.5.6');
+  const newWorker = () => new Worker('worker.js?v=14.5.7');
   function takeWorker() { const w = spare || newWorker(); spare = null; return w; }
   function crash(msg) { if (!worker) return; worker.onmessage = worker.onerror = null; try { worker.terminate(); } catch (e) {} worker = null; gpio = {}; prevV = null; crashes++;
     try { spare = newWorker(); } catch (e) { spare = null; }
@@ -566,7 +568,12 @@
       for (const k in extra) if (performance.now() - extra[k].hb > 2000) extra[k].kill('Скетч остановлен: нет ответа 2 с.'); }, 500);
   }
   function start() {
-    if (running) return; saveEditor(); autosave();
+    if (running) return; saveEditor();
+    if (window.World3D && World3D.active && World3D.ensurePairs) {
+      const added = World3D.ensurePairs(proj);
+      if (added && (added.sensors || added.stimuli) && World3D.onOpen) World3D.onOpen();
+    }
+    autosave();
     proj.parts.forEach(p => { delete p.burned; delete p.on; delete p._mod; delete p._burnMsg; delete p._burnLogged; }); gpio = {}; imgs = {}; links = {}; prevV = null; simState = { vC: {}, iL: {} }; simTime = 0; lastT = 0; lastAlert = null; con.textContent = '';
     running = true; $('#run').disabled = true; $('#stop').disabled = false;
     proj.parts.forEach(p => { delete p._st; delete p._txT; delete p._low; delete p._duty; delete p._acc; delete p._vs; }); extra = {}; rf = { sent: 0, delivered: 0, last: null };

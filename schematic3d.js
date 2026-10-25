@@ -1,10 +1,10 @@
-/* v14.5.6: low-poly schematic on the same table as the v14.5 stimulus world.
+/* v14.5.7: low-poly schematic on the same table as the v14.5 stimulus world.
  * Procedural Three.js primitives only — no GLB, no network, no new project fields.
  * v14.5.6: passives and the other generic-slab parts get a body silhouette in the
- * 2D group color. «Пассивные» are one mesh, a bit larger in plan than the old
- * 4.8×2.16×1.5 slab, with no bands, legs, or labels. Wire tubes follow pin
- * endpoints (and sanitized bend points) in the same table space. LED/PIR glow
- * stays out of this pass.
+ * 2D group color. Wire anchors follow pin endpoints (and sanitized bend points).
+ * v14.5.7: each span sags (a light arc), insulation matches the schematic stroke
+ * (named color, else ground / power / signal), and power is a little thicker.
+ * Pin joints are metal spheres. LED and PIR domes can glow from the live sim.
  *
  * Pose. The schematic SVG origin is the part origin (translate x y, then rotate(rot*90)
  * clockwise because SVG +Y points down). The table is the world3d table: +X right,
@@ -62,8 +62,12 @@
   };
   const BREAD_H = 2.2;
   const WIRE_Y = TABLE_Y + 0.85;
-  const WIRE_R = 0.32;
+  const WIRE_R = 0.55;
+  const WIRE_R_POWER = 0.78;
   const WIRE_NEUTRAL = 0x9aa3b5;
+  const WIRE_SIGNAL = 0x3fb37f;
+  const WIRE_PLUS = 0xe5484d;
+  const WIRE_GND = 0x0b0d12;
   const GROUP_COLOR = {
     'Платы': 0x243044, 'Датчики': 0x2c6b45, 'Пассивные': 0xc4a574, 'Питание': 0x2c3340,
     'Индикация': 0x3d4f78, 'Активные': 0x3e4a5c, 'Микросхемы': 0x1c1c1e, 'Интерфейсы': 0x3a4658,
@@ -255,8 +259,9 @@
   function pir(lib, part) {
     const s = sizeOf(part, 'pir'), g = new lib.THREE.Group();
     add(g, lib, s.w, s.h, s.d, 0x1a6b3c, 0, s.h / 2, 0, 0.68, 0.04);
-    const dome = lib.mesh(lib.dome(Math.max(1.6, s.w * 0.28)), lib.mat(0xf7f7fb, 0.22, 0.04, 0.92));
+    const dome = lib.mesh(lib.dome(Math.max(1.6, s.w * 0.28)), lensMat(lib, 0xf7f7fb, 0.92));
     dome.position.y = s.h;
+    dome.userData.glow = 'pir';
     g.add(dome);
     add(g, lib, 0.7, 0.45, 0.7, 0xff3b30, s.w * 0.28, s.h + 0.3, s.d * 0.18, 0.45, 0.1);
     pinsAt(g, lib, s.w, s.d, 3);
@@ -319,7 +324,12 @@
     g.userData.kind = kind;
     return g;
   }
-  /* TODO: lens stays a static dome. Lighting it from current / props.color is a later pass. */
+  function lensMat(lib, color, opacity) {
+    return new lib.THREE.MeshStandardMaterial({
+      color, roughness: 0.25, metalness: 0.04, transparent: opacity < 1, opacity,
+      emissive: 0x000000, emissiveIntensity: 0
+    });
+  }
   function ledShape(lib, part) {
     const g = new lib.THREE.Group();
     const wide = !!(part && part.type === 'rgbled');
@@ -330,8 +340,9 @@
       const x = -span / 2 + span * i / (n - 1);
       add(g, lib, 0.28, 2.0, 0.28, 0xc5cad1, x, 1.0, 0, 0.4, 0.5);
     }
-    const dome = lib.mesh(lib.dome(wide ? 1.55 : 1.25), lib.mat(0xf4f1ea, 0.25, 0.04, 0.94));
+    const dome = lib.mesh(lib.dome(wide ? 1.55 : 1.25), lensMat(lib, 0xf4f1ea, 0.94));
     dome.position.y = 2.0;
+    dome.userData.glow = 'led';
     g.add(dome);
     g.userData.kind = 'led';
     return g;
@@ -496,6 +507,42 @@
     }
     return WIRE_NEUTRAL;
   }
+  /* Same stroke the 2D canvas uses: a named insulation color, else ground / power / signal.
+   * Without a netlist (unit tests of geometry) an unnamed wire stays the neutral gray. */
+  function wireLook(parts, wires, wire) {
+    const table = window.WIRE_COLORS;
+    const named = !!(wire && typeof wire.color === 'string' && table && Object.prototype.hasOwnProperty.call(table, wire.color));
+    if (named) return { color: wireColorHex(wire.color), role: 'named', r: WIRE_R };
+    const netsFn = window.Netlist && window.Netlist.nets;
+    if (typeof netsFn !== 'function' || !wire || !wire.a) return { color: WIRE_NEUTRAL, role: 'plain', r: WIRE_R };
+    try {
+      const nets = netsFn({ parts: Array.isArray(parts) ? parts : [], wires: Array.isArray(wires) ? wires : [] });
+      const root = nets.netOf(wire.a.part, wire.a.pin);
+      if (nets.groundRoots.has(root)) return { color: WIRE_GND, role: 'gnd', r: WIRE_R };
+      if (nets.plusRoots.has(root)) return { color: WIRE_PLUS, role: 'plus', r: WIRE_R_POWER };
+    } catch (e) { return { color: WIRE_NEUTRAL, role: 'plain', r: WIRE_R }; }
+    return { color: WIRE_SIGNAL, role: 'signal', r: WIRE_R };
+  }
+  /* Light catenary: ends stay on the anchor, the middle dips a few table units. */
+  function sagSpan(a, b) {
+    const dx = b.x - a.x, dy = b.y - a.y, dz = b.z - a.z;
+    const len = Math.hypot(dx, dy, dz);
+    if (!(len >= 0.2)) return [];
+    const drop = Math.min(2.4, Math.max(0.55, len * 0.12));
+    const n = 4;
+    const pts = [];
+    for (let i = 0; i <= n; i++) {
+      const t = i / n;
+      const bow = 4 * t * (1 - t);
+      pts.push({
+        x: q(a.x + dx * t),
+        y: q(a.y + dy * t - drop * bow),
+        z: q(a.z + dz * t),
+        sag: q(drop * bow)
+      });
+    }
+    return pts;
+  }
   function pinPoint(part, pin) {
     const at = pose(part);
     const loc = localToTable(part, pin ? pin.x : 0, pin ? pin.y : 0);
@@ -530,13 +577,25 @@
     }
     return out;
   }
-  function addTube(g, lib, a, b, color) {
+  function addTube(g, lib, a, b, color, radius, sag) {
+    const r = radius || WIRE_R;
     const dx = b.x - a.x, dy = b.y - a.y, dz = b.z - a.z;
     const len = Math.hypot(dx, dy, dz);
-    if (!(len >= 0.2)) return;
-    const m = lib.mesh(lib.cyl(WIRE_R, len, 6), lib.mat(color, 0.48, 0.12));
+    if (!(len >= 0.05)) return;
+    const m = lib.mesh(lib.cyl(r, len, 8), lib.mat(color, 0.62, 0.04));
     m.position.set((a.x + b.x) / 2, (a.y + b.y) / 2, (a.z + b.z) / 2);
     m.quaternion.setFromUnitVectors(new lib.THREE.Vector3(0, 1, 0), new lib.THREE.Vector3(dx / len, dy / len, dz / len));
+    m.userData.kind = 'span';
+    m.userData.r = r;
+    m.userData.sag = sag || 0;
+    m.userData.y = q((a.y + b.y) / 2);
+    g.add(m);
+  }
+  function addJoint(g, lib, p) {
+    const m = lib.mesh(lib.ball(q(WIRE_R * 1.65)), lib.mat(0xd5dbe3, 0.32, 0.62));
+    m.position.set(p.x, p.y, p.z);
+    m.userData.kind = 'joint';
+    m.userData.r = q(WIRE_R * 1.65);
     g.add(m);
   }
   function buildWires(lib, parts, wires) {
@@ -544,17 +603,24 @@
     g.userData.role = 'wires';
     const list = Array.isArray(wires) ? wires : [];
     for (const w of list) {
-      const pts = wirePoints(parts, w);
-      const color = wireColorHex(w && w.color);
-      for (let i = 1; i < pts.length; i++) addTube(g, lib, pts[i - 1], pts[i], color);
+      const anchors = wirePoints(parts, w);
+      const look = wireLook(parts, list, w);
+      for (let i = 1; i < anchors.length; i++) {
+        const span = sagSpan(anchors[i - 1], anchors[i]);
+        let drop = 0;
+        for (const p of span) if (p.sag > drop) drop = p.sag;
+        for (let k = 1; k < span.length; k++) addTube(g, lib, span[k - 1], span[k], look.color, look.r, drop);
+      }
+      for (const p of anchors) addJoint(g, lib, p);
     }
     return silence(g);
   }
 
   const api = {
-    SCALE, TABLE_Y, LIFT, WIRE_Y, WIRE_R, WIRE_NEUTRAL, KIND_OF, GROUP_COLOR,
+    SCALE, TABLE_Y, LIFT, WIRE_Y, WIRE_R, WIRE_R_POWER, WIRE_NEUTRAL, WIRE_SIGNAL, WIRE_PLUS, WIRE_GND,
+    KIND_OF, GROUP_COLOR,
     kindOf, footprint, pose, localToTable, svgBox, createLib, build,
-    pinPoint, wirePoints, wireColorHex, buildWires
+    pinPoint, wirePoints, wireColorHex, wireLook, sagSpan, buildWires
   };
   window.Schematic3D = api;
 })();

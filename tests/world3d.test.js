@@ -53,7 +53,7 @@ test('world3d arrays are length-capped', () => {
   assert.equal(s.world3d.sensors.length, W.WORLD3D_LIMITS.sensors);
   assert.equal(s.world3d.stimuli.length, W.WORLD3D_LIMITS.stimuli);
   assert.deepEqual(W.WORLD3D_KINDS, ['ultrasonic', 'ldr', 'dht', 'pir']);
-  assert.deepEqual(W.WORLD3D_TYPES, ['block', 'flashlight', 'heat', 'humid', 'mover']);
+  assert.deepEqual(W.WORLD3D_TYPES, ['block', 'flashlight', 'heat', 'humid', 'mover', 'tape']);
 });
 
 test('readings: block, flashlight, heat, humid, mover', () => {
@@ -228,6 +228,82 @@ test('PIR motion is written even when the prop is missing, and NTC takes DHT tem
   assert.equal(proj.parts[1].props.temp, 64);
   assert.equal(proj.parts[1].props.hum, 90);
   assert.equal(proj.parts[2].props.motion, true);
+});
+
+test('ensurePairs fills a missing stimulus and does not move one that is already there', () => {
+  const proj = {
+    parts: [
+      { id: 'U2', type: 'hcsr04', props: { dist: 50 } },
+      { id: 'R1', type: 'ldr', props: { lux: 100 } },
+      { id: 'U3', type: 'dht22', props: { temp: 24, hum: 45 } },
+      { id: 'N1', type: 'ntc', props: { temp: 25 } },
+      { id: 'P1', type: 'pir', props: { motion: false } },
+      { id: 'T1', type: 'tcrt5000', props: { refl: 0.9, thr: 0.5 } },
+      { id: 'M1', type: 'mpu6050', props: { pitch: 0, roll: 0, acc: 0, gz: 0 } },
+      { id: 'V1', type: 'vl53l0x', props: { mm: 300 } }
+    ],
+    world3d: { sensors: [], stimuli: [] }
+  };
+  const added = S.ensurePairs(proj);
+  assert.deepEqual(proj.world3d.sensors.map(s => s.kind), ['ultrasonic', 'ldr', 'dht', 'pir']);
+  assert.deepEqual(proj.world3d.stimuli.map(s => s.type), ['block', 'flashlight', 'heat', 'humid', 'mover', 'tape']);
+  assert.ok(added.sensors >= 4 && added.stimuli >= 6);
+  const kept = proj.world3d.sensors[0].x;
+  const again = S.ensurePairs(proj);
+  assert.equal(again.sensors, 0);
+  assert.equal(again.stimuli, 0);
+  assert.equal(proj.world3d.sensors[0].x, kept);
+  assert.equal(proj.world3d.sensors.length, 4);
+  assert.equal(proj.parts.find(p => p.id === 'V1').props.mm, 300);
+  proj.parts.push({ id: 'U9', type: 'hcsr04', props: { dist: 50 } });
+  S.ensurePairs(proj);
+  assert.deepEqual(proj.world3d.sensors.map(s => s.kind), ['ultrasonic', 'ldr', 'dht', 'pir', 'ultrasonic']);
+  assert.equal(proj.world3d.stimuli.filter(s => s.type === 'block').length, 2);
+  assert.equal(proj.world3d.sensors[0].x, kept);
+});
+
+test('board extras move TCRT and MPU only, and the climate formulas stay', () => {
+  const climate = S.compute({
+    sensors: [{ id: 'd', kind: 'dht', x: 0, y: 80, z: 0 }],
+    stimuli: [{ id: 'h', type: 'heat', x: 0, y: 80, z: 0 }, { id: 'u', type: 'humid', x: 0, y: 80, z: 25 }]
+  }).sensors[0];
+  assert.equal(climate.temp, 64);
+  assert.equal(climate.hum, 90);
+  const line = {
+    parts: [
+      { id: 'T', type: 'tcrt5000', x: 0, y: 0, props: { refl: 0.4, thr: 0.5 } },
+      { id: 'M', type: 'mpu6050', x: 0, y: 0, props: { pitch: 0, roll: 0, acc: 0, gz: 0 } },
+      { id: 'V', type: 'vl53l0x', x: 0, y: 0, props: { mm: 300 } }
+    ],
+    world3d: {
+      stimuli: [
+        { id: 'tape', type: 'tape', x: 0, y: 78, z: 0 },
+        { id: 'mv', type: 'mover', x: 10, y: 78, z: 0 }
+      ]
+    }
+  };
+  S.applyBoard(line);
+  assert.equal(line.parts[0].props.refl, 0.05);
+  assert.equal(line.parts[1].props.gz, 20);
+  assert.equal(line.parts[2].props.mm, 300);
+  line.world3d.stimuli[0].z = 80;
+  S.applyBoard(line);
+  assert.equal(line.parts[0].props.refl, 0.9);
+  line.world3d.stimuli = [];
+  line.parts[0].props.refl = 0.4;
+  S.applyBoard(line);
+  assert.equal(line.parts[0].props.refl, 0.4, 'no tape leaves the slider alone');
+  line.world3d.stimuli = [{ id: 'tape', type: 'tape', x: 0, y: 78, z: 0 }];
+  global.window.RobotUI = { run: {}, paused: false };
+  S.applyBoard(line);
+  assert.equal(line.parts[0].props.refl, 0.4, 'the track owns reflectance while it drives');
+  delete global.window.RobotUI;
+  const lines = S.liveLines(line, { sensors: [{ id: 's1', kind: 'ultrasonic', dist: 41 }] }, { running: true, simTime: 1.2, meas: { D1: { I: 0.008 } } });
+  assert.ok(lines[0].includes('Симуляция') && lines[0].includes('1.20'));
+  assert.ok(lines.some(s => s.includes('41 см')));
+  const stopped = S.liveLines({ parts: [{ id: 'D1', type: 'led', props: { color: 'красный' } }] }, { sensors: [] }, { running: false });
+  assert.ok(stopped[0].includes('Остановлено'));
+  assert.equal(stopped.some(s => s.startsWith('LED')), false);
 });
 
 test('tag screen X stays to the right of a left palette and above the anchor', () => {

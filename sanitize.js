@@ -49,7 +49,7 @@
     return out;
   }
   const W3_KINDS = ['ultrasonic', 'ldr', 'dht', 'pir'];
-  const W3_TYPES = ['block', 'flashlight', 'heat', 'humid', 'mover'];
+  const W3_TYPES = ['block', 'flashlight', 'heat', 'humid', 'mover', 'tape'];
   const W3L = { sensors: 32, stimuli: 48 };
   const ang = v => Math.round(num(v, -Math.PI, Math.PI, 0) * 10000) / 10000;
   function sanitizeWorld3d(raw) {
