@@ -152,6 +152,7 @@ body.pm #mbar{display:flex;gap:4px;padding:4px 6px calc(4px + env(safe-area-inse
 body.pm #mbar button{min-height:56px;font-size:14px}
 body.pm #mCode{display:none}
 body.pm #mDel{display:block;flex:0 0 56px}
+body.hide-wire #mWire,body.hide-del #mDel{display:none!important}
 body.pm:not([data-ptab=schema]) #mbar{display:none}
 /* sheets */
 body.pm .pmHandle{display:flex;flex:0 0 28px;justify-content:center;align-items:center;height:28px;touch-action:none;cursor:grab;position:sticky;top:0;background:inherit;z-index:2}

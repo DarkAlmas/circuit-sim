@@ -13,7 +13,8 @@ const URL = process.argv[2] || 'http://localhost:8765/';
   ok(await pg.evaluate(() => [...document.scripts].every(s => !s.src || /\?v=14\.4$/.test(s.src)) && /style\.css\?v=14\.4/.test(document.querySelector('link[rel=stylesheet]').href)), 'cache stays ?v=14.4');
   const csp = await pg.evaluate(() => document.querySelector('meta[http-equiv="Content-Security-Policy"]').content);
   ok(csp.startsWith("default-src 'self'") && csp.includes("script-src 'self'") && !/unsafe-inline/.test(csp), 'CSP unchanged');
-  ok(await pg.evaluate(() => __sim.ui.holdMenu === false && __sim.ui.canvasProps === true && __sim.ui.labelFont === 'normal'), 'defaults: hold off, canvas props on, font normal');
+  const UI_KEYS = 'canvasProps,codeFont,holdMenu,labelFont,showDelBtn,showWireBtn';
+  ok(await pg.evaluate(() => __sim.ui.holdMenu === false && __sim.ui.canvasProps === true && __sim.ui.labelFont === 'normal' && __sim.ui.showWireBtn === true && __sim.ui.showDelBtn === true && __sim.ui.codeFont === 14), 'defaults: hold off, canvas props on, wire and delete on, code font 14');
 
   await pg.click('#simMore');
   const dlg = await pg.evaluate(() => {
@@ -23,13 +24,17 @@ const URL = process.argv[2] || 'http://localhost:8765/';
       hold: document.querySelector('#setHold').getAttribute('aria-checked'), canv: document.querySelector('#setCanvas').getAttribute('aria-checked'),
       font: document.querySelector('#setFont button.on').dataset.font,
       fonts: [...document.querySelectorAll('#setFont button')].map(b => b.textContent + ':' + b.dataset.font),
+      wire: document.querySelector('#setWire').getAttribute('aria-checked'), del: document.querySelector('#setDel').getAttribute('aria-checked'),
+      code: document.querySelector('#setCodeFont button.on').dataset.size,
+      codes: [...document.querySelectorAll('#setCodeFont button')].map(b => b.textContent + ':' + b.dataset.size),
       top: box.top, bottomGap: innerHeight - box.bottom };
   });
   ok(!dlg.hidden && dlg.title === 'Настройки симулятора' && dlg.close === 'Закрыть', 'dialog title and Закрыть');
-  ok(dlg.rows.join('|') === 'Меню по удержанию|Свойства на схеме|Шрифт подписей' && dlg.rows.length === 3, 'three rows only');
+  ok(dlg.rows.join('|') === 'Меню по удержанию|Свойства на схеме|Шрифт подписей|Кнопка «Провод»|Кнопка «Удалить»|Шрифт кода' && dlg.rows.length === 6, 'six settings rows');
   ok(dlg.hint === 'Удаление, поворот и дублирование — в Свойствах и на нижней панели.', 'hint under the rows');
-  ok(dlg.hold === 'false' && dlg.canv === 'true' && dlg.font === 'normal', 'controls match defaults');
+  ok(dlg.hold === 'false' && dlg.canv === 'true' && dlg.font === 'normal' && dlg.wire === 'true' && dlg.del === 'true' && dlg.code === '14', 'controls match defaults');
   ok(dlg.fonts.join('|') === 'Мелкий:small|Обычный:normal|Крупный:large', 'font segments');
+  ok(dlg.codes.join('|') === '14:14|16:16', 'code font is 14 or 16');
   ok(dlg.bottomGap > 40 && dlg.top > 40, 'desktop dialog is centered');
   await pg.screenshot({ path: '/tmp/settings-desktop.png' });
 
@@ -42,7 +47,7 @@ const URL = process.argv[2] || 'http://localhost:8765/';
   await pg.click('#simMore');
   await pg.click('#setHold'); await pg.click('#setCanvas'); await pg.click('#setFont [data-font="large"]');
   const saved = await pg.evaluate(() => JSON.parse(localStorage.getItem('circuitsim.ui')));
-  ok(saved.holdMenu === true && saved.canvasProps === false && saved.labelFont === 'large' && Object.keys(saved).sort().join() === 'canvasProps,holdMenu,labelFont', 'saved only the three known keys');
+  ok(saved.holdMenu === true && saved.canvasProps === false && saved.labelFont === 'large' && saved.showWireBtn === true && saved.showDelBtn === true && saved.codeFont === 14 && Object.keys(saved).sort().join() === UI_KEYS, 'saved only the known keys');
   ok(await pg.evaluate(() => document.querySelector('#canvasCards').hidden === true), 'canvas cards hide when toggled off');
   const fs1 = await pg.evaluate(() => parseFloat(getComputedStyle(document.querySelector('#svg .lbl')).fontSize));
   ok(fs1 > fs0, 'large labels are bigger (' + fs0 + ' → ' + fs1 + ')');
@@ -51,12 +56,19 @@ const URL = process.argv[2] || 'http://localhost:8765/';
   await pg.evaluate(() => localStorage.setItem('circuitsim.ui', JSON.stringify({ holdMenu: 'yes', canvasProps: 0, labelFont: 'xxl', evil: '<img>', font: 'large' })));
   await pg.reload(); await pg.waitForTimeout(300);
   const dropped = await pg.evaluate(() => JSON.parse(localStorage.getItem('circuitsim.ui')));
-  ok(dropped.holdMenu === false && dropped.canvasProps === true && dropped.labelFont === 'normal' && Object.keys(dropped).length === 3, 'invalid values and unknown keys dropped');
+  ok(dropped.holdMenu === false && dropped.canvasProps === true && dropped.labelFont === 'normal' && dropped.showWireBtn === true && dropped.showDelBtn === true && dropped.codeFont === 14 && Object.keys(dropped).length === 6, 'invalid values and unknown keys dropped');
 
   await pg.evaluate(() => localStorage.setItem('circuitsim.ui', JSON.stringify({ holdMenu: true, canvasProps: false, labelFont: 'small', extra: true })));
   await pg.reload(); await pg.waitForTimeout(300);
   const kept = await pg.evaluate(() => ({ ui: __sim.ui, lfs: document.querySelector('#svg').dataset.lfs, fs: parseFloat(getComputedStyle(document.querySelector('#svg .lbl')).fontSize), keys: Object.keys(JSON.parse(localStorage.getItem('circuitsim.ui'))).sort() }));
-  ok(kept.ui.holdMenu === true && kept.ui.canvasProps === false && kept.ui.labelFont === 'small' && kept.lfs === 'small' && kept.keys.join() === 'canvasProps,holdMenu,labelFont' && kept.fs < fs0, 'valid prefs persist, extra key dropped, small labels');
+  ok(kept.ui.holdMenu === true && kept.ui.canvasProps === false && kept.ui.labelFont === 'small' && kept.lfs === 'small' && kept.keys.join() === UI_KEYS && kept.fs < fs0, 'valid prefs persist, extra key dropped, small labels');
+  await pg.evaluate(() => { localStorage.setItem('pmFont', '16'); localStorage.removeItem('circuitsim.ui'); });
+  await pg.reload(); await pg.waitForTimeout(300);
+  const mig = await pg.evaluate(() => ({ code: __sim.ui.codeFont, pm: localStorage.getItem('pmFont'), ui: JSON.parse(localStorage.getItem('circuitsim.ui')), fs: getComputedStyle(document.body).getPropertyValue('--codefs').trim() }));
+  ok(mig.code === 16 && mig.pm === null && mig.ui.codeFont === 16 && mig.ui.showWireBtn === true && !('pmFont' in mig.ui) && mig.fs === '16px', 'pmFont 16 migrates into codeFont and the old key is removed');
+  await pg.evaluate(() => { localStorage.setItem('pmFont', '16'); localStorage.setItem('circuitsim.ui', JSON.stringify({ codeFont: 14, holdMenu: false, canvasProps: true, labelFont: 'normal', showWireBtn: true, showDelBtn: true })); });
+  await pg.reload(); await pg.waitForTimeout(300);
+  ok(await pg.evaluate(() => __sim.ui.codeFont === 14 && localStorage.getItem('pmFont') === null), 'a saved codeFont is kept and leftover pmFont is still dropped');
 
   await pg.evaluate(() => __sim.setUi({ holdMenu: false, canvasProps: true, labelFont: 'normal' }));
   await pg.evaluate(() => __sim.select('R1'));
@@ -99,25 +111,28 @@ const URL = process.argv[2] || 'http://localhost:8765/';
   const lpress = async (x, y) => { await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y, id: 1 }] }); await ph.waitForTimeout(650); await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] }); await ph.waitForTimeout(120); };
   const closeSheet = async () => { if (await ph.evaluate(() => document.body.dataset.sheet === 'props')) await ph.tap('#mProps'); };
   const hit = () => ph.evaluate(() => { const e = document.querySelector('.part[data-part="R1"] .hit').getBoundingClientRect(); return [e.x + e.width / 2, e.y + e.height / 2]; });
-  const menuText = () => ph.evaluate(() => { const m = document.querySelector('#ctxmenu'); return m && !m.hidden ? [...m.children].map(b => b.textContent) : []; });
-  const touchMenu = (x, y) => ph.evaluate(({ x, y }) => { const el = document.elementFromPoint(x, y); if (!el) return;
+  // Dispatch on #svg: a contextmenu fired on an inner SVG shape does not reliably reach the svg listener.
+  const touchMenu = (x, y) => ph.evaluate(({ x, y }) => {
+    const svg = document.querySelector('#svg'), m = document.querySelector('#ctxmenu');
+    if (m) { m.hidden = true; m.textContent = ''; }
     const o = { bubbles: true, cancelable: true, clientX: x, clientY: y, pointerId: 4, pointerType: 'touch', isPrimary: true };
-    el.dispatchEvent(new PointerEvent('pointerdown', o));
-    el.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: x, clientY: y, button: 2 }));
-    el.dispatchEvent(new PointerEvent('pointerup', o)); }, { x, y });
+    svg.dispatchEvent(new PointerEvent('pointerdown', o));
+    svg.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: x, clientY: y, button: 2 }));
+    return m && !m.hidden ? [...m.children].map(b => b.textContent) : [];
+  }, { x, y });
   const partActs = items => items.some(t => /Повернуть/.test(t)) || items.some(t => /Дублировать/.test(t));
   await closeSheet(); const xy = await hit(); await lpress(xy[0], xy[1]);
   ok(await ph.evaluate(() => { const m = document.querySelector('#ctxmenu'); return !m || m.hidden; }), 'part long-press menu is off by default');
-  await closeSheet(); const xyT = await hit(); await touchMenu(xyT[0], xyT[1]); await ph.waitForTimeout(80);
-  const touchOff = await menuText();
+  await closeSheet(); const xyT = await hit();
+  const touchOff = await touchMenu(xyT[0], xyT[1]);
   ok(!partActs(touchOff), 'touch contextmenu does not open the part menu when hold is off ' + JSON.stringify(touchOff));
   await ph.evaluate(() => __sim.setUi({ holdMenu: true })); await closeSheet();
   const xy2 = await hit(); await lpress(xy2[0], xy2[1]);
   const opened = await ph.evaluate(() => { const m = document.querySelector('#ctxmenu'); return m && !m.hidden ? [...m.children].map(b => b.textContent) : []; });
   ok(opened.some(t => /Повернуть/.test(t)) && opened.some(t => /Дублировать/.test(t)) && opened.some(t => /Удалить/.test(t)), 'part hold menu appears when enabled');
   await ph.evaluate(() => { const m = document.querySelector('#ctxmenu'); if (m) m.hidden = true; });
-  await closeSheet(); const xy3 = await hit(); await touchMenu(xy3[0], xy3[1]); await ph.waitForTimeout(80);
-  const touchOn = await menuText();
+  await closeSheet(); const xy3 = await hit();
+  const touchOn = await touchMenu(xy3[0], xy3[1]);
   ok(touchOn.some(t => /Повернуть/.test(t)) && touchOn.some(t => /Дублировать/.test(t)), 'touch contextmenu opens the part menu when hold is on ' + JSON.stringify(touchOn));
   await ph.evaluate(() => { const m = document.querySelector('#ctxmenu'); if (m) m.hidden = true; __sim.setUi({ holdMenu: false }); });
   await closeSheet();
@@ -126,9 +141,7 @@ const URL = process.argv[2] || 'http://localhost:8765/';
   const wireMenu = await ph.evaluate(p => { const m = document.querySelector('#ctxmenu'); const hit = document.elementFromPoint(p[0], p[1]); return { items: m && !m.hidden ? [...m.children].map(b => b.textContent) : [], hit: hit ? (hit.id || hit.getAttribute('class') || hit.tagName) : 'none', sheet: document.body.dataset.sheet || '' }; }, mid);
   ok(wireMenu.items.some(t => /Удалить провод/.test(t)) && wireMenu.items.some(t => /изгиб/.test(t)), 'wire long-press menu stays while part hold menu is off ' + JSON.stringify(wireMenu));
   await closeSheet();
-  await ph.evaluate(() => { const m = document.querySelector('#ctxmenu'); if (m) m.hidden = true; });
-  await touchMenu(mid[0], mid[1]); await ph.waitForTimeout(80);
-  const wireCtx = await menuText();
+  const wireCtx = await touchMenu(mid[0], mid[1]);
   ok(wireCtx.some(t => /Удалить провод/.test(t)) && wireCtx.some(t => /изгиб/.test(t)), 'wire touch contextmenu stays while part hold is off ' + JSON.stringify(wireCtx));
   const slot = await ph.evaluate(() => { const u = document.querySelector('#undo'), r = document.querySelector('#redo'), d = document.querySelector('#mDel');
     const ids = [...d.parentElement.children].map(e => e.id);
@@ -136,6 +149,16 @@ const URL = process.argv[2] || 'http://localhost:8765/';
       label: u.getAttribute('aria-label') + '/' + r.getAttribute('aria-label'), title: u.title + '/' + r.title }; });
   ok(slot.bar && slot.left && slot.label === 'Отменить/Повторить' && slot.title === 'Отменить/Повторить', 'phone ↩/↪ sit left of 🗑 ' + JSON.stringify(slot));
   ok(await ph.evaluate(() => !!document.querySelector('#mDel')), 'bottom bar still has delete');
+  ok(await ph.evaluate(() => !document.querySelector('#pmFont') && document.querySelector('#undo').parentElement.tagName !== 'HEADER'), 'phone ⋯ menu has no code-font item and undo is not in the header');
+  const chrome0 = await ph.evaluate(() => { const vis = el => !!el && getComputedStyle(el).display !== 'none' && el.getBoundingClientRect().height > 0; return { wire: vis(document.querySelector('#mWire')), del: vis(document.querySelector('#mDel')) }; });
+  ok(chrome0.wire && chrome0.del, 'Провод and 🗑 start visible');
+  await ph.evaluate(() => __sim.setUi({ showWireBtn: false, showDelBtn: false, codeFont: 16 }));
+  const chrome1 = await ph.evaluate(() => { const vis = el => !!el && getComputedStyle(el).display !== 'none' && el.getBoundingClientRect().height > 0;
+    return { wire: vis(document.querySelector('#mWire')), del: vis(document.querySelector('#mDel')), fs: getComputedStyle(document.body).getPropertyValue('--codefs').trim(),
+      wireSw: document.querySelector('#setWire').getAttribute('aria-checked'), delSw: document.querySelector('#setDel').getAttribute('aria-checked') }; });
+  ok(!chrome1.wire && !chrome1.del && chrome1.fs === '16px' && chrome1.wireSw === 'false' && chrome1.delSw === 'false', 'settings hide Провод and 🗑 and set code font 16 ' + JSON.stringify(chrome1));
+  await ph.evaluate(() => __sim.setUi({ showWireBtn: true, showDelBtn: true }));
+  ok(await ph.evaluate(() => getComputedStyle(document.querySelector('#mWire')).display !== 'none' && getComputedStyle(document.querySelector('#mDel')).display !== 'none'), 'turning the toggles back on shows Провод and 🗑');
 
   assert.deepEqual(errs, [], errs.join('\n'));
   await b.close(); console.log('settings e2e ok');

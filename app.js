@@ -597,6 +597,15 @@
   /* «Настройки симулятора»: hold menu (default off), U/I/P cards on the selected part (default on), label font. */
   function loadUi() {
     let raw = null; try { raw = JSON.parse(localStorage.getItem(UI_KEY)); } catch (e) { raw = null; }
+    /* One-time: the old ⋯ item stored pmFont as "14" or "16". Fold it into codeFont, then drop the key. */
+    let legacy = null; try { legacy = localStorage.getItem('pmFont'); } catch (e) { legacy = null; }
+    if (legacy != null) {
+      const n = legacy === '14' || legacy === '16' ? +legacy : 0;
+      const box = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : null;
+      const has = box && (box.codeFont === 14 || box.codeFont === 16);
+      if (n && !has) raw = box ? { ...box, codeFont: n } : { codeFont: n };
+      try { localStorage.removeItem('pmFont'); } catch (e) {}
+    }
     const clean = window.sanitizeUiSettings(raw);
     try { const next = JSON.stringify(clean); if (localStorage.getItem(UI_KEY) !== next) localStorage.setItem(UI_KEY, next); } catch (e) {}
     return clean;
@@ -606,18 +615,29 @@
     ui = window.sanitizeUiSettings({
       holdMenu: src.holdMenu !== undefined ? src.holdMenu : ui.holdMenu,
       canvasProps: src.canvasProps !== undefined ? src.canvasProps : ui.canvasProps,
-      labelFont: src.labelFont !== undefined ? src.labelFont : ui.labelFont
+      labelFont: src.labelFont !== undefined ? src.labelFont : ui.labelFont,
+      showWireBtn: src.showWireBtn !== undefined ? src.showWireBtn : ui.showWireBtn,
+      showDelBtn: src.showDelBtn !== undefined ? src.showDelBtn : ui.showDelBtn,
+      codeFont: src.codeFont !== undefined ? src.codeFont : ui.codeFont
     });
     try { localStorage.setItem(UI_KEY, JSON.stringify(ui)); } catch (e) {}
     applyUi();
   }
   function applyUi() {
     svg.dataset.lfs = ui.labelFont;
-    const hold = $('#setHold'), canv = $('#setCanvas');
+    document.body.classList.toggle('hide-wire', !ui.showWireBtn);
+    document.body.classList.toggle('hide-del', !ui.showDelBtn);
+    document.body.style.setProperty('--codefs', ui.codeFont + 'px');
+    if (!ui.showWireBtn && wireMode) { wireMode = false; const wb = $('#mWire'); if (wb) { wb.classList.remove('on'); wb.setAttribute('aria-pressed', 'false'); } cancelArm(); }
+    const hold = $('#setHold'), canv = $('#setCanvas'), wire = $('#setWire'), delb = $('#setDel');
     if (hold) hold.setAttribute('aria-checked', ui.holdMenu ? 'true' : 'false');
     if (canv) canv.setAttribute('aria-checked', ui.canvasProps ? 'true' : 'false');
+    if (wire) wire.setAttribute('aria-checked', ui.showWireBtn ? 'true' : 'false');
+    if (delb) delb.setAttribute('aria-checked', ui.showDelBtn ? 'true' : 'false');
     const g = $('#setFont');
     if (g) for (const b of g.querySelectorAll('button')) { const on = b.dataset.font === ui.labelFont; b.classList.toggle('on', on); b.setAttribute('aria-pressed', on ? 'true' : 'false'); }
+    const cg = $('#setCodeFont');
+    if (cg) for (const b of cg.querySelectorAll('button')) { const on = +b.dataset.size === ui.codeFont; b.classList.toggle('on', on); b.setAttribute('aria-pressed', on ? 'true' : 'false'); }
     syncCanvasCards();
   }
   function openSettings() { applyUi(); const m = $('#simSettings'); if (m) m.hidden = false; }
@@ -650,8 +670,11 @@
   $('#simSettings').addEventListener('click', e => { if (e.target.id === 'simSettings') closeSettings(); });
   $('#setHold').onclick = () => setUi({ holdMenu: !ui.holdMenu });
   $('#setCanvas').onclick = () => setUi({ canvasProps: !ui.canvasProps });
+  $('#setWire').onclick = () => setUi({ showWireBtn: !ui.showWireBtn });
+  $('#setDel').onclick = () => setUi({ showDelBtn: !ui.showDelBtn });
   $('#setFont').addEventListener('click', e => { const b = e.target.closest('button[data-font]'); if (b) setUi({ labelFont: b.dataset.font }); });
-  for (const row of document.querySelectorAll('#simSettings .srow')) row.addEventListener('click', e => { if (e.target.closest('.setsw, #setFont')) return; const sw = row.querySelector('.setsw'); if (sw) sw.click(); });
+  $('#setCodeFont').addEventListener('click', e => { const b = e.target.closest('button[data-size]'); if (b) setUi({ codeFont: +b.dataset.size }); });
+  for (const row of document.querySelectorAll('#simSettings .srow')) row.addEventListener('click', e => { if (e.target.closest('.setsw, #setFont, #setCodeFont')) return; const sw = row.querySelector('.setsw'); if (sw) sw.click(); });
   document.addEventListener('keydown', e => { if (e.key === 'Escape') { $('#hdmiFull').hidden = true; $('#newModal').hidden = true; closeSettings(); } });
   /* desktop: code editor docks into the bottom panel, Serial on the right */
   const desktop = () => window.matchMedia('(min-width: 900px)').matches;

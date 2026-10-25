@@ -91,17 +91,24 @@
                  Wire menus and a mouse right-click on a part are not gated by this flag.
      canvasProps strict boolean, default true. U/I/P cards drawn on the selected part.
      labelFont   'small' | 'normal' | 'large', default 'normal'. Schematic label size.
-     Non-booleans ("true", 1, null) and any other font string are dropped back to the default. */
+     showWireBtn strict boolean, default true. Phone/narrow bar button «Провод» (#mWire).
+     showDelBtn  strict boolean, default true. Phone bar button 🗑 (#mDel).
+     codeFont    number 14 or 16 only, default 14. Code editor size (was the ⋯ menu's pmFont).
+     Non-booleans ("true", 1, null), any other font string, and codeFont as a string are dropped. */
   const UI_FONTS = ['small', 'normal', 'large'];
+  const UI_CODE_FONTS = [14, 16];
   const UI_KEY = 'circuitsim.ui';
   function sanitizeUiSettings(raw) {
-    const out = { holdMenu: false, canvasProps: true, labelFont: 'normal' };
+    const out = { holdMenu: false, canvasProps: true, labelFont: 'normal', showWireBtn: true, showDelBtn: true, codeFont: 14 };
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return out;
     if (raw.holdMenu === true || raw.holdMenu === false) out.holdMenu = raw.holdMenu;
     if (raw.canvasProps === true || raw.canvasProps === false) out.canvasProps = raw.canvasProps;
     if (typeof raw.labelFont === 'string' && UI_FONTS.includes(raw.labelFont)) out.labelFont = raw.labelFont;
+    if (raw.showWireBtn === true || raw.showWireBtn === false) out.showWireBtn = raw.showWireBtn;
+    if (raw.showDelBtn === true || raw.showDelBtn === false) out.showDelBtn = raw.showDelBtn;
+    if (raw.codeFont === 14 || raw.codeFont === 16) out.codeFont = raw.codeFont;
     return out;
   }
   window.sanitizeProject = sanitizeProject; window.parseProjectText = parseProjectText; window.SANITIZE_LIMITS = LIMITS; window.ROBOT_LIMITS = RL; window.PROJECT_KINDS = KINDS; window.esc = esc; window.ID_RE = ID; window.WIRE_COLORS = WIRE_COLORS;
-  window.sanitizeUiSettings = sanitizeUiSettings; window.UI_SETTINGS_KEY = UI_KEY; window.UI_FONTS = UI_FONTS;
+  window.sanitizeUiSettings = sanitizeUiSettings; window.UI_SETTINGS_KEY = UI_KEY; window.UI_FONTS = UI_FONTS; window.UI_CODE_FONTS = UI_CODE_FONTS;
 })();
