@@ -52,6 +52,10 @@ const SHOT = process.argv[3] || '/tmp';
   ok(placed.lux > 100, 'flashlight raises LDR lux (' + placed.lux + ')');
   ok(placed.temp > 24, 'heat raises DHT temp (' + placed.temp + ')');
   ok(placed.mm === 300, 'VL53 millimeters left alone');
+  const blockAt = await pg.evaluate(() => World3D.screenPos('stimulus', __sim.proj.world3d.stimuli.find(s => s.type === 'block').id));
+  await pg.mouse.click(blockAt.x, blockAt.y);
+  await pg.waitForTimeout(120);
+  await pg.screenshot({ path: SHOT + '/world3d.png' });
 
   async function dragStim(type, dx, dy) {
     const info = await pg.evaluate(t => {
@@ -97,7 +101,6 @@ const SHOT = process.argv[3] || '/tmp';
   await pg.click('#w3tab'); await pg.waitForTimeout(300);
   await pg.click('#w3reset');
   ok(await pg.evaluate(() => __sim.proj.world3d.stimuli.length === 0 && __sim.proj.world3d.sensors.length === 4), 'reset clears stimuli only');
-  await pg.screenshot({ path: SHOT + '/world3d.png' });
 
   await pg.click('#w3tab'); await pg.waitForTimeout(200);
   const back = await pg.evaluate(() => {

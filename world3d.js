@@ -272,7 +272,9 @@
       renderer.setClearColor(0xd4d6db, 1);
       scene = new THREE.Scene();
       camera = new THREE.PerspectiveCamera(48, 1, 0.5, 2000);
-      camera.position.set(120, 100, 150);
+      // Sensors face −Z, stimuli sit in front of them. Look from that side
+      // so a click on a stimulus is not swallowed by the sensor behind it.
+      camera.position.set(95, 118, -175);
       scene.add(new THREE.AmbientLight(0xffffff, 0.72));
       const sun = new THREE.DirectionalLight(0xfff7ee, 0.85); sun.position.set(60, 140, 80); scene.add(sun);
       const floor = new THREE.Mesh(new THREE.PlaneGeometry(520, 520), new THREE.MeshStandardMaterial({ color: 0xc8c6c2, roughness: 0.95 }));
@@ -376,10 +378,10 @@
         break;
       }
       case 'flashlight': {
-        const body = mesh(new THREE.CylinderGeometry(2.2, 2.6, 14, 12), 0xf0c14a); body.rotation.x = Math.PI / 2; g.add(body);
-        const head = mesh(new THREE.CylinderGeometry(4.2, 2.6, 5, 14), 0xfff4c2); head.rotation.x = Math.PI / 2; head.position.z = 9; g.add(head);
-        const lens = mesh(new THREE.CircleGeometry(3.4, 16), 0xfffef6, { emissive: 0xfff2a8, emissiveIntensity: 0.7 });
-        lens.position.z = 11.6; g.add(lens);
+        const body = mesh(new THREE.CylinderGeometry(3.2, 3.6, 16, 12), 0xf0c14a); body.rotation.x = Math.PI / 2; g.add(body);
+        const head = mesh(new THREE.CylinderGeometry(5.4, 3.4, 6, 14), 0xfff4c2); head.rotation.x = Math.PI / 2; head.position.z = 10; g.add(head);
+        const lens = mesh(new THREE.CircleGeometry(4.2, 16), 0xfffef6, { emissive: 0xfff2a8, emissiveIntensity: 0.7 });
+        lens.position.z = 13.1; g.add(lens);
         aimNegZ(g, [-FLASH_DIR[0], -FLASH_DIR[1], -FLASH_DIR[2]]);
         break;
       }
@@ -450,7 +452,7 @@
     const THREE = window.THREE;
     const geo = new THREE.ConeGeometry(Math.max(0.2, Math.tan(ang) * len), len, 28, 1, true);
     geo.translate(0, -len / 2, 0); geo.rotateX(Math.PI / 2);
-    return new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.22, depthWrite: false, side: THREE.DoubleSide }));
+    return new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.32, depthWrite: false, side: THREE.DoubleSide }));
   }
   function updateZones() {
     if (!zoneRoot) return;
@@ -482,7 +484,7 @@
     }
   }
   function zoneSphere(o, r, color) {
-    const m = new window.THREE.Mesh(new window.THREE.SphereGeometry(r, 20, 14), new window.THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.16, depthWrite: false }));
+    const m = new window.THREE.Mesh(new window.THREE.SphereGeometry(r, 20, 14), new window.THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.22, depthWrite: false }));
     m.position.set(o.x, o.y, o.z); return m;
   }
   function updateSel() {
