@@ -247,10 +247,11 @@
   function pinchStart() { const [a, b] = [...pointers.values()]; drag = { pinch: true, d0: Math.hypot(a.x - b.x, a.y - b.y), s0: cam.s, c0: [(a.x + b.x) / 2, (a.y + b.y) / 2], cam0: { ...cam } }; }
   function zoomAt(cx, cy, s) { const r = svg.getBoundingClientRect(), mx = cx - r.left, my = cy - r.top; s = Math.min(4, Math.max(0.25, s));
     cam.x = mx - (mx - cam.x) * s / cam.s; cam.y = my - (my - cam.y) * s / cam.s; cam.s = s; }
-  let lastPtr = 'mouse', touchAt = 0;
+  /* Set when a touch/pen long-press timer fires, so the contextmenu that hold also
+     synthesizes stays gated for a moment. A later mouse right-click is not part of that hold. */
+  let holdArmUntil = 0;
   svg.addEventListener('pointerdown', e => {
-    lastPtr = e.pointerType || 'mouse';
-    if (lastPtr === 'touch' || lastPtr === 'pen' || (e.sourceCapabilities && e.sourceCapabilities.firesTouchEvents)) touchAt = performance.now(); else touchAt = 0;
+    if (e.pointerType === 'mouse') holdArmUntil = 0;
     { const t = performance.now(), L = lastDown; lastDown = { t, x: e.clientX, y: e.clientY }; if (L && t - L.t < 400 && Math.hypot(e.clientX - L.x, e.clientY - L.y) < 6 && pointers.size === 0) { lastDown = null; onDbl(e); return; } }
     if (e.isPrimary) pointers.clear(); pointers.set(e.pointerId, { x: e.clientX, y: e.clientY }); try { svg.setPointerCapture(e.pointerId); } catch (_) {}
     if (pointers.size === 2) { if (drag && drag.press && P[drag.press.type].interactive === 'momentary') drag.press.on = false; pinchStart(); return; }
@@ -329,7 +330,7 @@
     if (d < bd) { bd = d; best = el; } } return best ? { pinEl: best, partEl: best.closest('.part') } : null; }
   function pinUnder(cx, cy) { const tg = document.elementFromPoint(cx, cy); let pe = tg && tg.closest && tg.closest('.pin'); if (!pe) { const n = nearestPin(cx, cy, 22); pe = n && n.pinEl; }
     return pe ? { part: pe.closest('.part').dataset.part, pin: pe.dataset.pin } : null; }
-  function startLong(e) { cancelLong(); if (e.pointerType === 'mouse' || locked()) return; const x = e.clientX, y = e.clientY, t0 = e.target; lp = { x, y, t: setTimeout(() => { lp = null; if (pointers.size > 1) return;
+  function startLong(e) { cancelLong(); if (e.pointerType === 'mouse' || locked()) return; const x = e.clientX, y = e.clientY, t0 = e.target; lp = { x, y, t: setTimeout(() => { lp = null; holdArmUntil = performance.now() + 300; if (pointers.size > 1) return;
     if (drag && drag.part && drag.moved) return; drag = null; openMenu(x, y, t0, 'hold'); }, 500) }; }
   function cancelLong() { if (lp) { clearTimeout(lp.t); lp = null; } }
   function cancelArm() { armed = null; temp.setAttribute('d', ''); render(); }
@@ -351,9 +352,9 @@
     if (we) { const w = proj.wires.find(x => x.id === we.dataset.wire); if (!w) return; sel = { wire: w.id }; const [wx, wy] = toWorld(cx, cy);
       items.push(['🗑 Удалить провод', del, 'danger'], ['↯ Добавить изгиб', () => addBend(w, wx, wy)]); }
     else if (pe && part(pe.dataset.part)) {
-      /* holdMenu gates the component menu for a finger/pen hold and for the contextmenu
-         that same hold also fires (passed in as how 'hold'). A mouse right-click stays.
-         Wire menus are not gated. Delete / rotate / duplicate remain in Свойства and the bottom bar. */
+      /* holdMenu gates a finger/pen hold (how 'hold'), including the contextmenu that hold
+         just fired. A mouse right-click (how 'context') always opens. Wire menus are not gated.
+         Delete / rotate / duplicate remain in Свойства and the bottom bar. */
       if (how === 'hold' && !ui.holdMenu) return;
       sel = { part: pe.dataset.part }; items.push(['🗑 Удалить', del, 'danger'], ['⟳ Повернуть', rotate], ['⧉ Дублировать', dup]); }
     else return;
@@ -362,9 +363,12 @@
     const r = $('#center').getBoundingClientRect(); menu.hidden = false;
     menu.style.left = Math.max(4, Math.min(cx - r.left, r.width - menu.offsetWidth - 4)) + 'px'; menu.style.top = Math.max(4, Math.min(cy - r.top, r.height - menu.offsetHeight - 4)) + 'px'; }
   svg.addEventListener('contextmenu', e => { e.preventDefault(); if (!menu.hidden) return; cancelLong(); drag = null;
-    const recentTouch = touchAt > 0 && performance.now() - touchAt < 1500;
-    const fromTouch = e.pointerType === 'touch' || e.pointerType === 'pen' || lastPtr === 'touch' || lastPtr === 'pen' || !!(e.sourceCapabilities && e.sourceCapabilities.firesTouchEvents) || recentTouch;
-    openMenu(e.clientX, e.clientY, null, fromTouch ? 'hold' : 'context'); });
+    const pt = e.pointerType;
+    /* Mouse (or a right-click that is not touch/pen) is always the context menu.
+       Touch/pen, and a contextmenu in the short window after the long-press timer, are the gated hold.
+       firesTouchEvents and an older touch must not reclassify a mouse right-click. */
+    const mouse = pt === 'mouse' || (pt !== 'touch' && pt !== 'pen' && performance.now() >= holdArmUntil);
+    openMenu(e.clientX, e.clientY, null, mouse ? 'context' : 'hold'); });
   document.addEventListener('pointerdown', e => { if (!menu.hidden && !menu.contains(e.target)) closeMenu(); }, true);
   function placeFloat() { fcan.hidden = !armed; }
   /* mobile bottom bar: sheets for parts / properties / code, and wire mode */
