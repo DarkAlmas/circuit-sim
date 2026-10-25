@@ -13,11 +13,15 @@
   function clone(o) { return JSON.parse(JSON.stringify(o)); }
   function syncHist() { const u = $('#undo'), r = $('#redo'); if (u) u.disabled = !hist.length; if (r) r.disabled = !redoSt.length; }
   function autosave() { const j = JSON.stringify(strip(proj)); if (lastJ !== null && j !== lastJ) { hist.push(lastJ); if (hist.length > 100) hist.shift(); redoSt.length = 0; } lastJ = j; localStorage.setItem(AUTO, j); syncHist(); }
-  function applySnap(j) { lastJ = j; proj = sanitizeProject(JSON.parse(j)); proj.code = proj.code || $('#code').value; sel = null; prevV = null; localStorage.setItem(AUTO, j); render(); props(); calc(); syncHist(); }
+  function applySnap(j) { lastJ = j; proj = sanitizeProject(JSON.parse(j)); proj.code = proj.code || $('#code').value; sel = null; prevV = null; localStorage.setItem(AUTO, j); render(); props(); calc(); syncHist(); if (window.World3D) World3D.onOpen(); }
   function undo() { if (!hist.length) return; const cur = lastJ != null ? lastJ : JSON.stringify(strip(proj)); redoSt.push(cur); if (redoSt.length > 100) redoSt.shift(); applySnap(hist.pop()); }
   function redo() { if (!redoSt.length) return; const cur = lastJ != null ? lastJ : JSON.stringify(strip(proj)); hist.push(cur); if (hist.length > 100) hist.shift(); applySnap(redoSt.pop()); }
   const locked = () => running && !shorts.length;
-  function strip(p) { return { parts: p.parts.map(({ id, type, x, y, rot, props }) => ({ id, type, x, y, rot, props })), wires: p.wires.map(({ id, a, b, pts, color }) => { const w = { id, a, b, pts }; if (color) w.color = color; return w; }), code: p.code, codes: p.codes, name: p.name, kind: p.kind, robot: p.robot }; }
+  function strip(p) {
+    const o = { parts: p.parts.map(({ id, type, x, y, rot, props }) => ({ id, type, x, y, rot, props })), wires: p.wires.map(({ id, a, b, pts, color }) => { const w = { id, a, b, pts }; if (color) w.color = color; return w; }), code: p.code, codes: p.codes, name: p.name, kind: p.kind, robot: p.robot };
+    if (p.world3d) o.world3d = p.world3d;
+    return o;
+  }
   const uid = pre => { let i = 1; const ids = new Set([...proj.parts, ...proj.wires].map(o => o.id)); while (ids.has(pre + i)) i++; return pre + i; };
   const part = id => proj.parts.find(p => p.id === id);
   const rotPt = (x, y, r) => { for (let i = 0; i < (r || 0) % 4; i++) [x, y] = [-y, x]; return [x, y]; };
@@ -390,6 +394,11 @@
     const mod = e.ctrlKey || e.metaKey, zKey = e.code === 'KeyZ' || e.key === 'z' || e.key === 'Z' || e.key === 'я' || e.key === 'Я', yKey = e.code === 'KeyY' || e.key === 'y' || e.key === 'Y' || e.key === 'н' || e.key === 'Н';
     if (mod && zKey) { e.preventDefault(); if (!locked()) { if (e.shiftKey) redo(); else undo(); } return; }
     if (mod && yKey) { e.preventDefault(); if (!locked()) redo(); return; }
+    if (window.World3D && window.World3D.active) {
+      if (e.key === 'r' || e.key === 'R' || e.key === 'к' || e.key === 'К') { window.World3D.yawSelected(e.shiftKey ? -1 : 1); return; }
+      if (e.key === 'Delete' || e.key === 'Backspace') { window.World3D.removeSelected(); return; }
+      if (e.key === 'Escape') window.World3D.show(false);
+    }
     if (e.key === 'r' || e.key === 'R' || e.key === 'к' || e.key === 'К') rotate(); else if (e.key === 'Delete' || e.key === 'Backspace') del(); else if (e.key === 'Escape') { closeMenu(); cancelArm(); } });
   $('#undo').onclick = () => { if (!locked()) undo(); };
   $('#redo').onclick = () => { if (!locked()) redo(); };
@@ -397,6 +406,8 @@
   /* ---------- simulation ---------- */
   function tick() {
     const mcus = proj.parts.filter(p => P[p.type].mcu), gpioBy = {}; for (const id in extra) gpioBy[id] = extra[id].gpio; if (mcus[0]) gpioBy[mcus[0].id] = gpio;
+    // v14.5: 3D world writes approximate sensor props; the robot track (next line) still owns distance while it is driving.
+    if (window.World3D) World3D.applyReadings(proj);
     // v9: move the robot car first (motor rpm from the previous frame), so this frame's stamp already sees the new sensor readings
     if (window.RobotUI) RobotUI.onTick(proj, Math.min(0.05, Math.max(1e-4, lastT ? (performance.now() - lastT) / 1000 : 1 / 60)));
     const b = Netlist.build(proj, gpio, { gpioBy, vio: mcus[0] ? P[mcus[0].type].vio : 3.3 });
@@ -494,7 +505,7 @@
   /* sketch worker lifecycle: a crashed/hung worker (exception, OOM, infinite loop) is torn down, a fresh idle
    * worker is created right away, the console explains what happened, and the next Run uses the fresh worker. */
   let spare = null, crashes = 0;
-  const newWorker = () => new Worker('worker.js?v=14.4.1');
+  const newWorker = () => new Worker('worker.js?v=14.5');
   function takeWorker() { const w = spare || newWorker(); spare = null; return w; }
   function crash(msg) { if (!worker) return; worker.onmessage = worker.onerror = null; try { worker.terminate(); } catch (e) {} worker = null; gpio = {}; prevV = null; crashes++;
     try { spare = newWorker(); } catch (e) { spare = null; }
@@ -580,7 +591,7 @@
     const g1 = document.createElement('optgroup'); g1.label = 'Примеры'; Object.keys(window.EXAMPLES).forEach(n => g1.appendChild(opt('ex:' + n, n))); sel_.appendChild(g1);
     const g2 = document.createElement('optgroup'); g2.label = 'Сохранённые'; Object.keys(saved()).forEach(n => g2.appendChild(opt('my:' + n, n.slice(0, 64), n === selName))); sel_.appendChild(g2);
   }
-  function open(data) { stop(); codeTarget = null; codeForSig = ''; proj = sanitizeProject(data); proj.code = proj.code ?? DEFAULT_CODE; $('#code').value = proj.code; sel = null; fit(); changed(); if (window.RobotUI) RobotUI.onOpen(); }
+  function open(data) { stop(); codeTarget = null; codeForSig = ''; proj = sanitizeProject(data); proj.code = proj.code ?? DEFAULT_CODE; $('#code').value = proj.code; sel = null; fit(); changed(); if (window.RobotUI) RobotUI.onOpen(); if (window.World3D) World3D.onOpen(); }
   $('#projects').onchange = e => { const v = e.target.value; if (!v) return; open(v.startsWith('ex:') ? window.EXAMPLES[v.slice(3)] : (Object.prototype.hasOwnProperty.call(saved(), v.slice(3)) ? saved()[v.slice(3)] : {})); };
   $('#save').onclick = () => { let n = prompt('Название проекта:', proj.name || 'Мой проект'); if (!n) return; n = String(n).slice(0, 64); proj.name = n; proj.code = $('#code').value;
     const s = saved(); s[n] = { ...strip(proj), name: n }; localStorage.setItem(LS, JSON.stringify(s)); projList(n); $('#status').textContent = 'Сохранено: ' + n; };

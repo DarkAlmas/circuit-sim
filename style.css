@@ -244,3 +244,36 @@ body.pm #mbar #undo,body.pm #mbar #redo{flex:0 0 44px;padding:0;font-size:20px}
 #svg[data-lfs="large"] .blbl{font-size:11px}
 #svg[data-lfs="large"] .bbl{font-size:8px}
 #svg[data-lfs="large"] .capv{font-size:14px}
+/* v14.5: 3D sensor world. Sits over the schematic; robot tabs stay clickable above it. */
+#rtabs{z-index:28}
+#w3tab{position:absolute;top:6px;z-index:28;min-height:34px;padding:4px 14px;border-radius:8px;border:1px solid #39435a;background:#1a2030}
+body.carproj #w3tab{left:calc(50% + 158px)}
+body:not(.carproj) #w3tab{left:50%;transform:translateX(-50%)}
+#w3tab.on{background:#3fb37f;color:#08140e;border-color:#3fb37f}
+body.pm #w3tab{display:none!important}
+#w3pane{position:absolute;inset:0;z-index:24;display:flex;background:#d5d7dc}
+#w3pane[hidden]{display:none!important}
+#w3pal{width:168px;flex:0 0 168px;background:#161b27;color:#d8dee9;overflow:auto;padding:8px 8px 12px;display:flex;flex-direction:column;gap:4px}
+#w3pal .w3sec{font-size:11px;color:#8a94a8;margin:8px 0 2px;letter-spacing:.04em}
+#w3pal button{text-align:left;border-left-width:4px}
+#w3pal .w3k-ultrasonic{border-left-color:#4c7dff}
+#w3pal .w3k-ldr{border-left-color:#e0b15a}
+#w3pal .w3k-dht{border-left-color:#d8dee9}
+#w3pal .w3k-pir{border-left-color:#c9b6ff}
+#w3pal .w3k-block{border-left-color:#9aa3b2}
+#w3pal .w3k-flashlight{border-left-color:#f5d76e}
+#w3pal .w3k-heat{border-left-color:#e85d04}
+#w3pal .w3k-humid{border-left-color:#7ec8e3}
+#w3pal .w3k-mover{border-left-color:#3d5a80}
+#w3pal .w3act{border-left-color:#3fb37f;margin-top:4px}
+#w3stage{position:relative;flex:1;min-width:0}
+#w3cv{width:100%;height:100%;display:block;touch-action:none}
+#w3tags{position:absolute;inset:0;pointer-events:none;overflow:hidden}
+.w3tag{position:absolute;transform:translate(-50%,-130%);background:rgba(20,26,36,.92);color:#e8eef8;border:1px solid #39435a;border-radius:8px;padding:3px 8px;font:12px/1.35 ui-monospace,monospace;white-space:nowrap}
+.w3tag.on{border-color:#ffd34d}
+.w3hint{color:#8a94a8;font-size:12px;margin:6px 0 0}
+#w3fail{position:absolute;left:12px;right:12px;top:52px;background:#1a2030;color:#e8eef8;padding:10px 12px;border-radius:8px;z-index:2}
+@media (max-width:899px){#w3tab{min-height:44px}#w3pal button{min-height:44px}}
+body.pm #w3pal{width:112px;flex-basis:112px;padding:6px}
+body.pm #w3pal button{min-height:44px;font-size:13px;padding:4px 6px}
+body.pm .w3hint{display:none}
