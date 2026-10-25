@@ -1,4 +1,4 @@
-// Settings UI: hold menu defaults off, three controls, prefs persist, junk localStorage is dropped. ?v=14.4.
+// Settings UI: hold menu defaults off, three controls, prefs persist, junk localStorage is dropped. ?v=14.4.1.
 const { chromium } = require('playwright-core'); const assert = require('assert');
 const URL = process.argv[2] || 'http://localhost:8765/';
 (async () => {
@@ -10,11 +10,20 @@ const URL = process.argv[2] || 'http://localhost:8765/';
   await pg.goto(URL); await pg.evaluate(() => localStorage.clear()); await pg.reload(); await pg.waitForTimeout(300);
   const ok = (c, m) => { assert.ok(c, m); console.log('✓', m); };
 
-  ok(await pg.evaluate(() => [...document.scripts].every(s => !s.src || /\?v=14\.4$/.test(s.src)) && /style\.css\?v=14\.4/.test(document.querySelector('link[rel=stylesheet]').href)), 'cache stays ?v=14.4');
+  ok(await pg.evaluate(() => [...document.scripts].every(s => !s.src || /\?v=14\.4\.1$/.test(s.src)) && /style\.css\?v=14\.4\.1$/.test(document.querySelector('link[rel=stylesheet]').href)), 'cache stays ?v=14.4.1');
   const csp = await pg.evaluate(() => document.querySelector('meta[http-equiv="Content-Security-Policy"]').content);
   ok(csp.startsWith("default-src 'self'") && csp.includes("script-src 'self'") && !/unsafe-inline/.test(csp), 'CSP unchanged');
   const UI_KEYS = 'canvasProps,codeFont,holdMenu,labelFont,showDelBtn,showWireBtn';
   ok(await pg.evaluate(() => __sim.ui.holdMenu === false && __sim.ui.canvasProps === true && __sim.ui.labelFont === 'normal' && __sim.ui.showWireBtn === true && __sim.ui.showDelBtn === true && __sim.ui.codeFont === 14), 'defaults: hold off, canvas props on, wire and delete on, code font 14');
+  const codeFs = () => pg.evaluate(() => ({ pm: document.body.classList.contains('pm'), fs: getComputedStyle(document.querySelector('#code')).fontSize, ui: __sim.ui.codeFont }));
+  let cfs = await codeFs();
+  ok(!cfs.pm && cfs.ui === 14 && cfs.fs === '14px', 'desktop #code computed size is 14px');
+  await pg.evaluate(() => __sim.setUi({ codeFont: 16 }));
+  cfs = await codeFs();
+  ok(!cfs.pm && cfs.ui === 16 && cfs.fs === '16px', 'desktop #code is 16px after setUi({codeFont:16})');
+  await pg.evaluate(() => __sim.setUi({ codeFont: 14 }));
+  cfs = await codeFs();
+  ok(!cfs.pm && cfs.fs === '14px' && cfs.ui === 14, 'desktop #code returns to 14px');
 
   await pg.click('#simMore');
   const dlg = await pg.evaluate(() => {
@@ -77,6 +86,54 @@ const URL = process.argv[2] || 'http://localhost:8765/';
   const rc = await pg.evaluate(() => { const m = document.querySelector('#ctxmenu'); return m && !m.hidden ? [...m.children].map(b => b.textContent) : []; });
   ok(rc.some(t => /Повернуть/.test(t)) && rc.some(t => /Дублировать/.test(t)), 'right-click part menu stays when hold is off');
   await pg.keyboard.press('Escape');
+  await pg.waitForTimeout(450);
+  const partMenu = items => items.some(t => /Удалить/.test(t)) && items.some(t => /Повернуть/.test(t)) && items.some(t => /Дублировать/.test(t));
+  const atPart = (x, y, fire) => pg.evaluate(({ x, y, fire }) => {
+    const svg = document.querySelector('#svg'), m = document.querySelector('#ctxmenu');
+    m.hidden = true; m.textContent = '';
+    const base = { bubbles: true, cancelable: true, clientX: x, clientY: y, isPrimary: true };
+    if (fire === 'touch-then-mouse' || fire === 'touch-then-button') {
+      svg.dispatchEvent(new PointerEvent('pointerdown', { ...base, pointerId: 9, pointerType: 'touch' }));
+      svg.dispatchEvent(new PointerEvent('pointerup', { ...base, pointerId: 9, pointerType: 'touch' }));
+    }
+    let ev;
+    if (fire === 'touch-then-mouse') {
+      ev = new PointerEvent('contextmenu', { ...base, button: 2, pointerId: 3, pointerType: 'mouse' });
+      Object.defineProperty(ev, 'sourceCapabilities', { value: { firesTouchEvents: true } });
+    } else if (fire === 'touch-then-button') ev = new MouseEvent('contextmenu', { ...base, button: 2 });
+    else ev = new PointerEvent('contextmenu', { ...base, button: 2, pointerId: 4, pointerType: fire });
+    svg.dispatchEvent(ev);
+    return { pm: document.body.classList.contains('pm'), hold: __sim.ui.holdMenu, items: m.hidden ? [] : [...m.children].map(b => b.textContent) };
+  }, { x, y, fire });
+  const mouseAfter = await atPart(part.x, part.y, 'touch-then-mouse');
+  ok(!mouseAfter.pm && mouseAfter.hold === false && partMenu(mouseAfter.items), 'hold off: mouse contextmenu opens the part menu after a touch ' + JSON.stringify(mouseAfter));
+  const bareRight = await atPart(part.x, part.y, 'touch-then-button');
+  ok(partMenu(bareRight.items), 'hold off: right-button contextmenu without pointerType still opens after a touch ' + JSON.stringify(bareRight));
+  const touchCtx = await atPart(part.x, part.y, 'touch');
+  ok(!partMenu(touchCtx.items) && !touchCtx.items.some(t => /Повернуть/.test(t)), 'hold off: touch contextmenu does not open the part menu ' + JSON.stringify(touchCtx));
+  const penCtx = await atPart(part.x, part.y, 'pen');
+  ok(!penCtx.items.some(t => /Повернуть/.test(t)), 'hold off: pen contextmenu does not open the part menu ' + JSON.stringify(penCtx));
+  await pg.waitForTimeout(450);
+  await pg.evaluate(p => { const el = document.elementFromPoint(p.x, p.y); el.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true, clientX: p.x, clientY: p.y, pointerId: 11, pointerType: 'touch', isPrimary: true })); }, part);
+  await pg.waitForTimeout(560);
+  const held = await pg.evaluate(() => { const m = document.querySelector('#ctxmenu'); return m.hidden ? [] : [...m.children].map(b => b.textContent); });
+  ok(!partMenu(held), 'hold off: long-press does not open the part menu ' + JSON.stringify(held));
+  const synth = await pg.evaluate(p => {
+    const svg = document.querySelector('#svg'), m = document.querySelector('#ctxmenu');
+    svg.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: p.x, clientY: p.y, button: 2 }));
+    return m.hidden ? [] : [...m.children].map(b => b.textContent);
+  }, part);
+  ok(!partMenu(synth), 'hold off: synthetic contextmenu just after long-press stays gated ' + JSON.stringify(synth));
+  await pg.evaluate(p => document.querySelector('#svg').dispatchEvent(new PointerEvent('pointerup', { bubbles: true, cancelable: true, clientX: p.x, clientY: p.y, pointerId: 11, pointerType: 'touch', isPrimary: true })), part);
+  await pg.waitForTimeout(350);
+  const after = await pg.evaluate(p => {
+    const svg = document.querySelector('#svg'), m = document.querySelector('#ctxmenu');
+    m.hidden = true; m.textContent = '';
+    svg.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: p.x, clientY: p.y, button: 2 }));
+    return m.hidden ? [] : [...m.children].map(b => b.textContent);
+  }, part);
+  ok(partMenu(after), 'right-button contextmenu opens again once the long-press window has passed ' + JSON.stringify(after));
+  await pg.keyboard.press('Escape');
 
   const hist0 = await pg.evaluate(() => { const u = document.querySelector('#undo'), r = document.querySelector('#redo');
     return { u: u.disabled, r: r.disabled, place: u.parentElement.tagName === 'HEADER' && u.previousElementSibling.id === 'status' && r.nextElementSibling.id === 'simMore',
@@ -102,6 +159,7 @@ const URL = process.argv[2] || 'http://localhost:8765/';
   const mc = await b.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, deviceScaleFactor: 2 });
   const ph = await mc.newPage(); ph.on('pageerror', e => errs.push(e.message));
   await ph.goto(URL); await ph.evaluate(() => localStorage.clear()); await ph.reload(); await ph.waitForTimeout(400);
+  ok(await ph.evaluate(() => document.body.classList.contains('pm') && innerWidth <= 390 && getComputedStyle(document.querySelector('#code')).fontSize === '14px'), 'phone body.pm #code is 14px at ~390px');
   await ph.tap('#pmMore'); await ph.tap('#pmSettings');
   const sheet = await ph.evaluate(() => { const box = document.querySelector('#simSettings .sbox').getBoundingClientRect(); return { hidden: document.querySelector('#simSettings').hidden, bottomGap: Math.round(innerHeight - box.bottom), w: Math.round(box.width), iw: innerWidth }; });
   ok(!sheet.hidden && sheet.bottomGap <= 2 && sheet.w >= sheet.iw - 2, 'phone settings is a bottom sheet (' + JSON.stringify(sheet) + ')');
@@ -117,7 +175,7 @@ const URL = process.argv[2] || 'http://localhost:8765/';
     if (m) { m.hidden = true; m.textContent = ''; }
     const o = { bubbles: true, cancelable: true, clientX: x, clientY: y, pointerId: 4, pointerType: 'touch', isPrimary: true };
     svg.dispatchEvent(new PointerEvent('pointerdown', o));
-    svg.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: x, clientY: y, button: 2 }));
+    svg.dispatchEvent(new PointerEvent('contextmenu', { ...o, button: 2 }));
     return m && !m.hidden ? [...m.children].map(b => b.textContent) : [];
   }, { x, y });
   const partActs = items => items.some(t => /Повернуть/.test(t)) || items.some(t => /Дублировать/.test(t));
@@ -155,8 +213,9 @@ const URL = process.argv[2] || 'http://localhost:8765/';
   await ph.evaluate(() => __sim.setUi({ showWireBtn: false, showDelBtn: false, codeFont: 16 }));
   const chrome1 = await ph.evaluate(() => { const vis = el => !!el && getComputedStyle(el).display !== 'none' && el.getBoundingClientRect().height > 0;
     return { wire: vis(document.querySelector('#mWire')), del: vis(document.querySelector('#mDel')), fs: getComputedStyle(document.body).getPropertyValue('--codefs').trim(),
+      code: getComputedStyle(document.querySelector('#code')).fontSize, pm: document.body.classList.contains('pm'),
       wireSw: document.querySelector('#setWire').getAttribute('aria-checked'), delSw: document.querySelector('#setDel').getAttribute('aria-checked') }; });
-  ok(!chrome1.wire && !chrome1.del && chrome1.fs === '16px' && chrome1.wireSw === 'false' && chrome1.delSw === 'false', 'settings hide Провод and 🗑 and set code font 16 ' + JSON.stringify(chrome1));
+  ok(!chrome1.wire && !chrome1.del && chrome1.fs === '16px' && chrome1.code === '16px' && chrome1.pm && chrome1.wireSw === 'false' && chrome1.delSw === 'false', 'settings hide Провод and 🗑 and phone #code is 16px ' + JSON.stringify(chrome1));
   await ph.evaluate(() => __sim.setUi({ showWireBtn: true, showDelBtn: true }));
   ok(await ph.evaluate(() => getComputedStyle(document.querySelector('#mWire')).display !== 'none' && getComputedStyle(document.querySelector('#mDel')).display !== 'none'), 'turning the toggles back on shows Провод and 🗑');
 
