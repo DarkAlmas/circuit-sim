@@ -85,5 +85,22 @@
   }
   const WIRE_COLORS = { 'красный': '#e5484d', 'чёрный': '#1a1d24', 'синий': '#4c7dff', 'зелёный': '#3fb37f', 'жёлтый': '#f0c430', 'белый': '#f2f5f8' };
   const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  /* Simulator UI prefs, localStorage key circuitsim.ui. Known keys only — anything else is dropped:
+     holdMenu    strict boolean, default false. Component long-press menu (Удалить / Повернуть / Дублировать).
+                 Wire long-press (delete + bend) and a right-click on a part are not gated by this flag.
+     canvasProps strict boolean, default true. U/I/P cards drawn on the selected part.
+     labelFont   'small' | 'normal' | 'large', default 'normal'. Schematic label size.
+     Non-booleans ("true", 1, null) and any other font string are dropped back to the default. */
+  const UI_FONTS = ['small', 'normal', 'large'];
+  const UI_KEY = 'circuitsim.ui';
+  function sanitizeUiSettings(raw) {
+    const out = { holdMenu: false, canvasProps: true, labelFont: 'normal' };
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return out;
+    if (raw.holdMenu === true || raw.holdMenu === false) out.holdMenu = raw.holdMenu;
+    if (raw.canvasProps === true || raw.canvasProps === false) out.canvasProps = raw.canvasProps;
+    if (typeof raw.labelFont === 'string' && UI_FONTS.includes(raw.labelFont)) out.labelFont = raw.labelFont;
+    return out;
+  }
   window.sanitizeProject = sanitizeProject; window.parseProjectText = parseProjectText; window.SANITIZE_LIMITS = LIMITS; window.ROBOT_LIMITS = RL; window.PROJECT_KINDS = KINDS; window.esc = esc; window.ID_RE = ID; window.WIRE_COLORS = WIRE_COLORS;
+  window.sanitizeUiSettings = sanitizeUiSettings; window.UI_SETTINGS_KEY = UI_KEY; window.UI_FONTS = UI_FONTS;
 })();

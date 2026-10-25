@@ -51,6 +51,7 @@ const EX = 'ex:Пример: мигание светодиодом (ESP32)';
   [x, y] = await mid('w1', 0.62); await lpress(x, y);
   await pg.evaluate(() => [...document.querySelectorAll('#ctxmenu button')].find(b => /Удалить провод/.test(b.textContent)).click());
   console.log('menu delete', await wires()); assert.ok(!(await wires()).split(',').includes('w1'));
+  await pg.evaluate(() => window.__sim.setUi({ holdMenu: true })); // component hold menu is off until «Меню по удержанию»
   const r = await pg.evaluate(() => { const e = document.querySelector('.part[data-part="R1"] .hit').getBoundingClientRect(); return [e.x + e.width / 2, e.y + e.height / 2]; }); await lpress(...r);
   mi = await pg.evaluate(() => [...document.querySelector('#ctxmenu').children].map(b => b.textContent)); console.log('part menu', mi); assert.ok(mi.some(t => /Повернуть/.test(t)) && mi.some(t => /Дублировать/.test(t)));
   const np = await pg.evaluate(() => window.__sim.proj.parts.length); await pg.evaluate(() => [...document.querySelectorAll('#ctxmenu button')].find(b => /Дублировать/.test(b.textContent)).click());

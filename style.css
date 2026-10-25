@@ -194,3 +194,49 @@ body.pm button,body.pm select,body.pm input{touch-action:manipulation}
 /* v13 «Любая машинка» */.rdrives{display:flex;flex-wrap:wrap;gap:4px}.rcard{font-size:12px;padding:4px 8px;border-radius:8px}.rgrp .rcard.on{background:#2d5a8a;border-color:#4a9eff}
 .rmass{color:#ff9ad2;font-size:12px}.rtpl{display:inline-flex;flex-wrap:wrap;gap:4px;align-items:center}.rtpl input{width:110px}.rdir input[type=number]{width:64px}
 label.rdir[hidden],.rgrp button[hidden]{display:none}body.pm .rcard{min-height:44px}body.pm .rtpl input{min-height:44px;font-size:14px}
+/* v14.3 settings: ⋯ → «Настройки симулятора». Phone = bottom sheet, desktop = centered modal. */
+#simMore{margin-left:8px;min-width:36px;padding:5px 8px;font-size:20px;line-height:1}
+#simSettings .sbox{width:min(480px,94vw)}
+.srow{display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:48px;padding:8px 0;border-bottom:1px solid #2a3242}
+.srow>span{font-size:15px}
+.srow:last-of-type{border-bottom:0}
+.setsw{position:relative;width:52px;height:32px;border-radius:16px;padding:0;flex:0 0 auto;background:#252d3f}
+.setsw::after{content:"";position:absolute;top:3px;left:3px;width:24px;height:24px;border-radius:50%;background:#9aa3b5}
+.setsw[aria-checked="true"]{background:#1f6b3a;border-color:#2c8a4c}
+.setsw[aria-checked="true"]::after{left:23px;background:#fff}
+.seg{display:flex;border:1px solid #39435a;border-radius:8px;overflow:hidden}
+.seg button{border:0;border-radius:0;min-height:36px;padding:6px 10px}
+.seg button.on{background:#2d5a8a;color:#fff}
+#simSettings .muted{margin:12px 0 0}
+#canvasCards{position:absolute;display:flex;gap:4px;pointer-events:none}
+.ccard{background:#1f2636ee;border:1px solid #2a3242;border-radius:8px;padding:3px 6px;display:flex;gap:4px;align-items:baseline}
+.ccard span{color:#8a94a8;font-size:11px;font-weight:700}
+.ccard b{font:700 13px ui-monospace,Consolas,monospace;color:#e8eef8}
+.ccard.green b{color:#7ddea8}.ccard.orange b{color:#ffb057}.ccard.red b{color:#ff6b6b}.ccard.dead b{color:#888}
+@media (max-width:899px){
+  #simSettings{align-items:flex-end}
+  #simSettings .sbox{width:100%;max-width:none;border-radius:16px 16px 0 0;padding-bottom:calc(16px + env(safe-area-inset-bottom))}
+  .seg{flex:1 1 100%}
+  .seg button{flex:1;min-height:44px}
+  .setsw{width:64px;height:36px}
+  .setsw::after{width:28px;height:28px;top:3px}
+  .setsw[aria-checked="true"]::after{left:31px}
+}
+/* label font (Шрифт подписей). normal keeps the sizes above. */
+#svg[data-lfs="small"] text{font-size:9px}
+#svg[data-lfs="small"] .lbl{font-size:10px}
+#svg[data-lfs="small"] .plabel{font-size:7px}
+#svg[data-lfs="small"] .chip{font-size:7px}
+#svg[data-lfs="small"] .tiny{font-size:6px}
+#svg[data-lfs="small"] .meter{font-size:9px}
+#svg[data-lfs="small"] .blbl,#svg[data-lfs="small"] .bbl{font-size:6px}
+#svg[data-lfs="small"] .capv{font-size:9px}
+#svg[data-lfs="large"] text{font-size:14px}
+#svg[data-lfs="large"] .lbl{font-size:16px}
+#svg[data-lfs="large"] .plabel{font-size:12px}
+#svg[data-lfs="large"] .chip{font-size:11px}
+#svg[data-lfs="large"] .tiny{font-size:9px}
+#svg[data-lfs="large"] .meter{font-size:14px}
+#svg[data-lfs="large"] .blbl{font-size:11px}
+#svg[data-lfs="large"] .bbl{font-size:8px}
+#svg[data-lfs="large"] .capv{font-size:14px}

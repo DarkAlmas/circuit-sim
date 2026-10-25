@@ -2,7 +2,8 @@
   'use strict';
   const P = window.PARTS, $ = s => document.querySelector(s);
   const svg = $('#svg'), view = $('#view'), wiresL = $('#wires'), partsL = $('#partsL'), temp = $('#temp'), tip = $('#tip');
-  const LS = 'circuitsim.projects', AUTO = 'circuitsim.autosave';
+  const LS = 'circuitsim.projects', AUTO = 'circuitsim.autosave', UI_KEY = window.UI_SETTINGS_KEY || 'circuitsim.ui';
+  let ui = loadUi();
   const DEFAULT_CODE = window.EXAMPLES[Object.keys(window.EXAMPLES)[0]].code;
   let proj = load(), cam = { x: 500, y: 330, s: 1 }, sel = null, armed = null, drag = null, hover = null, mouse = { x: 0, y: 0 };
   let running = false, worker = null, gpio = {}, lastHb = 0, sim = null, prevV = null, raf = 0, wd = 0, lastAlert = '';
@@ -106,7 +107,7 @@
     $('#simbar').hidden = !running; $('#simbar').classList.toggle('bad', !!shorts.length); $('#svg').classList.toggle('locked', locked());
     syncCodeFor(); placeFloat();
     $('#boardName').textContent = (proj.parts.find(p => P[p.type].mcu) && P[proj.parts.find(p => P[p.type].mcu).type].name) || 'нет платы';
-    updateTip();
+    updateTip(); syncCanvasCards();
   }
   function changed() { prevV = null; autosave(); render(); props(); calc(); }
 
@@ -323,7 +324,7 @@
   function pinUnder(cx, cy) { const tg = document.elementFromPoint(cx, cy); let pe = tg && tg.closest && tg.closest('.pin'); if (!pe) { const n = nearestPin(cx, cy, 22); pe = n && n.pinEl; }
     return pe ? { part: pe.closest('.part').dataset.part, pin: pe.dataset.pin } : null; }
   function startLong(e) { cancelLong(); if (e.pointerType === 'mouse' || locked()) return; const x = e.clientX, y = e.clientY, t0 = e.target; lp = { x, y, t: setTimeout(() => { lp = null; if (pointers.size > 1) return;
-    if (drag && drag.part && drag.moved) return; drag = null; openMenu(x, y, t0); }, 500) }; }
+    if (drag && drag.part && drag.moved) return; drag = null; openMenu(x, y, t0, 'hold'); }, 500) }; }
   function cancelLong() { if (lp) { clearTimeout(lp.t); lp = null; } }
   function cancelArm() { armed = null; temp.setAttribute('d', ''); render(); }
   function addBend(w, wx, wy) { const Q = wirePts(w); let best = 0, bd = Infinity; for (let i = 0; i < Q.length - 1; i++) { const [x1, y1] = Q[i], [x2, y2] = Q[i + 1], L = (x2 - x1) ** 2 + (y2 - y1) ** 2 || 1;
@@ -339,17 +340,21 @@
   fcan.addEventListener('pointerdown', e => e.stopPropagation()); fcan.onclick = cancelArm;
   menu.addEventListener('pointerdown', e => e.stopPropagation());
   function closeMenu() { menu.hidden = true; menu.textContent = ''; }
-  function openMenu(cx, cy, t0) { if (locked()) return; const tg = t0 && t0.isConnected ? t0 : document.elementFromPoint(cx, cy); if (!tg || !tg.closest) return;
+  function openMenu(cx, cy, t0, how) { if (locked()) return; const tg = t0 && t0.isConnected ? t0 : document.elementFromPoint(cx, cy); if (!tg || !tg.closest) return;
     const we = tg.closest('.whit, .wire') || wireNear(cx, cy, 9), pe = tg.closest('.part'), items = [];
     if (we) { const w = proj.wires.find(x => x.id === we.dataset.wire); if (!w) return; sel = { wire: w.id }; const [wx, wy] = toWorld(cx, cy);
       items.push(['🗑 Удалить провод', del, 'danger'], ['↯ Добавить изгиб', () => addBend(w, wx, wy)]); }
-    else if (pe && part(pe.dataset.part)) { sel = { part: pe.dataset.part }; items.push(['🗑 Удалить', del, 'danger'], ['⟳ Повернуть', rotate], ['⧉ Дублировать', dup]); }
+    else if (pe && part(pe.dataset.part)) {
+      /* holdMenu gates only the component long-press (Удалить / Повернуть / Дублировать).
+         Wire long-press and a right-click on a part stay. Delete / rotate / duplicate remain in Свойства and the bottom bar. */
+      if (how === 'hold' && !ui.holdMenu) return;
+      sel = { part: pe.dataset.part }; items.push(['🗑 Удалить', del, 'danger'], ['⟳ Повернуть', rotate], ['⧉ Дублировать', dup]); }
     else return;
     props(); calc(); render(); menu.textContent = '';
     for (const [t, fn, c] of items) { const b = document.createElement('button'); b.textContent = t; if (c) b.className = c; b.onclick = () => { closeMenu(); fn(); }; menu.appendChild(b); }
     const r = $('#center').getBoundingClientRect(); menu.hidden = false;
     menu.style.left = Math.max(4, Math.min(cx - r.left, r.width - menu.offsetWidth - 4)) + 'px'; menu.style.top = Math.max(4, Math.min(cy - r.top, r.height - menu.offsetHeight - 4)) + 'px'; }
-  svg.addEventListener('contextmenu', e => { e.preventDefault(); if (!menu.hidden) return; cancelLong(); drag = null; openMenu(e.clientX, e.clientY); });
+  svg.addEventListener('contextmenu', e => { e.preventDefault(); if (!menu.hidden) return; cancelLong(); drag = null; openMenu(e.clientX, e.clientY, null, 'context'); });
   document.addEventListener('pointerdown', e => { if (!menu.hidden && !menu.contains(e.target)) closeMenu(); }, true);
   function placeFloat() { fcan.hidden = !armed; }
   /* mobile bottom bar: sheets for parts / properties / code, and wire mode */
@@ -575,7 +580,65 @@
   function openHdmi() { const o = $('#hdmiFull'), fc = $('#hdmiCanvas'); o.hidden = false; const g = fc.getContext('2d'); g.fillStyle = '#000'; g.fillRect(0, 0, 1920, 1080);
     if (cv.hdmi) g.drawImage(cv.hdmi, 0, 0); else { g.fillStyle = '#888'; g.font = '64px sans-serif'; g.textAlign = 'center'; g.fillText('Нет сигнала', 960, 540); g.textAlign = 'start'; } }
   $('#hdmiClose').onclick = () => { $('#hdmiFull').hidden = true; };
-  document.addEventListener('keydown', e => { if (e.key === 'Escape') { $('#hdmiFull').hidden = true; $('#newModal').hidden = true; } });
+  /* «Настройки симулятора»: hold menu (default off), U/I/P cards on the selected part (default on), label font. */
+  function loadUi() {
+    let raw = null; try { raw = JSON.parse(localStorage.getItem(UI_KEY)); } catch (e) { raw = null; }
+    const clean = window.sanitizeUiSettings(raw);
+    try { const next = JSON.stringify(clean); if (localStorage.getItem(UI_KEY) !== next) localStorage.setItem(UI_KEY, next); } catch (e) {}
+    return clean;
+  }
+  function setUi(patch) {
+    const src = patch && typeof patch === 'object' && !Array.isArray(patch) ? patch : {};
+    ui = window.sanitizeUiSettings({
+      holdMenu: src.holdMenu !== undefined ? src.holdMenu : ui.holdMenu,
+      canvasProps: src.canvasProps !== undefined ? src.canvasProps : ui.canvasProps,
+      labelFont: src.labelFont !== undefined ? src.labelFont : ui.labelFont
+    });
+    try { localStorage.setItem(UI_KEY, JSON.stringify(ui)); } catch (e) {}
+    applyUi();
+  }
+  function applyUi() {
+    svg.dataset.lfs = ui.labelFont;
+    const hold = $('#setHold'), canv = $('#setCanvas');
+    if (hold) hold.setAttribute('aria-checked', ui.holdMenu ? 'true' : 'false');
+    if (canv) canv.setAttribute('aria-checked', ui.canvasProps ? 'true' : 'false');
+    const g = $('#setFont');
+    if (g) for (const b of g.querySelectorAll('button')) { const on = b.dataset.font === ui.labelFont; b.classList.toggle('on', on); b.setAttribute('aria-pressed', on ? 'true' : 'false'); }
+    syncCanvasCards();
+  }
+  function openSettings() { applyUi(); const m = $('#simSettings'); if (m) m.hidden = false; }
+  function closeSettings() { const m = $('#simSettings'); if (m) m.hidden = true; }
+  function syncCanvasCards() {
+    const box = $('#canvasCards'); if (!box) return;
+    const p = ui.canvasProps && sel && sel.part ? part(sel.part) : null;
+    if (!p) { box.hidden = true; return; }
+    const m = meas[p.id], mx = maxes(p), isShort = shortSet.has(p.id) || shorts.some(z => z.source === p.id);
+    for (const c of box.querySelectorAll('[data-q]')) {
+      const q = c.dataset.q, v = m ? m[q] : null, u = { U: 'В', I: 'А', P: 'Вт' }[q], cv = c.querySelector('b');
+      let cls = 'ccard';
+      if (isShort) { cv.textContent = 'КЗ'; cls += ' red'; }
+      else if (p.burned) { cv.textContent = 'Сгорела'; cls += ' dead'; }
+      else {
+        cv.textContent = m && Number.isFinite(m[q]) ? fU(m[q], u) : (running ? '—' : 'стоп');
+        const r = mx[q] && Number.isFinite(v) ? Math.abs(v) / mx[q] : null;
+        if (r != null) cls += r <= 0.7 ? ' green' : r <= 1 ? ' orange' : ' red';
+      }
+      c.className = cls;
+    }
+    box.hidden = false;
+    const [, by] = bbox(p.type), parent = box.parentElement.getBoundingClientRect();
+    const cx = cam.x + p.x * cam.s, top = cam.y + (p.y + by) * cam.s, w = box.offsetWidth, h = box.offsetHeight;
+    const left = Math.max(4, Math.min(cx - w / 2, parent.width - w - 4)), t = Math.max(4, Math.min(top - h - 8, parent.height - h - 4));
+    box.style.left = Math.round(left) + 'px'; box.style.top = Math.round(t) + 'px';
+  }
+  $('#simMore').onclick = openSettings;
+  $('#simSettingsClose').onclick = closeSettings;
+  $('#simSettings').addEventListener('click', e => { if (e.target.id === 'simSettings') closeSettings(); });
+  $('#setHold').onclick = () => setUi({ holdMenu: !ui.holdMenu });
+  $('#setCanvas').onclick = () => setUi({ canvasProps: !ui.canvasProps });
+  $('#setFont').addEventListener('click', e => { const b = e.target.closest('button[data-font]'); if (b) setUi({ labelFont: b.dataset.font }); });
+  for (const row of document.querySelectorAll('#simSettings .srow')) row.addEventListener('click', e => { if (e.target.closest('.setsw, #setFont')) return; const sw = row.querySelector('.setsw'); if (sw) sw.click(); });
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') { $('#hdmiFull').hidden = true; $('#newModal').hidden = true; closeSettings(); } });
   /* desktop: code editor docks into the bottom panel, Serial on the right */
   const desktop = () => window.matchMedia('(min-width: 900px)').matches;
   function layout() { const cp = $('#codePane'), dock = $('#codeDock'); if (!dock) return;
@@ -595,7 +658,7 @@
     const xs = pts.map(q => q[0]), ys = pts.map(q => q[1]), r = svg.getBoundingClientRect(), w = Math.max(...xs) - Math.min(...xs) + 160, h = Math.max(...ys) - Math.min(...ys) + 160;
     cam.s = Math.min(2.5, Math.max(0.25, Math.min(r.width / w, r.height / h))); cam.x = r.width / 2 - cam.s * (Math.min(...xs) + Math.max(...xs)) / 2; cam.y = r.height / 2 - cam.s * (Math.min(...ys) + Math.max(...ys)) / 2; render(); };
   lastJ = JSON.stringify(strip(proj));
-  layout(); palette(); projList(); $('#code').value = proj.code ?? DEFAULT_CODE; fit(); render(); props(); calc();
+  layout(); palette(); projList(); $('#code').value = proj.code ?? DEFAULT_CODE; fit(); applyUi(); render(); props(); calc();
   window.addEventListener('resize', () => { if (!running) render(); });
-  window.__sim = { fit: () => { fit(); render(); }, del: () => del(), rotate: () => rotate(), get proj() { return proj; }, get running() { return running; }, changed() { changed(); }, select(id) { sel = id && part(id) ? { part: id } : null; render(); props(); }, get sel() { return sel; }, get wireMode() { return wireMode; }, get armed() { return armed; }, get meas() { return meas; }, start, stop, undo, get gpio() { return gpio; }, get shorts() { return shorts; }, get crashes() { return crashes; }, get simTime() { return simTime; }, get hasWorker() { return !!worker; }, get worker() { return worker; }, get hasSpare() { return !!spare; }, get rf() { return rf; }, get extra() { return Object.keys(extra); }, codeFor: id => setCodeTarget(id), get cam() { return cam; }, render: () => render(), select: id => { sel = { part: id }; props(); calc(); render(); } };
+  window.__sim = { fit: () => { fit(); render(); }, del: () => del(), rotate: () => rotate(), get proj() { return proj; }, get running() { return running; }, changed() { changed(); }, select(id) { sel = id && part(id) ? { part: id } : null; render(); props(); }, get sel() { return sel; }, get wireMode() { return wireMode; }, get armed() { return armed; }, get meas() { return meas; }, start, stop, undo, get gpio() { return gpio; }, get shorts() { return shorts; }, get crashes() { return crashes; }, get simTime() { return simTime; }, get hasWorker() { return !!worker; }, get worker() { return worker; }, get hasSpare() { return !!spare; }, get rf() { return rf; }, get extra() { return Object.keys(extra); }, codeFor: id => setCodeTarget(id), get cam() { return cam; }, render: () => render(), select: id => { sel = { part: id }; props(); calc(); render(); }, openSettings, setUi, get ui() { return ui; } };
 })();
