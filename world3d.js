@@ -7,6 +7,7 @@
  * Floating #w3tags refresh in the same call as applyReadings. Cones and spheres
  * draw only for the selected or hovered object. VL53 and TCRT stay on the robot track.
  * v14.5.5: «Схема 3D» puts Schematic3D meshes on this table (pose from part x/y/rot).
+ * v14.5.6: passive silhouettes and wire tubes join that view. Stimulus math is untouched.
  * That view does not move schematic parts and does not change how readings are written.
  * Three.js is vendored (vendor/three). No network. DOM is createElement/textContent only.
  * window.World3D.getReadings() / the world3d-readings event are the solver hook. */
@@ -340,7 +341,7 @@
     const w = world(), nT = w ? w.stimuli.length : 0;
     if (view === 'schema') {
       const n = proj() && Array.isArray(proj().parts) ? proj().parts.length : 0;
-      const shown = schemaRoot ? schemaRoot.children.length : 0;
+      const shown = schemaPartNodes().length;
       stat.textContent = 'Схема 3D · деталей ' + n + (shown && shown < n ? ' · на столе ' + shown : '') + ' · воздействий ' + nT;
       return;
     }
@@ -394,13 +395,18 @@
   }
 
   const SCHEMA_MAX = 160;
+  const WIRE_MAX = 400;
+  function schemaPartNodes() {
+    if (!schemaRoot) return [];
+    return schemaRoot.children.filter(c => c.userData && c.userData.role === 'schematic');
+  }
   function mix(h, n) { return Math.imul(h ^ n, 16777619); }
   function hashStr(h, s) {
     const str = s || '';
     for (let i = 0; i < str.length; i++) h = mix(h, str.charCodeAt(i));
     return h;
   }
-  function schemaHash(parts) {
+  function schemaHash(parts, wires) {
     let h = 2166136261;
     const n = Math.min(parts.length, SCHEMA_MAX);
     for (let i = 0; i < n; i++) {
@@ -411,7 +417,27 @@
       h = mix(h, Math.round(p && p.y || 0));
       h = mix(h, ((p && p.rot) | 0) & 3);
     }
-    return mix(h, parts.length);
+    h = mix(h, parts.length);
+    const ws = Array.isArray(wires) ? wires : [];
+    const m = Math.min(ws.length, WIRE_MAX);
+    for (let i = 0; i < m; i++) {
+      const w = ws[i];
+      h = hashStr(h, w && w.id);
+      h = hashStr(h, w && w.color);
+      h = hashStr(h, w && w.a && w.a.part);
+      h = hashStr(h, w && w.a && w.a.pin);
+      h = hashStr(h, w && w.b && w.b.part);
+      h = hashStr(h, w && w.b && w.b.pin);
+      const pts = w && Array.isArray(w.pts) ? w.pts : [];
+      h = mix(h, pts.length);
+      const kn = Math.min(pts.length, 50);
+      for (let k = 0; k < kn; k++) {
+        const pt = pts[k];
+        h = mix(h, Math.round(pt && pt[0] || 0));
+        h = mix(h, Math.round(pt && pt[1] || 0));
+      }
+    }
+    return mix(h, ws.length);
   }
   function applyView() {
     const schema = view === 'schema';
@@ -430,8 +456,11 @@
   }
   function refreshSchema(force) {
     if (view !== 'schema' || !schemaRoot || !schemaLib || !window.Schematic3D) return;
-    const parts = (proj() && Array.isArray(proj().parts)) ? proj().parts : [];
-    const sig = schemaHash(parts);
+    const project = proj();
+    const parts = (project && Array.isArray(project.parts)) ? project.parts : [];
+    const wires = (project && Array.isArray(project.wires)) ? project.wires : [];
+    const drawnWires = wires.slice(0, WIRE_MAX);
+    const sig = schemaHash(parts, drawnWires);
     if (!force && sig === schemaSig) return;
     schemaSig = sig;
     clearSchema();
@@ -449,6 +478,12 @@
       g.userData.id = p.id;
       g.userData.type = p.type;
       schemaRoot.add(g);
+    }
+    if (typeof S.buildWires === 'function') {
+      try {
+        const wg = S.buildWires(schemaLib, parts, drawnWires);
+        if (wg) schemaRoot.add(wg);
+      } catch (e) { /* a bad tube must not drop the parts already on the table */ }
     }
   }
   function setView(next) {
@@ -817,14 +852,19 @@
     if (active) { rebuild(); if (view === 'schema') refreshSchema(true); applyReadings(proj()); updateZones(); }
   };
   api.setView = setView;
-  api.schemaCount = () => schemaRoot ? schemaRoot.children.length : 0;
-  api.schemaDetail = () => !schemaRoot ? [] : schemaRoot.children.map(c => ({
+  api.schemaCount = () => schemaPartNodes().length;
+  api.schemaDetail = () => schemaPartNodes().map(c => ({
     id: c.userData.id, type: c.userData.type, kind: c.userData.kind, n: c.children.length,
     x: c.position.x, y: c.position.y, z: c.position.z, yaw: c.rotation.y
   }));
+  api.schemaWireCount = () => {
+    if (!schemaRoot) return 0;
+    const g = schemaRoot.children.find(c => c.userData && c.userData.role === 'wires');
+    return g ? g.children.length : 0;
+  };
   api.schemaScreen = id => {
     if (!schemaRoot) return null;
-    const g = schemaRoot.children.find(c => c.userData && c.userData.id === id);
+    const g = schemaPartNodes().find(c => c.userData && c.userData.id === id);
     if (!g) return null;
     return screenOf({ x: g.position.x, y: g.position.y + 8, z: g.position.z });
   };

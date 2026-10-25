@@ -1,4 +1,4 @@
-// v14.5.5: schematic → table pose. No DOM, no WebGL, no new sanitize fields.
+// v14.5.6: schematic pose, passive silhouettes, wire tubes. No DOM, no WebGL, no new sanitize fields.
 const test = require('node:test'), assert = require('node:assert');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -41,7 +41,7 @@ test('local +Y (down the symbol) follows the SVG quarter turns', () => {
   assert.ok(down(3).x > 0 && Math.abs(down(3).z) < 1e-9);
 });
 
-test('boards and world3d sensors have footprints; passives stay generic', () => {
+test('boards and world3d sensors keep their schematic footprints', () => {
   const modeled = {
     esp32: 'esp32', esp8266: 'esp8266', esp32c3: 'esp32c3', uno: 'uno', pico: 'pico', opi: 'opi',
     atmega328: 'dip', attiny85: 'dip', dht22: 'dht', hcsr04: 'hcsr04', pir: 'pir', ldr: 'ldr'
@@ -55,10 +55,75 @@ test('boards and world3d sensors have footprints; passives stay generic', () => 
     assert.equal(f.d, Math.round(Math.min(420, box[3]) * S.SCALE * 1000) / 1000, type + ' depth');
     assert.ok(f.h >= 1.5, type + ' height ' + f.h);
   }
-  for (const type of ['resistor', 'led', 'cap', 'breadboard']) assert.equal(S.kindOf(type), 'generic', type);
   assert.equal(S.kindOf('not-a-part'), 'generic');
-  const board = S.footprint('esp32'), slug = S.footprint('resistor');
-  assert.ok(board.w > slug.w && board.d > slug.d, 'a DevKit is larger than an unboxed passive');
+});
+
+function fakeThree() {
+  function Mesh(geo, material) {
+    this.geometry = geo; this.material = material; this.userData = {};
+    this.position = { set() {} };
+    this.rotation = { x: 0, y: 0, z: 0 };
+    this.quaternion = { setFromUnitVectors() {} };
+  }
+  function Group() {
+    this.children = []; this.userData = {};
+    this.position = { set() {} };
+    this.rotation = { y: 0 };
+    this.add = c => { this.children.push(c); };
+  }
+  function Vector3() {}
+  function Geo() {}
+  function Mat(o) { this.color = o && o.color; }
+  return {
+    Group, Mesh, Vector3,
+    BoxGeometry: Geo, CylinderGeometry: Geo, SphereGeometry: Geo, TorusGeometry: Geo,
+    MeshStandardMaterial: Mat
+  };
+}
+
+test('passive bodies are one group-colored mesh, larger than the generic slab', () => {
+  const slab = S.footprint('not-a-part');
+  assert.equal(slab.w, 4.8);
+  assert.equal(slab.d, 2.16);
+  assert.equal(slab.h, 1.5);
+  const lib = S.createLib(fakeThree());
+  for (const type of ['resistor', 'cap', 'ecap', 'inductor', 'pot']) {
+    const f = S.footprint(type);
+    assert.ok(f.w > slab.w && f.d > slab.d && f.h > slab.h, type + ' ' + JSON.stringify(f) + ' vs slab');
+    assert.equal(S.kindOf(type), type, type);
+    const g = S.build(lib, { type, x: 0, y: 0, rot: 0 });
+    assert.equal(g.userData.kind, type, type);
+    assert.equal(g.children.length, 1, type + ' is a single body');
+    assert.equal(g.children[0].material.color, S.GROUP_COLOR['Пассивные'], type);
+  }
+  const board = S.footprint('breadboard');
+  assert.equal(board.kind, 'breadboard');
+  assert.equal(board.h, 2.2);
+  assert.equal(board.w, Math.round(P.breadboard.box[2] * S.SCALE * 1000) / 1000);
+  assert.ok(board.w > slab.w && board.d > slab.d && board.h > slab.h);
+  const bb = S.build(lib, { type: 'breadboard' });
+  assert.equal(bb.children.length, 1);
+  assert.equal(bb.children[0].material.color, S.GROUP_COLOR['Пассивные']);
+});
+
+test('every catalog part has a silhouette; unknown types stay a slab', () => {
+  const lib = S.createLib(fakeThree());
+  const generic = [];
+  for (const type of Object.keys(P)) {
+    const kind = S.kindOf(type);
+    if (kind === 'generic') generic.push(type);
+    const g = S.build(lib, { id: 'X', type, x: 10, y: 20, rot: 1 });
+    assert.equal(g.userData.kind, kind, type);
+    assert.ok(g.children.length >= 1, type);
+    assert.equal(typeof g.raycast, 'function', type + ' is not pickable');
+  }
+  assert.deepEqual(generic, [], 'slab fallback: ' + generic.join(','));
+  const led = S.build(lib, { type: 'led' });
+  assert.equal(led.userData.kind, 'led');
+  assert.ok(led.children.length >= 3, 'LED keeps a dome and legs');
+  const wires = S.buildWires(lib, [], []);
+  assert.equal(wires.userData.role, 'wires');
+  assert.equal(typeof wires.raycast, 'function');
 });
 
 test('schematic meshes do not widen the sanitize whitelist', () => {
@@ -74,8 +139,56 @@ test('schematic meshes do not widen the sanitize whitelist', () => {
   assert.equal(JSON.stringify(s).includes('http'), false);
 });
 
+test('wire tubes follow sanitized pin endpoints and bend points', () => {
+  const raw = {
+    parts: [
+      { id: 'R1', type: 'resistor', x: 0, y: 0, rot: 0 },
+      { id: 'R2', type: 'resistor', x: 80, y: 0, rot: 1 },
+      { id: 'D1', type: 'led', x: -40, y: 20, rot: 2, props: { color: 'красный' } }
+    ],
+    wires: [
+      { id: 'w1', a: { part: 'R1', pin: 'b' }, b: { part: 'R2', pin: 'a' }, color: 'синий', pts: [[40, 20]], mesh: 'http://evil/a.glb' },
+      { id: 'w2', a: { part: 'R1', pin: 'a' }, b: { part: 'D1', pin: 'a' } },
+      { id: 'nope', a: { part: 'R1', pin: 'no-pin' }, b: { part: 'R2', pin: 'a' }, color: 'пурпурный' }
+    ]
+  };
+  const s = global.window.sanitizeProject(raw);
+  assert.equal(s.wires.length, 2);
+  assert.equal(s.wires[0].color, 'синий');
+  assert.equal(Object.prototype.hasOwnProperty.call(s.wires[1], 'color'), false);
+  assert.equal(JSON.stringify(s).includes('glb'), false);
+  assert.equal(JSON.stringify(s).includes('http'), false);
+  const pts = S.wirePoints(s.parts, s.wires[0]);
+  assert.equal(pts.length, 3);
+  assert.equal(pts[0].y, S.WIRE_Y);
+  assert.equal(pts[1].y, S.WIRE_Y);
+  assert.equal(pts[2].y, S.WIRE_Y);
+  const r1 = s.parts[0], pinB = P.resistor.pins.find(q => q.id === 'b');
+  const at = S.pose(r1), loc = S.localToTable(r1, pinB.x, pinB.y);
+  assert.equal(pts[0].x, Math.round((at.x + loc.x) * 1000) / 1000);
+  assert.equal(pts[0].z, Math.round((at.z + loc.z) * 1000) / 1000);
+  assert.equal(pts[1].x, 4.8);
+  assert.equal(pts[1].z, 2.4);
+  const spun = S.wirePoints(s.parts, s.wires[0])[2];
+  const r2 = s.parts[1], pinA = P.resistor.pins.find(q => q.id === 'a');
+  const at2 = S.pose(r2), loc2 = S.localToTable(r2, pinA.x, pinA.y);
+  assert.equal(spun.x, Math.round((at2.x + loc2.x) * 1000) / 1000);
+  assert.equal(spun.z, Math.round((at2.z + loc2.z) * 1000) / 1000);
+  assert.equal(r2.rot, 1);
+  assert.equal(S.wireColorHex('синий'), 0x4c7dff);
+  assert.equal(S.wireColorHex(undefined), S.WIRE_NEUTRAL);
+  assert.equal(S.wireColorHex('пурпурный'), S.WIRE_NEUTRAL);
+  assert.deepEqual(S.wirePoints(s.parts, { a: { part: 'R1', pin: 'missing' }, b: { part: 'R2', pin: 'a' } }), []);
+  const lib = S.createLib(fakeThree());
+  const tubes = S.buildWires(lib, s.parts, s.wires);
+  assert.equal(tubes.children.length, 3);
+  assert.equal(tubes.children[0].material.color, 0x4c7dff);
+  assert.equal(tubes.children[2].material.color, S.WIRE_NEUTRAL);
+});
+
 test('source stays local and procedural', () => {
   const src = fs.readFileSync(path.join(__dirname, '../schematic3d.js'), 'utf8');
   assert.equal(/https?:\/\//.test(src), false);
   assert.equal(/GLTF|ObjectLoader|FileLoader/.test(src), false);
+  assert.equal(/fetch\s*\(/.test(src), false);
 });
