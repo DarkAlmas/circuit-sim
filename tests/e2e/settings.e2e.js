@@ -1,4 +1,4 @@
-// Settings UI: hold menu defaults off, three controls, prefs persist, junk localStorage is dropped. ?v=14.3.
+// Settings UI: hold menu defaults off, three controls, prefs persist, junk localStorage is dropped. ?v=14.4.
 const { chromium } = require('playwright-core'); const assert = require('assert');
 const URL = process.argv[2] || 'http://localhost:8765/';
 (async () => {
@@ -10,7 +10,7 @@ const URL = process.argv[2] || 'http://localhost:8765/';
   await pg.goto(URL); await pg.evaluate(() => localStorage.clear()); await pg.reload(); await pg.waitForTimeout(300);
   const ok = (c, m) => { assert.ok(c, m); console.log('✓', m); };
 
-  ok(await pg.evaluate(() => [...document.scripts].every(s => !s.src || /\?v=14\.3$/.test(s.src)) && /style\.css\?v=14\.3/.test(document.querySelector('link[rel=stylesheet]').href)), 'cache stays ?v=14.3');
+  ok(await pg.evaluate(() => [...document.scripts].every(s => !s.src || /\?v=14\.4$/.test(s.src)) && /style\.css\?v=14\.4/.test(document.querySelector('link[rel=stylesheet]').href)), 'cache stays ?v=14.4');
   const csp = await pg.evaluate(() => document.querySelector('meta[http-equiv="Content-Security-Policy"]').content);
   ok(csp.startsWith("default-src 'self'") && csp.includes("script-src 'self'") && !/unsafe-inline/.test(csp), 'CSP unchanged');
   ok(await pg.evaluate(() => __sim.ui.holdMenu === false && __sim.ui.canvasProps === true && __sim.ui.labelFont === 'normal'), 'defaults: hold off, canvas props on, font normal');
@@ -66,6 +66,27 @@ const URL = process.argv[2] || 'http://localhost:8765/';
   ok(rc.some(t => /Повернуть/.test(t)) && rc.some(t => /Дублировать/.test(t)), 'right-click part menu stays when hold is off');
   await pg.keyboard.press('Escape');
 
+  const hist0 = await pg.evaluate(() => { const u = document.querySelector('#undo'), r = document.querySelector('#redo');
+    return { u: u.disabled, r: r.disabled, place: u.parentElement.tagName === 'HEADER' && u.previousElementSibling.id === 'status' && r.nextElementSibling.id === 'simMore',
+      label: u.getAttribute('aria-label') + '/' + r.getAttribute('aria-label'), title: u.title + '/' + r.title, text: u.textContent + r.textContent }; });
+  ok(hist0.u && hist0.r && hist0.place && hist0.label === 'Отменить/Повторить' && hist0.title === 'Отменить/Повторить' && hist0.text === '↩↪', 'desktop ↩/↪ sit between status and ⋯, disabled with empty stacks');
+  await pg.evaluate(() => { __sim.select('R1'); __sim.del(); });
+  ok(await pg.evaluate(() => !document.querySelector('#undo').disabled && document.querySelector('#redo').disabled && !__sim.proj.parts.some(p => p.id === 'R1')), 'delete enables Отменить only');
+  await pg.click('#undo');
+  ok(await pg.evaluate(() => __sim.proj.parts.some(p => p.id === 'R1') && document.querySelector('#undo').disabled && !document.querySelector('#redo').disabled), 'Отменить restores the part and enables Повторить');
+  await pg.click('#redo');
+  ok(await pg.evaluate(() => !__sim.proj.parts.some(p => p.id === 'R1') && !document.querySelector('#undo').disabled && document.querySelector('#redo').disabled), 'Повторить reapplies the delete');
+  await pg.keyboard.press('Control+z');
+  ok(await pg.evaluate(() => __sim.proj.parts.some(p => p.id === 'R1')), 'Ctrl+Z still undoes');
+  await pg.keyboard.press('Control+y');
+  ok(await pg.evaluate(() => !__sim.proj.parts.some(p => p.id === 'R1')), 'Ctrl+Y redoes');
+  await pg.keyboard.press('Control+z');
+  await pg.keyboard.press('Control+Shift+Z');
+  ok(await pg.evaluate(() => !__sim.proj.parts.some(p => p.id === 'R1')), 'Ctrl+Shift+Z redoes');
+  await pg.keyboard.press('Control+z');
+  await pg.evaluate(() => { const p = __sim.proj.parts.find(x => x.id === 'R1'); p.x += 40; __sim.changed(); });
+  ok(await pg.evaluate(() => document.querySelector('#redo').disabled && __sim.proj.parts.some(p => p.id === 'R1')), 'a new edit clears the redo stack');
+
   const mc = await b.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, deviceScaleFactor: 2 });
   const ph = await mc.newPage(); ph.on('pageerror', e => errs.push(e.message));
   await ph.goto(URL); await ph.evaluate(() => localStorage.clear()); await ph.reload(); await ph.waitForTimeout(400);
@@ -78,18 +99,42 @@ const URL = process.argv[2] || 'http://localhost:8765/';
   const lpress = async (x, y) => { await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y, id: 1 }] }); await ph.waitForTimeout(650); await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] }); await ph.waitForTimeout(120); };
   const closeSheet = async () => { if (await ph.evaluate(() => document.body.dataset.sheet === 'props')) await ph.tap('#mProps'); };
   const hit = () => ph.evaluate(() => { const e = document.querySelector('.part[data-part="R1"] .hit').getBoundingClientRect(); return [e.x + e.width / 2, e.y + e.height / 2]; });
+  const menuText = () => ph.evaluate(() => { const m = document.querySelector('#ctxmenu'); return m && !m.hidden ? [...m.children].map(b => b.textContent) : []; });
+  const touchMenu = (x, y) => ph.evaluate(({ x, y }) => { const el = document.elementFromPoint(x, y); if (!el) return;
+    const o = { bubbles: true, cancelable: true, clientX: x, clientY: y, pointerId: 4, pointerType: 'touch', isPrimary: true };
+    el.dispatchEvent(new PointerEvent('pointerdown', o));
+    el.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: x, clientY: y, button: 2 }));
+    el.dispatchEvent(new PointerEvent('pointerup', o)); }, { x, y });
+  const partActs = items => items.some(t => /Повернуть/.test(t)) || items.some(t => /Дублировать/.test(t));
   await closeSheet(); const xy = await hit(); await lpress(xy[0], xy[1]);
   ok(await ph.evaluate(() => { const m = document.querySelector('#ctxmenu'); return !m || m.hidden; }), 'part long-press menu is off by default');
+  await closeSheet(); const xyT = await hit(); await touchMenu(xyT[0], xyT[1]); await ph.waitForTimeout(80);
+  const touchOff = await menuText();
+  ok(!partActs(touchOff), 'touch contextmenu does not open the part menu when hold is off ' + JSON.stringify(touchOff));
   await ph.evaluate(() => __sim.setUi({ holdMenu: true })); await closeSheet();
   const xy2 = await hit(); await lpress(xy2[0], xy2[1]);
   const opened = await ph.evaluate(() => { const m = document.querySelector('#ctxmenu'); return m && !m.hidden ? [...m.children].map(b => b.textContent) : []; });
   ok(opened.some(t => /Повернуть/.test(t)) && opened.some(t => /Дублировать/.test(t)) && opened.some(t => /Удалить/.test(t)), 'part hold menu appears when enabled');
+  await ph.evaluate(() => { const m = document.querySelector('#ctxmenu'); if (m) m.hidden = true; });
+  await closeSheet(); const xy3 = await hit(); await touchMenu(xy3[0], xy3[1]); await ph.waitForTimeout(80);
+  const touchOn = await menuText();
+  ok(touchOn.some(t => /Повернуть/.test(t)) && touchOn.some(t => /Дублировать/.test(t)), 'touch contextmenu opens the part menu when hold is on ' + JSON.stringify(touchOn));
   await ph.evaluate(() => { const m = document.querySelector('#ctxmenu'); if (m) m.hidden = true; __sim.setUi({ holdMenu: false }); });
   await closeSheet();
   const mid = await ph.evaluate(() => { const el = document.querySelector('.whit[data-wire="w1"]'), L = el.getTotalLength(), q = el.getPointAtLength(L * 0.5), m = el.getScreenCTM(); return [q.x * m.a + m.e, q.y * m.d + m.f]; });
   await lpress(mid[0], mid[1]);
   const wireMenu = await ph.evaluate(p => { const m = document.querySelector('#ctxmenu'); const hit = document.elementFromPoint(p[0], p[1]); return { items: m && !m.hidden ? [...m.children].map(b => b.textContent) : [], hit: hit ? (hit.id || hit.getAttribute('class') || hit.tagName) : 'none', sheet: document.body.dataset.sheet || '' }; }, mid);
   ok(wireMenu.items.some(t => /Удалить провод/.test(t)) && wireMenu.items.some(t => /изгиб/.test(t)), 'wire long-press menu stays while part hold menu is off ' + JSON.stringify(wireMenu));
+  await closeSheet();
+  await ph.evaluate(() => { const m = document.querySelector('#ctxmenu'); if (m) m.hidden = true; });
+  await touchMenu(mid[0], mid[1]); await ph.waitForTimeout(80);
+  const wireCtx = await menuText();
+  ok(wireCtx.some(t => /Удалить провод/.test(t)) && wireCtx.some(t => /изгиб/.test(t)), 'wire touch contextmenu stays while part hold is off ' + JSON.stringify(wireCtx));
+  const slot = await ph.evaluate(() => { const u = document.querySelector('#undo'), r = document.querySelector('#redo'), d = document.querySelector('#mDel');
+    const ids = [...d.parentElement.children].map(e => e.id);
+    return { bar: u.parentElement.id === 'mbar' && r.parentElement.id === 'mbar', left: ids.indexOf('undo') === ids.indexOf('mDel') - 2 && ids.indexOf('redo') === ids.indexOf('mDel') - 1,
+      label: u.getAttribute('aria-label') + '/' + r.getAttribute('aria-label'), title: u.title + '/' + r.title }; });
+  ok(slot.bar && slot.left && slot.label === 'Отменить/Повторить' && slot.title === 'Отменить/Повторить', 'phone ↩/↪ sit left of 🗑 ' + JSON.stringify(slot));
   ok(await ph.evaluate(() => !!document.querySelector('#mDel')), 'bottom bar still has delete');
 
   assert.deepEqual(errs, [], errs.join('\n'));

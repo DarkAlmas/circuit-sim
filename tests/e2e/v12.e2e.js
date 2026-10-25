@@ -15,8 +15,8 @@ async function phone(b, W, H) {
   const tag = `[${W}×${H}]`;
   const ok = (c, m) => { assert.ok(c, tag + ' ' + m); console.log(tag, '✓', m); };
 
-  ok(await ev(() => [...document.scripts].filter(s => s.src).every(s => /\?v=(12|13|14|14\.1|14\.2|14\.3)$/.test(s.src)) && document.body.classList.contains('pm')), 'scripts ?v=12+, portrait UI on');
-  ok((await (await fetch(new globalThis.URL('app.js?v=14.3', URL))).text()).includes("new Worker('worker.js?v=14.3')"), 'worker cache key v=14.3');
+  ok(await ev(() => [...document.scripts].filter(s => s.src).every(s => /\?v=(12|13|14|14\.1|14\.2|14\.3|14\.4)$/.test(s.src)) && document.body.classList.contains('pm')), 'scripts ?v=12+, portrait UI on');
+  ok((await (await fetch(new globalThis.URL('app.js?v=14.4', URL))).text()).includes("new Worker('worker.js?v=14.4')"), 'worker cache key v=14.4');
   // top bar 48px, tabs, bottom bar, touch targets, text size, no horizontal scroll
   const L = await ev(() => { const vis = e => { const r = e.getBoundingClientRect(); return r.width > 0 && r.height > 0 && getComputedStyle(e).visibility !== 'hidden'; };
     const btns = [...document.querySelectorAll('header button, header select, #pmTabs button, #mbar button, #pmFit')].filter(vis);
@@ -26,7 +26,7 @@ async function phone(b, W, H) {
       play: document.querySelector('#pmPlay').getBoundingClientRect(), svg: document.querySelector('#svg').getBoundingClientRect().width }; });
   console.log(tag, 'layout', JSON.stringify({ ...L, play: [Math.round(L.play.x + L.play.width / 2)] }));
   ok(L.hdr <= 50 && L.hdr >= 46, 'top bar 48px'); ok(Math.abs(L.play.x + L.play.width / 2 - W / 2) < 2, '▶ centred');
-  ok(L.tabs.join() === 'Схема,Код', 'tabs Схема/Код (no robot)'); ok(L.bar.map(b => b[0]).join('|') === '＋ Детали|〰 Провод|⚙ Свойства|🗑' && L.bar.every(b => b[1] >= 56), 'bottom bar 4×56px');
+  ok(L.tabs.join() === 'Схема,Код', 'tabs Схема/Код (no robot)'); ok(L.bar.map(b => b[0]).join('|') === '＋ Детали|〰 Провод|⚙ Свойства|↩|↪|🗑' && L.bar.every(b => b[1] >= 56), 'bottom bar: undo/redo left of delete, 56px');
   ok(L.minBtn >= 44 && L.minFont >= 14, 'touch targets ≥44px, text ≥14px'); ok(Math.abs(L.svg - W) < 2, 'canvas full width'); ok(await noHScroll(), 'no horizontal scroll');
   // ⋯ menu
   await pg.tap('#pmMore'); ok(await pg.isVisible('#pmMenu #pmSave') && await pg.isVisible('#pmExport') && await pg.isVisible('#pmExamples'), '⋯ menu: save/export/examples');

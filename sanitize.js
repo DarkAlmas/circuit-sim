@@ -86,8 +86,9 @@
   const WIRE_COLORS = { 'красный': '#e5484d', 'чёрный': '#1a1d24', 'синий': '#4c7dff', 'зелёный': '#3fb37f', 'жёлтый': '#f0c430', 'белый': '#f2f5f8' };
   const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   /* Simulator UI prefs, localStorage key circuitsim.ui. Known keys only — anything else is dropped:
-     holdMenu    strict boolean, default false. Component long-press menu (Удалить / Повернуть / Дублировать).
-                 Wire long-press (delete + bend) and a right-click on a part are not gated by this flag.
+     holdMenu    strict boolean, default false. Component long-press menu (Удалить / Повернуть / Дублировать),
+                 including the contextmenu a finger or pen long-press also fires.
+                 Wire menus and a mouse right-click on a part are not gated by this flag.
      canvasProps strict boolean, default true. U/I/P cards drawn on the selected part.
      labelFont   'small' | 'normal' | 'large', default 'normal'. Schematic label size.
      Non-booleans ("true", 1, null) and any other font string are dropped back to the default. */

@@ -7,12 +7,15 @@
   const DEFAULT_CODE = window.EXAMPLES[Object.keys(window.EXAMPLES)[0]].code;
   let proj = load(), cam = { x: 500, y: 330, s: 1 }, sel = null, armed = null, drag = null, hover = null, mouse = { x: 0, y: 0 };
   let running = false, worker = null, gpio = {}, lastHb = 0, sim = null, prevV = null, raf = 0, wd = 0, lastAlert = '';
-  const meas = {}, checks = {}, flowOff = {}, pointers = new Map(); let lastDown = null, hist = [], lastJ = null, shorts = [], shortSet = new Set(), shortSig = '';
+  const meas = {}, checks = {}, flowOff = {}, pointers = new Map(); let lastDown = null, hist = [], redoSt = [], lastJ = null, shorts = [], shortSet = new Set(), shortSig = '';
 
   function load() { try { const a = JSON.parse(localStorage.getItem(AUTO)); if (a && a.parts) return sanitizeProject(a); } catch (e) {} return sanitizeProject(window.EXAMPLES[Object.keys(window.EXAMPLES)[0]]); }
   function clone(o) { return JSON.parse(JSON.stringify(o)); }
-  function autosave() { const j = JSON.stringify(strip(proj)); if (lastJ !== null && j !== lastJ) { hist.push(lastJ); if (hist.length > 100) hist.shift(); } lastJ = j; localStorage.setItem(AUTO, j); }
-  function undo() { if (!hist.length) return; const j = hist.pop(); lastJ = j; proj = sanitizeProject(JSON.parse(j)); proj.code = proj.code || $('#code').value; sel = null; prevV = null; localStorage.setItem(AUTO, j); render(); props(); calc(); }
+  function syncHist() { const u = $('#undo'), r = $('#redo'); if (u) u.disabled = !hist.length; if (r) r.disabled = !redoSt.length; }
+  function autosave() { const j = JSON.stringify(strip(proj)); if (lastJ !== null && j !== lastJ) { hist.push(lastJ); if (hist.length > 100) hist.shift(); redoSt.length = 0; } lastJ = j; localStorage.setItem(AUTO, j); syncHist(); }
+  function applySnap(j) { lastJ = j; proj = sanitizeProject(JSON.parse(j)); proj.code = proj.code || $('#code').value; sel = null; prevV = null; localStorage.setItem(AUTO, j); render(); props(); calc(); syncHist(); }
+  function undo() { if (!hist.length) return; const cur = lastJ != null ? lastJ : JSON.stringify(strip(proj)); redoSt.push(cur); if (redoSt.length > 100) redoSt.shift(); applySnap(hist.pop()); }
+  function redo() { if (!redoSt.length) return; const cur = lastJ != null ? lastJ : JSON.stringify(strip(proj)); hist.push(cur); if (hist.length > 100) hist.shift(); applySnap(redoSt.pop()); }
   const locked = () => running && !shorts.length;
   function strip(p) { return { parts: p.parts.map(({ id, type, x, y, rot, props }) => ({ id, type, x, y, rot, props })), wires: p.wires.map(({ id, a, b, pts, color }) => { const w = { id, a, b, pts }; if (color) w.color = color; return w; }), code: p.code, codes: p.codes, name: p.name, kind: p.kind, robot: p.robot }; }
   const uid = pre => { let i = 1; const ids = new Set([...proj.parts, ...proj.wires].map(o => o.id)); while (ids.has(pre + i)) i++; return pre + i; };
@@ -244,7 +247,10 @@
   function pinchStart() { const [a, b] = [...pointers.values()]; drag = { pinch: true, d0: Math.hypot(a.x - b.x, a.y - b.y), s0: cam.s, c0: [(a.x + b.x) / 2, (a.y + b.y) / 2], cam0: { ...cam } }; }
   function zoomAt(cx, cy, s) { const r = svg.getBoundingClientRect(), mx = cx - r.left, my = cy - r.top; s = Math.min(4, Math.max(0.25, s));
     cam.x = mx - (mx - cam.x) * s / cam.s; cam.y = my - (my - cam.y) * s / cam.s; cam.s = s; }
+  let lastPtr = 'mouse', touchAt = 0;
   svg.addEventListener('pointerdown', e => {
+    lastPtr = e.pointerType || 'mouse';
+    if (lastPtr === 'touch' || lastPtr === 'pen' || (e.sourceCapabilities && e.sourceCapabilities.firesTouchEvents)) touchAt = performance.now(); else touchAt = 0;
     { const t = performance.now(), L = lastDown; lastDown = { t, x: e.clientX, y: e.clientY }; if (L && t - L.t < 400 && Math.hypot(e.clientX - L.x, e.clientY - L.y) < 6 && pointers.size === 0) { lastDown = null; onDbl(e); return; } }
     if (e.isPrimary) pointers.clear(); pointers.set(e.pointerId, { x: e.clientX, y: e.clientY }); try { svg.setPointerCapture(e.pointerId); } catch (_) {}
     if (pointers.size === 2) { if (drag && drag.press && P[drag.press.type].interactive === 'momentary') drag.press.on = false; pinchStart(); return; }
@@ -345,8 +351,9 @@
     if (we) { const w = proj.wires.find(x => x.id === we.dataset.wire); if (!w) return; sel = { wire: w.id }; const [wx, wy] = toWorld(cx, cy);
       items.push(['🗑 Удалить провод', del, 'danger'], ['↯ Добавить изгиб', () => addBend(w, wx, wy)]); }
     else if (pe && part(pe.dataset.part)) {
-      /* holdMenu gates only the component long-press (Удалить / Повернуть / Дублировать).
-         Wire long-press and a right-click on a part stay. Delete / rotate / duplicate remain in Свойства and the bottom bar. */
+      /* holdMenu gates the component menu for a finger/pen hold and for the contextmenu
+         that same hold also fires (passed in as how 'hold'). A mouse right-click stays.
+         Wire menus are not gated. Delete / rotate / duplicate remain in Свойства and the bottom bar. */
       if (how === 'hold' && !ui.holdMenu) return;
       sel = { part: pe.dataset.part }; items.push(['🗑 Удалить', del, 'danger'], ['⟳ Повернуть', rotate], ['⧉ Дублировать', dup]); }
     else return;
@@ -354,7 +361,10 @@
     for (const [t, fn, c] of items) { const b = document.createElement('button'); b.textContent = t; if (c) b.className = c; b.onclick = () => { closeMenu(); fn(); }; menu.appendChild(b); }
     const r = $('#center').getBoundingClientRect(); menu.hidden = false;
     menu.style.left = Math.max(4, Math.min(cx - r.left, r.width - menu.offsetWidth - 4)) + 'px'; menu.style.top = Math.max(4, Math.min(cy - r.top, r.height - menu.offsetHeight - 4)) + 'px'; }
-  svg.addEventListener('contextmenu', e => { e.preventDefault(); if (!menu.hidden) return; cancelLong(); drag = null; openMenu(e.clientX, e.clientY, null, 'context'); });
+  svg.addEventListener('contextmenu', e => { e.preventDefault(); if (!menu.hidden) return; cancelLong(); drag = null;
+    const recentTouch = touchAt > 0 && performance.now() - touchAt < 1500;
+    const fromTouch = e.pointerType === 'touch' || e.pointerType === 'pen' || lastPtr === 'touch' || lastPtr === 'pen' || !!(e.sourceCapabilities && e.sourceCapabilities.firesTouchEvents) || recentTouch;
+    openMenu(e.clientX, e.clientY, null, fromTouch ? 'hold' : 'context'); });
   document.addEventListener('pointerdown', e => { if (!menu.hidden && !menu.contains(e.target)) closeMenu(); }, true);
   function placeFloat() { fcan.hidden = !armed; }
   /* mobile bottom bar: sheets for parts / properties / code, and wire mode */
@@ -373,8 +383,12 @@
   function del() { if (!sel || locked()) return; if (sel.part) { proj.parts = proj.parts.filter(p => p.id !== sel.part); proj.wires = proj.wires.filter(w => w.a.part !== sel.part && w.b.part !== sel.part); }
     if (sel.wire) proj.wires = proj.wires.filter(w => w.id !== sel.wire); sel = null; closeMenu(); changed(); }
   document.addEventListener('keydown', e => { if (/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName)) return;
-    if ((e.ctrlKey || e.metaKey) && (e.key === 'z' || e.key === 'Z' || e.key === 'я' || e.code === 'KeyZ')) { e.preventDefault(); if (!locked()) undo(); return; }
+    const mod = e.ctrlKey || e.metaKey, zKey = e.code === 'KeyZ' || e.key === 'z' || e.key === 'Z' || e.key === 'я' || e.key === 'Я', yKey = e.code === 'KeyY' || e.key === 'y' || e.key === 'Y' || e.key === 'н' || e.key === 'Н';
+    if (mod && zKey) { e.preventDefault(); if (!locked()) { if (e.shiftKey) redo(); else undo(); } return; }
+    if (mod && yKey) { e.preventDefault(); if (!locked()) redo(); return; }
     if (e.key === 'r' || e.key === 'R' || e.key === 'к' || e.key === 'К') rotate(); else if (e.key === 'Delete' || e.key === 'Backspace') del(); else if (e.key === 'Escape') { closeMenu(); cancelArm(); } });
+  $('#undo').onclick = () => { if (!locked()) undo(); };
+  $('#redo').onclick = () => { if (!locked()) redo(); };
 
   /* ---------- simulation ---------- */
   function tick() {
@@ -476,7 +490,7 @@
   /* sketch worker lifecycle: a crashed/hung worker (exception, OOM, infinite loop) is torn down, a fresh idle
    * worker is created right away, the console explains what happened, and the next Run uses the fresh worker. */
   let spare = null, crashes = 0;
-  const newWorker = () => new Worker('worker.js?v=14.3');
+  const newWorker = () => new Worker('worker.js?v=14.4');
   function takeWorker() { const w = spare || newWorker(); spare = null; return w; }
   function crash(msg) { if (!worker) return; worker.onmessage = worker.onerror = null; try { worker.terminate(); } catch (e) {} worker = null; gpio = {}; prevV = null; crashes++;
     try { spare = newWorker(); } catch (e) { spare = null; }
@@ -657,8 +671,8 @@
     for (const p of proj.parts) if (ids.has(p.id)) pts.push([p.x, p.y]); for (const w of proj.wires) if (ids.has(w.id)) pts.push(...wirePts(w));
     const xs = pts.map(q => q[0]), ys = pts.map(q => q[1]), r = svg.getBoundingClientRect(), w = Math.max(...xs) - Math.min(...xs) + 160, h = Math.max(...ys) - Math.min(...ys) + 160;
     cam.s = Math.min(2.5, Math.max(0.25, Math.min(r.width / w, r.height / h))); cam.x = r.width / 2 - cam.s * (Math.min(...xs) + Math.max(...xs)) / 2; cam.y = r.height / 2 - cam.s * (Math.min(...ys) + Math.max(...ys)) / 2; render(); };
-  lastJ = JSON.stringify(strip(proj));
+  lastJ = JSON.stringify(strip(proj)); syncHist();
   layout(); palette(); projList(); $('#code').value = proj.code ?? DEFAULT_CODE; fit(); applyUi(); render(); props(); calc();
   window.addEventListener('resize', () => { if (!running) render(); });
-  window.__sim = { fit: () => { fit(); render(); }, del: () => del(), rotate: () => rotate(), get proj() { return proj; }, get running() { return running; }, changed() { changed(); }, select(id) { sel = id && part(id) ? { part: id } : null; render(); props(); }, get sel() { return sel; }, get wireMode() { return wireMode; }, get armed() { return armed; }, get meas() { return meas; }, start, stop, undo, get gpio() { return gpio; }, get shorts() { return shorts; }, get crashes() { return crashes; }, get simTime() { return simTime; }, get hasWorker() { return !!worker; }, get worker() { return worker; }, get hasSpare() { return !!spare; }, get rf() { return rf; }, get extra() { return Object.keys(extra); }, codeFor: id => setCodeTarget(id), get cam() { return cam; }, render: () => render(), select: id => { sel = { part: id }; props(); calc(); render(); }, openSettings, setUi, get ui() { return ui; } };
+  window.__sim = { fit: () => { fit(); render(); }, del: () => del(), rotate: () => rotate(), get proj() { return proj; }, get running() { return running; }, changed() { changed(); }, select(id) { sel = id && part(id) ? { part: id } : null; render(); props(); }, get sel() { return sel; }, get wireMode() { return wireMode; }, get armed() { return armed; }, get meas() { return meas; }, start, stop, undo, redo, get gpio() { return gpio; }, get shorts() { return shorts; }, get crashes() { return crashes; }, get simTime() { return simTime; }, get hasWorker() { return !!worker; }, get worker() { return worker; }, get hasSpare() { return !!spare; }, get rf() { return rf; }, get extra() { return Object.keys(extra); }, codeFor: id => setCodeTarget(id), get cam() { return cam; }, render: () => render(), select: id => { sel = { part: id }; props(); calc(); render(); }, openSettings, setUi, get ui() { return ui; } };
 })();
