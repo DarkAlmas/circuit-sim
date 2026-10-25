@@ -1,10 +1,13 @@
-/* v14.5.7: low-poly schematic on the same table as the v14.5 stimulus world.
+/* v14.5.8: low-poly schematic on the same table as the v14.5 stimulus world.
  * Procedural Three.js primitives only — no GLB, no network, no new project fields.
  * v14.5.6: passives and the other generic-slab parts get a body silhouette in the
  * 2D group color. Wire anchors follow pin endpoints (and sanitized bend points).
  * v14.5.7: each span sags (a light arc), insulation matches the schematic stroke
  * (named color, else ground / power / signal), and power is a little thicker.
  * Pin joints are metal spheres. LED and PIR domes can glow from the live sim.
+ * v14.5.8: the arc is lifted clear of the table. Anchors used to sit at TABLE_Y+0.85
+ * and then dip by up to 2.4, so the span sank into the tabletop and only a stub
+ * at each pin stayed visible.
  *
  * Pose. The schematic SVG origin is the part origin (translate x y, then rotate(rot*90)
  * clockwise because SVG +Y points down). The table is the world3d table: +X right,
@@ -61,9 +64,14 @@
     pot: { r: 2.55, h: 2.6 }
   };
   const BREAD_H = 2.2;
-  const WIRE_Y = TABLE_Y + 0.85;
   const WIRE_R = 0.55;
   const WIRE_R_POWER = 0.78;
+  /* Table mesh is a 4-unit box centered at TABLE_Y - 2, so the top is TABLE_Y.
+   * The centerline has to clear that top by the thickest radius plus a gap even
+   * at the bottom of the sag, or the tube is buried and only the pin ends show. */
+  const WIRE_SAG = 2.4;
+  const WIRE_CLEAR = 0.35;
+  const WIRE_Y = TABLE_Y + WIRE_R_POWER + WIRE_SAG + WIRE_CLEAR;
   const WIRE_NEUTRAL = 0x9aa3b5;
   const WIRE_SIGNAL = 0x3fb37f;
   const WIRE_PLUS = 0xe5484d;
@@ -523,12 +531,12 @@
     } catch (e) { return { color: WIRE_NEUTRAL, role: 'plain', r: WIRE_R }; }
     return { color: WIRE_SIGNAL, role: 'signal', r: WIRE_R };
   }
-  /* Light catenary: ends stay on the anchor, the middle dips a few table units. */
+  /* Light catenary: ends stay on the anchor, the middle dips by at most WIRE_SAG. */
   function sagSpan(a, b) {
     const dx = b.x - a.x, dy = b.y - a.y, dz = b.z - a.z;
     const len = Math.hypot(dx, dy, dz);
     if (!(len >= 0.2)) return [];
-    const drop = Math.min(2.4, Math.max(0.55, len * 0.12));
+    const drop = Math.min(WIRE_SAG, Math.max(0.55, len * 0.12));
     const n = 4;
     const pts = [];
     for (let i = 0; i <= n; i++) {
@@ -582,7 +590,10 @@
     const dx = b.x - a.x, dy = b.y - a.y, dz = b.z - a.z;
     const len = Math.hypot(dx, dy, dz);
     if (!(len >= 0.05)) return;
-    const m = lib.mesh(lib.cyl(r, len, 8), lib.mat(color, 0.62, 0.04));
+    const geo = lib.cyl(r, len, 8);
+    const m = lib.mesh(geo, lib.mat(color, 0.62, 0.04));
+    const gh = geo.parameters && geo.parameters.height;
+    if (m.scale && gh) m.scale.set(1, len / gh, 1);
     m.position.set((a.x + b.x) / 2, (a.y + b.y) / 2, (a.z + b.z) / 2);
     m.quaternion.setFromUnitVectors(new lib.THREE.Vector3(0, 1, 0), new lib.THREE.Vector3(dx / len, dy / len, dz / len));
     m.userData.kind = 'span';
@@ -617,7 +628,7 @@
   }
 
   const api = {
-    SCALE, TABLE_Y, LIFT, WIRE_Y, WIRE_R, WIRE_R_POWER, WIRE_NEUTRAL, WIRE_SIGNAL, WIRE_PLUS, WIRE_GND,
+    SCALE, TABLE_Y, LIFT, WIRE_Y, WIRE_SAG, WIRE_R, WIRE_R_POWER, WIRE_NEUTRAL, WIRE_SIGNAL, WIRE_PLUS, WIRE_GND,
     KIND_OF, GROUP_COLOR,
     kindOf, footprint, pose, localToTable, svgBox, createLib, build,
     pinPoint, wirePoints, wireColorHex, wireLook, sagSpan, buildWires

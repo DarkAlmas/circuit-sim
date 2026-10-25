@@ -1,4 +1,4 @@
-// v14.5.6: schematic pose, passive silhouettes, wire tubes. No DOM, no WebGL, no new sanitize fields.
+// v14.5.8: schematic pose, passive silhouettes, wire tubes that clear the table. No DOM, no WebGL context, no new sanitize fields.
 const test = require('node:test'), assert = require('node:assert');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -222,6 +222,65 @@ test('unnamed wires take the schematic stroke; power is thicker', () => {
   assert.ok(spans.some(c => c.material.color === S.WIRE_PLUS && c.userData.r === S.WIRE_R_POWER));
   assert.ok(spans.some(c => c.material.color === S.WIRE_GND && c.userData.r === S.WIRE_R));
   assert.equal(/https?:\/\//.test(JSON.stringify(s)), false);
+});
+
+test('a long sag clears the tabletop, including the thicker power tube', () => {
+  assert.equal(S.WIRE_SAG, 2.4);
+  assert.ok(S.WIRE_Y > S.TABLE_Y + S.WIRE_SAG);
+  const arc = S.sagSpan({ x: 0, y: S.WIRE_Y, z: 0 }, { x: 40, y: S.WIRE_Y, z: 0 });
+  assert.equal(arc[0].y, S.WIRE_Y);
+  assert.equal(arc[arc.length - 1].y, S.WIRE_Y);
+  const low = Math.min(...arc.map(p => p.y));
+  assert.ok(Math.abs(S.WIRE_Y - low - S.WIRE_SAG) < 1e-9, 'full sag on a long span');
+  assert.ok(low - S.WIRE_R_POWER >= S.TABLE_Y + 0.2, 'power insulation stays above the wood, low=' + low);
+});
+
+test('rendered tubes run from pin to pin above the table', () => {
+  const THREE = require('../vendor/three/three.min.js');
+  require('../netlist.js');
+  const raw = {
+    parts: [
+      { id: 'U1', type: 'esp32', x: 0, y: 0, rot: 0 },
+      { id: 'P1', type: 'pir', x: 280, y: 40, rot: 0, props: { motion: false } }
+    ],
+    wires: [
+      { id: 'wp', a: { part: 'U1', pin: '3V3' }, b: { part: 'P1', pin: 'VCC' } },
+      { id: 'wg', a: { part: 'U1', pin: 'GND' }, b: { part: 'P1', pin: 'GND' } },
+      { id: 'ws', a: { part: 'U1', pin: '2' }, b: { part: 'P1', pin: 'OUT' } }
+    ]
+  };
+  const s = global.window.sanitizeProject(raw);
+  const want = {
+    wp: { color: S.WIRE_PLUS, r: S.WIRE_R_POWER },
+    wg: { color: S.WIRE_GND, r: S.WIRE_R },
+    ws: { color: S.WIRE_SIGNAL, r: S.WIRE_R }
+  };
+  const g = S.buildWires(S.createLib(THREE), s.parts, s.wires);
+  const spans = g.children.filter(c => c.userData.kind === 'span');
+  assert.ok(spans.length >= 12, 'three full arcs, not pin stubs');
+  for (const w of s.wires) {
+    const anchors = S.wirePoints(s.parts, w);
+    const arc = S.sagSpan(anchors[0], anchors[1]);
+    assert.ok(Math.hypot(anchors[1].x - anchors[0].x, anchors[1].z - anchors[0].z) > 8, w.id);
+    const mine = spans.filter(m => m.material.color.getHex() === want[w.id].color && m.userData.r === want[w.id].r);
+    assert.equal(mine.length, arc.length - 1, w.id);
+    let nearA = Infinity, nearB = Infinity, longest = 0;
+    for (const m of mine) {
+      m.updateMatrixWorld(true);
+      const h = m.geometry.parameters.height * m.scale.y;
+      longest = Math.max(longest, h);
+      const top = new THREE.Vector3(0, m.geometry.parameters.height / 2, 0).applyMatrix4(m.matrixWorld);
+      const bot = new THREE.Vector3(0, -m.geometry.parameters.height / 2, 0).applyMatrix4(m.matrixWorld);
+      const yMin = Math.min(top.y, bot.y) - m.userData.r;
+      assert.ok(yMin > S.TABLE_Y, w.id + ' bottom ' + yMin);
+      for (const p of [top, bot]) {
+        nearA = Math.min(nearA, Math.hypot(p.x - anchors[0].x, p.y - anchors[0].y, p.z - anchors[0].z));
+        nearB = Math.min(nearB, Math.hypot(p.x - anchors[1].x, p.y - anchors[1].y, p.z - anchors[1].z));
+      }
+    }
+    assert.ok(longest > 2, w.id + ' has a real span, longest=' + longest);
+    assert.ok(nearA < 0.05 && nearB < 0.05, w.id + ' reaches both pins ' + nearA.toFixed(4) + ' ' + nearB.toFixed(4));
+  }
 });
 
 test('source stays local and procedural', () => {
