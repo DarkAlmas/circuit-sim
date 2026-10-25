@@ -1,5 +1,10 @@
-/* v14.5.5: low-poly schematic on the same table as the v14.5 stimulus world.
+/* v14.5.6: low-poly schematic on the same table as the v14.5 stimulus world.
  * Procedural Three.js primitives only — no GLB, no network, no new project fields.
+ * v14.5.6: passives and the other generic-slab parts get a body silhouette in the
+ * 2D group color. «Пассивные» are one mesh, a bit larger in plan than the old
+ * 4.8×2.16×1.5 slab, with no bands, legs, or labels. Wire tubes follow pin
+ * endpoints (and sanitized bend points) in the same table space. LED/PIR glow
+ * stays out of this pass.
  *
  * Pose. The schematic SVG origin is the part origin (translate x y, then rotate(rot*90)
  * clockwise because SVG +Y points down). The table is the world3d table: +X right,
@@ -12,8 +17,8 @@
  * SCALE is 0.12 table-units per SVG unit, so a DevKit drawn ~168×312 px is about
  * 20×37 on a 180×100 table and parts laid out a few hundred pixels apart do not
  * stack on top of each other. Local +Y (down the symbol) becomes table +Z before
- * yaw; localToTable() applies the yaw. Wires stay on the 2D canvas — this view
- * does not move parts and does not write sensor readings.
+ * yaw; localToTable() applies the yaw. This view does not move parts and does not
+ * write sensor readings. Meshes are visual only — the 2D canvas stays the editor.
  */
 (function () {
   'use strict';
@@ -22,7 +27,18 @@
   const LIFT = 0.2;
   const KIND_OF = {
     esp32: 'esp32', esp8266: 'esp8266', esp32c3: 'esp32c3', uno: 'uno', pico: 'pico', opi: 'opi',
-    atmega328: 'dip', attiny85: 'dip', dht22: 'dht', hcsr04: 'hcsr04', pir: 'pir', ldr: 'ldr'
+    atmega328: 'dip', attiny85: 'dip', ne555: 'dip', hc595: 'dip',
+    dht22: 'dht', hcsr04: 'hcsr04', pir: 'pir', ldr: 'ldr', ntc: 'bead',
+    resistor: 'resistor', cap: 'cap', ecap: 'ecap', inductor: 'inductor', pot: 'pot', breadboard: 'breadboard',
+    led: 'led', rgbled: 'led', diode: 'diode', npn: 'to92',
+    mosfet: 'to220', pmosfet: 'to220', lm7805: 'to220', ams1117: 'to220',
+    button: 'button', switch: 'switch', voltmeter: 'meter', ammeter: 'meter',
+    dc: 'supply', battery: 'battery', liion: 'cell', gnd: 'gnd',
+    buzzer: 'buzzer', motor: 'motor', ttmotor: 'motor', coreless: 'motor', servo: 'servo', relay: 'relay',
+    usbuart: 'module', boost: 'module', l298n: 'module', drv8833: 'module', lvlshift: 'module',
+    tcrt5000: 'module', vl53l0x: 'module', mpu6050: 'module', nrf24: 'module',
+    oled: 'panel', lcd1602: 'panel', monitor: 'panel', seg7: 'panel', wsm8: 'panel', wsm16: 'panel', max7219: 'panel',
+    strip8: 'strip', ring16: 'ring'
   };
   const FALLBACK = {
     esp32: [168, 312], esp8266: [168, 272], esp32c3: [128, 222], uno: [188, 382], pico: [148, 462],
@@ -31,12 +47,29 @@
   };
   const THICK = {
     esp32: 1.8, esp8266: 1.8, esp32c3: 1.6, uno: 1.8, pico: 1.6, opi: 1.8, dip: 2.2,
-    dht: 8, hcsr04: 1.8, pir: 1.6, ldr: 2.2, generic: 1.5
+    dht: 8, hcsr04: 1.8, pir: 1.6, ldr: 2.2, generic: 1.5,
+    module: 1.8, panel: 1.6, strip: 1.2, ring: 1.4, battery: 3.6, cell: 2.4
   };
+  /* Generic slab for an unboxed part is FALLBACK 40×18 × SCALE → 4.8×2.16, height 1.5.
+   * Passive bodies sit above that in every axis so a high camera still reads the shape.
+   * One primitive, group color only — the pins stay on the schematic coordinates. */
+  const PASSIVE = {
+    resistor: { len: 6.8, r: 1.5 },
+    cap: { r: 2.6, h: 2.3 },
+    ecap: { r: 2.5, h: 4.4 },
+    inductor: { r: 1.85, tube: 0.95 },
+    pot: { r: 2.55, h: 2.6 }
+  };
+  const BREAD_H = 2.2;
+  const WIRE_Y = TABLE_Y + 0.85;
+  const WIRE_R = 0.32;
+  const WIRE_NEUTRAL = 0x9aa3b5;
   const GROUP_COLOR = {
     'Платы': 0x243044, 'Датчики': 0x2c6b45, 'Пассивные': 0xc4a574, 'Питание': 0x2c3340,
-    'Индикация': 0x3d4f78, 'Активные': 0x3e4a5c, 'Микросхемы': 0x1c1c1e, 'Интерфейсы': 0x3a4658
+    'Индикация': 0x3d4f78, 'Активные': 0x3e4a5c, 'Микросхемы': 0x1c1c1e, 'Интерфейсы': 0x3a4658,
+    'Полупроводники': 0x1c1c1e, 'Ввод/вывод': 0x3f3a36
   };
+  const PASSIVE_COLOR = GROUP_COLOR['Пассивные'];
 
   function q(v) { return Math.round(v * 1000) / 1000; }
   function finite(v) { const n = +v; return Number.isFinite(n) ? n : 0; }
@@ -55,10 +88,33 @@
     if (b && Number.isFinite(+b[2]) && Number.isFinite(+b[3]) && +b[2] > 4 && +b[3] > 4) { w = +b[2]; dep = +b[3]; }
     return [Math.min(420, Math.max(12, w)), Math.min(420, Math.max(12, dep))];
   }
+  function passiveFootprint(kind) {
+    const p = PASSIVE[kind];
+    if (!p) return null;
+    if (kind === 'resistor') return { w: p.len, d: q(p.r * 2), h: q(p.r * 2), kind };
+    if (kind === 'inductor') {
+      const outer = q((p.r + p.tube) * 2);
+      return { w: outer, d: outer, h: q(p.tube * 2), kind };
+    }
+    const dia = q(p.r * 2);
+    return { w: dia, d: dia, h: p.h, kind };
+  }
   function footprint(type) {
     const kind = kindOf(type);
+    if (kind === 'breadboard') {
+      const box = svgBox(type, kind);
+      return { w: q(box[0] * SCALE), d: q(box[1] * SCALE), h: BREAD_H, kind };
+    }
+    const body = passiveFootprint(kind);
+    if (body) return body;
     const [w, d] = svgBox(type, kind);
     return { w: q(w * SCALE), d: q(d * SCALE), h: THICK[kind] || THICK.generic, kind };
+  }
+  function groupColor(type) {
+    const d = window.PARTS && type && window.PARTS[type];
+    const g = d && d.group;
+    if (g && Object.prototype.hasOwnProperty.call(GROUP_COLOR, g)) return GROUP_COLOR[g];
+    return 0x4a5568;
   }
   function pose(part) {
     const p = part && typeof part === 'object' ? part : {};
@@ -97,8 +153,13 @@
     function box(w, h, d) { const a = qd(w), b = qd(h), c = qd(d); return geo('b' + a + 'x' + b + 'x' + c, () => new THREE.BoxGeometry(a, b, c)); }
     function cyl(r, h, seg) { const a = qd(r), b = qd(h); return geo('c' + a + 'x' + b + 'x' + seg, () => new THREE.CylinderGeometry(a, a, b, seg)); }
     function dome(r) { const a = qd(r); return geo('d' + a, () => new THREE.SphereGeometry(a, 16, 10, 0, Math.PI * 2, 0, Math.PI / 2)); }
+    function ball(r) { const a = qd(r); return geo('s' + a, () => new THREE.SphereGeometry(a, 12, 8)); }
+    function torus(r, tube) {
+      const a = qd(r), b = qd(tube);
+      return geo('t' + a + 'x' + b, () => new THREE.TorusGeometry(a, b, 6, 10));
+    }
     function mesh(geometry, material) { return new THREE.Mesh(geometry, material); }
-    return { THREE, geo, mat, box, cyl, dome, mesh };
+    return { THREE, geo, mat, box, cyl, dome, ball, torus, mesh };
   }
 
   function add(g, lib, w, h, d, color, x, y, z, rough, metal) {
@@ -213,35 +274,287 @@
   }
   function generic(lib, part) {
     const s = sizeOf(part, 'generic');
-    const d = window.PARTS && part && window.PARTS[part.type];
-    const color = (d && Object.prototype.hasOwnProperty.call(GROUP_COLOR, d.group) && GROUP_COLOR[d.group]) || 0x4a5568;
     const g = new lib.THREE.Group();
-    add(g, lib, s.w, s.h, s.d, color, 0, s.h / 2, 0, 0.74, 0.04);
+    add(g, lib, s.w, s.h, s.d, groupColor(part && part.type), 0, s.h / 2, 0, 0.74, 0.04);
     g.userData.kind = 'generic';
     return g;
   }
+  function axial(lib, kind, len, r, color) {
+    const g = new lib.THREE.Group();
+    const m = lib.mesh(lib.cyl(r, len, 12), lib.mat(color, 0.58, 0.08));
+    m.rotation.z = Math.PI / 2;
+    m.position.y = r;
+    g.add(m);
+    g.userData.kind = kind;
+    return g;
+  }
+  function upright(lib, kind, r, h, color) {
+    const g = new lib.THREE.Group();
+    const m = lib.mesh(lib.cyl(r, h, 12), lib.mat(color, 0.58, 0.08));
+    m.position.y = h / 2;
+    g.add(m);
+    g.userData.kind = kind;
+    return g;
+  }
+  function passiveCoil(lib) {
+    const g = new lib.THREE.Group();
+    const p = PASSIVE.inductor;
+    const m = lib.mesh(lib.torus(p.r, p.tube), lib.mat(PASSIVE_COLOR, 0.58, 0.08));
+    m.rotation.x = Math.PI / 2;
+    m.position.y = p.tube;
+    g.add(m);
+    g.userData.kind = 'inductor';
+    return g;
+  }
+  function passiveBoard(lib, part) {
+    const [sw, sd] = svgBox(part && part.type, 'breadboard');
+    const g = new lib.THREE.Group();
+    add(g, lib, q(sw * SCALE), BREAD_H, q(sd * SCALE), PASSIVE_COLOR, 0, BREAD_H / 2, 0, 0.78, 0.04);
+    g.userData.kind = 'breadboard';
+    return g;
+  }
+  function fixedBox(lib, part, kind, w, h, d) {
+    const g = new lib.THREE.Group();
+    add(g, lib, w, h, d, groupColor(part && part.type), 0, h / 2, 0, 0.68, 0.06);
+    g.userData.kind = kind;
+    return g;
+  }
+  /* TODO: lens stays a static dome. Lighting it from current / props.color is a later pass. */
+  function ledShape(lib, part) {
+    const g = new lib.THREE.Group();
+    const wide = !!(part && part.type === 'rgbled');
+    const n = wide ? 4 : 2;
+    const span = wide ? 3.2 : 2.2;
+    add(g, lib, wide ? 4.2 : 2.6, 0.7, 1.6, groupColor(part && part.type), 0, 0.35, 0, 0.6, 0.08);
+    for (let i = 0; i < n; i++) {
+      const x = -span / 2 + span * i / (n - 1);
+      add(g, lib, 0.28, 2.0, 0.28, 0xc5cad1, x, 1.0, 0, 0.4, 0.5);
+    }
+    const dome = lib.mesh(lib.dome(wide ? 1.55 : 1.25), lib.mat(0xf4f1ea, 0.25, 0.04, 0.94));
+    dome.position.y = 2.0;
+    g.add(dome);
+    g.userData.kind = 'led';
+    return g;
+  }
+  function to220(lib, part) {
+    const g = new lib.THREE.Group();
+    add(g, lib, 3.4, 1.5, 4.6, groupColor(part && part.type), 0, 0.75, 0.3, 0.55, 0.12);
+    add(g, lib, 2.6, 0.35, 1.8, 0xc5cad1, 0, 1.7, -1.6, 0.35, 0.55);
+    g.userData.kind = 'to220';
+    return g;
+  }
+  function bead(lib, part) {
+    const g = new lib.THREE.Group();
+    const m = lib.mesh(lib.ball(1.35), lib.mat(groupColor(part && part.type), 0.5, 0.06));
+    m.position.y = 1.35;
+    g.add(m);
+    g.userData.kind = 'bead';
+    return g;
+  }
+  function motorShape(lib, part) {
+    const g = new lib.THREE.Group();
+    const body = lib.mesh(lib.cyl(2.1, 3.4, 14), lib.mat(groupColor(part && part.type), 0.5, 0.18));
+    body.rotation.z = Math.PI / 2;
+    body.position.y = 2.1;
+    g.add(body);
+    const shaft = lib.mesh(lib.cyl(0.45, 1.6, 8), lib.mat(0xc5cad1, 0.35, 0.55));
+    shaft.rotation.z = Math.PI / 2;
+    shaft.position.set(2.4, 2.1, 0);
+    g.add(shaft);
+    g.userData.kind = 'motor';
+    return g;
+  }
+  function servoShape(lib, part) {
+    const g = new lib.THREE.Group();
+    add(g, lib, 5.4, 2.4, 3.2, groupColor(part && part.type), 0, 1.2, 0, 0.6, 0.08);
+    const horn = lib.mesh(lib.cyl(1.1, 0.45, 10), lib.mat(0xe8e8e8, 0.5, 0.08));
+    horn.position.set(1.2, 2.6, 0);
+    g.add(horn);
+    g.userData.kind = 'servo';
+    return g;
+  }
+  function relayShape(lib, part) {
+    const g = new lib.THREE.Group();
+    add(g, lib, 5.2, 2.6, 4.4, groupColor(part && part.type), 0, 1.3, 0, 0.62, 0.08);
+    const coil = lib.mesh(lib.cyl(0.9, 1.2, 10), lib.mat(0xc9a46a, 0.55, 0.2));
+    coil.rotation.z = Math.PI / 2;
+    coil.position.set(-0.6, 2.9, 0);
+    g.add(coil);
+    g.userData.kind = 'relay';
+    return g;
+  }
+  function boxed(lib, part, kind) {
+    const s = sizeOf(part, kind);
+    const g = new lib.THREE.Group();
+    add(g, lib, s.w, s.h, s.d, groupColor(part && part.type), 0, s.h / 2, 0, 0.66, 0.08);
+    if (kind === 'battery' || kind === 'cell') add(g, lib, Math.max(0.8, s.w * 0.22), 0.55, Math.max(0.6, s.d * 0.16), 0xc5cad1, 0, s.h + 0.28, -s.d * 0.18, 0.4, 0.4);
+    g.userData.kind = kind;
+    return g;
+  }
+  function moduleShape(lib, part) {
+    const s = sizeOf(part, 'module');
+    const g = new lib.THREE.Group();
+    add(g, lib, s.w, s.h, s.d, groupColor(part && part.type), 0, s.h / 2, 0, 0.68, 0.06);
+    add(g, lib, Math.max(1.2, q(s.w * 0.28)), 0.7, Math.max(1.0, q(s.d * 0.22)), 0x16181c, 0, s.h + 0.35, -s.d * 0.08, 0.55, 0.12);
+    g.userData.kind = 'module';
+    return g;
+  }
+  function panelShape(lib, part) {
+    const s = sizeOf(part, 'panel');
+    const g = new lib.THREE.Group();
+    add(g, lib, s.w, s.h, s.d, groupColor(part && part.type), 0, s.h / 2, 0, 0.6, 0.08);
+    add(g, lib, q(s.w * 0.78), 0.2, q(s.d * 0.62), 0x10141c, 0, s.h + 0.1, -s.d * 0.04, 0.4, 0.15);
+    g.userData.kind = 'panel';
+    return g;
+  }
+  function stripShape(lib, part) {
+    const s = sizeOf(part, 'strip');
+    const g = new lib.THREE.Group();
+    const h = Math.min(s.h, 1.2);
+    add(g, lib, s.w, h, s.d, groupColor(part && part.type), 0, h / 2, 0, 0.62, 0.06);
+    const n = 4;
+    for (let i = 0; i < n; i++) {
+      const x = -s.w * 0.36 + (s.w * 0.72) * i / (n - 1);
+      const dot = lib.mesh(lib.dome(Math.min(0.7, s.d * 0.22)), lib.mat(0xd7dde6, 0.35, 0.08));
+      dot.position.set(x, h, 0);
+      g.add(dot);
+    }
+    g.userData.kind = 'strip';
+    return g;
+  }
+  function ringShape(lib, part) {
+    const s = sizeOf(part, 'ring');
+    const g = new lib.THREE.Group();
+    const tube = Math.max(0.55, Math.min(s.w, s.d) * 0.08);
+    const r = Math.max(1.4, Math.min(s.w, s.d) * 0.32 - tube);
+    const m = lib.mesh(lib.torus(r, tube), lib.mat(groupColor(part && part.type), 0.55, 0.1));
+    m.rotation.x = Math.PI / 2;
+    m.position.y = tube;
+    g.add(m);
+    g.userData.kind = 'ring';
+    return g;
+  }
+  function silence(obj) {
+    const kill = o => { if (o) o.raycast = function () {}; };
+    if (obj && typeof obj.traverse === 'function') obj.traverse(kill);
+    else if (obj && obj.children) { kill(obj); for (const c of obj.children) kill(c); }
+    else kill(obj);
+    return obj;
+  }
   function build(lib, part) {
     const kind = kindOf(part && part.type);
+    const color = part && part.type ? groupColor(part.type) : PASSIVE_COLOR;
+    let g;
     switch (kind) {
-      case 'esp32': return esp32(lib, part);
-      case 'esp8266': return esp8266(lib, part);
-      case 'esp32c3': return esp32c3(lib, part);
-      case 'uno': return uno(lib, part);
-      case 'pico': return pico(lib, part);
-      case 'opi': return opi(lib, part);
-      case 'dip': return dip(lib, part);
-      case 'dht': return dht(lib, part);
-      case 'hcsr04': return hcsr04(lib, part);
-      case 'pir': return pir(lib, part);
-      case 'ldr': return ldr(lib, part);
-      case 'generic': return generic(lib, part);
+      case 'esp32': g = esp32(lib, part); break;
+      case 'esp8266': g = esp8266(lib, part); break;
+      case 'esp32c3': g = esp32c3(lib, part); break;
+      case 'uno': g = uno(lib, part); break;
+      case 'pico': g = pico(lib, part); break;
+      case 'opi': g = opi(lib, part); break;
+      case 'dip': g = dip(lib, part); break;
+      case 'dht': g = dht(lib, part); break;
+      case 'hcsr04': g = hcsr04(lib, part); break;
+      case 'pir': g = pir(lib, part); break;
+      case 'ldr': g = ldr(lib, part); break;
+      case 'resistor': g = axial(lib, 'resistor', PASSIVE.resistor.len, PASSIVE.resistor.r, PASSIVE_COLOR); break;
+      case 'cap': g = upright(lib, 'cap', PASSIVE.cap.r, PASSIVE.cap.h, PASSIVE_COLOR); break;
+      case 'ecap': g = upright(lib, 'ecap', PASSIVE.ecap.r, PASSIVE.ecap.h, PASSIVE_COLOR); break;
+      case 'inductor': g = passiveCoil(lib); break;
+      case 'pot': g = upright(lib, 'pot', PASSIVE.pot.r, PASSIVE.pot.h, PASSIVE_COLOR); break;
+      case 'breadboard': g = passiveBoard(lib, part); break;
+      case 'led': g = ledShape(lib, part); break;
+      case 'diode': g = axial(lib, 'diode', 6.2, 0.95, color); break;
+      case 'to92': g = upright(lib, 'to92', 1.5, 3.2, color); break;
+      case 'to220': g = to220(lib, part); break;
+      case 'button': g = upright(lib, 'button', 1.8, 1.8, color); break;
+      case 'switch': g = fixedBox(lib, part, 'switch', 4.4, 1.4, 2.2); break;
+      case 'meter': g = fixedBox(lib, part, 'meter', 5.2, 2.4, 3.2); break;
+      case 'supply': g = fixedBox(lib, part, 'supply', 4.8, 3.0, 3.4); break;
+      case 'battery': g = boxed(lib, part, 'battery'); break;
+      case 'gnd': g = upright(lib, 'gnd', 1.5, 2.0, color); break;
+      case 'cell': g = boxed(lib, part, 'cell'); break;
+      case 'buzzer': g = upright(lib, 'buzzer', 2.0, 1.7, color); break;
+      case 'motor': g = motorShape(lib, part); break;
+      case 'servo': g = servoShape(lib, part); break;
+      case 'relay': g = relayShape(lib, part); break;
+      case 'bead': g = bead(lib, part); break;
+      case 'module': g = moduleShape(lib, part); break;
+      case 'panel': g = panelShape(lib, part); break;
+      case 'strip': g = stripShape(lib, part); break;
+      case 'ring': g = ringShape(lib, part); break;
+      case 'generic': g = generic(lib, part); break;
       default: { const never = kind; throw new Error('schematic3d: ' + never); }
     }
+    return silence(g);
+  }
+  function wireColorHex(name) {
+    const table = window.WIRE_COLORS;
+    if (typeof name === 'string' && table && Object.prototype.hasOwnProperty.call(table, name)) {
+      const hex = table[name];
+      if (typeof hex === 'string' && /^#[0-9a-fA-F]{6}$/.test(hex)) return parseInt(hex.slice(1), 16);
+    }
+    return WIRE_NEUTRAL;
+  }
+  function pinPoint(part, pin) {
+    const at = pose(part);
+    const loc = localToTable(part, pin ? pin.x : 0, pin ? pin.y : 0);
+    return { x: q(at.x + loc.x), y: WIRE_Y, z: q(at.z + loc.z) };
+  }
+  function wirePoints(parts, wire) {
+    if (!wire || !wire.a || !wire.b) return [];
+    const list = Array.isArray(parts) ? parts : [];
+    const byId = new Map();
+    for (const p of list) if (p && p.id) byId.set(p.id, p);
+    const end = e => {
+      const p = e && byId.get(e.part);
+      const d = p && window.PARTS && window.PARTS[p.type];
+      const pin = d && Array.isArray(d.pins) ? d.pins.find(q => q.id === e.pin) : null;
+      if (!p || !pin) return null;
+      return pinPoint(p, pin);
+    };
+    const a = end(wire.a), b = end(wire.b);
+    if (!a || !b) return [];
+    const mid = [];
+    if (Array.isArray(wire.pts)) {
+      for (const pt of wire.pts) {
+        if (!Array.isArray(pt) || pt.length < 2 || !Number.isFinite(+pt[0]) || !Number.isFinite(+pt[1])) continue;
+        mid.push({ x: q(finite(pt[0]) * SCALE), y: WIRE_Y, z: q(finite(pt[1]) * SCALE) });
+      }
+    }
+    const out = [];
+    for (const p of [a, ...mid, b]) {
+      const prev = out[out.length - 1];
+      if (prev && prev.x === p.x && prev.z === p.z) continue;
+      out.push(p);
+    }
+    return out;
+  }
+  function addTube(g, lib, a, b, color) {
+    const dx = b.x - a.x, dy = b.y - a.y, dz = b.z - a.z;
+    const len = Math.hypot(dx, dy, dz);
+    if (!(len >= 0.2)) return;
+    const m = lib.mesh(lib.cyl(WIRE_R, len, 6), lib.mat(color, 0.48, 0.12));
+    m.position.set((a.x + b.x) / 2, (a.y + b.y) / 2, (a.z + b.z) / 2);
+    m.quaternion.setFromUnitVectors(new lib.THREE.Vector3(0, 1, 0), new lib.THREE.Vector3(dx / len, dy / len, dz / len));
+    g.add(m);
+  }
+  function buildWires(lib, parts, wires) {
+    const g = new lib.THREE.Group();
+    g.userData.role = 'wires';
+    const list = Array.isArray(wires) ? wires : [];
+    for (const w of list) {
+      const pts = wirePoints(parts, w);
+      const color = wireColorHex(w && w.color);
+      for (let i = 1; i < pts.length; i++) addTube(g, lib, pts[i - 1], pts[i], color);
+    }
+    return silence(g);
   }
 
   const api = {
-    SCALE, TABLE_Y, LIFT, KIND_OF,
-    kindOf, footprint, pose, localToTable, svgBox, createLib, build
+    SCALE, TABLE_Y, LIFT, WIRE_Y, WIRE_R, WIRE_NEUTRAL, KIND_OF, GROUP_COLOR,
+    kindOf, footprint, pose, localToTable, svgBox, createLib, build,
+    pinPoint, wirePoints, wireColorHex, buildWires
   };
   window.Schematic3D = api;
 })();

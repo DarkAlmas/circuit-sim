@@ -1,4 +1,4 @@
-// v14.5.5: «Схема 3D» loads on the existing table, poses match, stimuli and the 2D canvas stay.
+// v14.5.6: «Схема 3D» loads on the existing table, poses match, stimuli and the 2D canvas stay.
 const { chromium } = require('playwright-core'); const assert = require('assert');
 const URL = process.argv[2] || 'http://localhost:8765/';
 const SHOT = process.argv[3] || '/tmp';
@@ -16,7 +16,7 @@ const SHOT = process.argv[3] || '/tmp';
   ok(csp.includes("connect-src 'none'") && csp.includes("script-src 'self'") && !/unsafe-inline|unsafe-eval/.test(csp), 'CSP unchanged');
   const scripts = await pg.evaluate(() => [...document.scripts].filter(s => s.src).map(s => s.src));
   const origin = new globalThis.URL(URL).origin;
-  ok(scripts.every(s => s.startsWith(origin) && /\?v=14\.5\.5$/.test(s)), 'scripts are same-origin ?v=14.5.5');
+  ok(scripts.every(s => s.startsWith(origin) && /\?v=14\.5\.6$/.test(s)), 'scripts are same-origin ?v=14.5.6');
   ok(scripts.some(s => s.includes('/schematic3d.js')) && scripts.some(s => s.includes('/vendor/three/three.min.js')), 'schematic3d and vendored Three.js');
 
   await pg.click('#w3tab'); await pg.waitForTimeout(400);
@@ -60,11 +60,13 @@ const SHOT = process.argv[3] || '/tmp';
       kinds,
       boards: ['esp32', 'esp8266', 'esp32c3', 'uno', 'pico', 'opi'].every(k => kinds.includes(k)),
       sensors: ['dht', 'hcsr04', 'pir', 'ldr'].every(k => kinds.includes(k)),
-      deep: Math.min(...rows.filter(r => r.kind !== 'generic').map(r => r.n))
+      passives: kinds.includes('resistor') && kinds.includes('led'),
+      wires: World3D.schemaWireCount(),
+      deep: Math.min(...rows.filter(r => ['esp32', 'esp8266', 'esp32c3', 'uno', 'pico', 'opi', 'dht', 'hcsr04', 'pir', 'ldr'].includes(r.kind)).map(r => r.n))
     };
   });
-  console.log('schema', JSON.stringify({ n: detail.n, kinds: detail.kinds, deep: detail.deep, bad: detail.bad }));
-  ok(detail.bad.length === 0 && detail.n === detail.parts && detail.boards && detail.sensors && detail.deep >= 3, 'meshes posed from the schematic ' + detail.bad.join('; '));
+  console.log('schema', JSON.stringify({ n: detail.n, kinds: detail.kinds, deep: detail.deep, wires: detail.wires, bad: detail.bad }));
+  ok(detail.bad.length === 0 && detail.n === detail.parts && detail.boards && detail.sensors && detail.passives && detail.wires >= 3 && detail.deep >= 3, 'meshes posed from the schematic ' + detail.bad.join('; '));
   await pg.screenshot({ path: SHOT + '/schematic3d.png' });
 
   const before = await pg.evaluate(() => {
