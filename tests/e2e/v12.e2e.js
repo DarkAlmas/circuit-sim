@@ -15,8 +15,8 @@ async function phone(b, W, H) {
   const tag = `[${W}×${H}]`;
   const ok = (c, m) => { assert.ok(c, tag + ' ' + m); console.log(tag, '✓', m); };
 
-  ok(await ev(() => [...document.scripts].filter(s => s.src).every(s => /\?v=(12|13|14|14\.1|14\.2|14\.3|14\.4|14\.5|14\.5\.1)$/.test(s.src)) && document.body.classList.contains('pm')), 'scripts ?v=12+, portrait UI on');
-  ok((await (await fetch(new globalThis.URL('app.js?v=14.5.1', URL))).text()).includes("new Worker('worker.js?v=14.5.1')"), 'worker cache key v=14.5.1');
+  ok(await ev(() => [...document.scripts].filter(s => s.src).every(s => /\?v=(12|13|14|14\.1|14\.2|14\.3|14\.4|14\.5|14\.5\.1|14\.5\.3)$/.test(s.src)) && document.body.classList.contains('pm')), 'scripts ?v=12+, portrait UI on');
+  ok((await (await fetch(new globalThis.URL('app.js?v=14.5.3', URL))).text()).includes("new Worker('worker.js?v=14.5.3')"), 'worker cache key v=14.5.3');
   // top bar 48px, tabs, bottom bar, touch targets, text size, no horizontal scroll
   const L = await ev(() => { const vis = e => { const r = e.getBoundingClientRect(); return r.width > 0 && r.height > 0 && getComputedStyle(e).visibility !== 'hidden'; };
     const btns = [...document.querySelectorAll('header button, header select, #pmTabs button, #mbar button, #pmFit')].filter(vis);

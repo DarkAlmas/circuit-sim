@@ -1,5 +1,7 @@
-/* v14.5.1: 3D sensor world. Stimulus zones are unchanged (US cone 12°/400 cm,
+/* v14.5.3: 3D sensor world. Stimulus zones are unchanged (US cone 12°/400 cm,
  * flashlight 22°/140 cm, heat|humid spheres R50, PIR 40°/280 cm, table 86×46).
+ * Humidity stays obvious anywhere inside the R50 steam sphere (about 80% at the
+ * rim, 100% at the source, ambient 45% outside). Heat keeps the linear falloff.
  * Readings land on schematic props in kind order: hcsr04.dist, ldr.lux,
  * dht22.temp/hum, pir.motion, and ntc.temp from the same climate sample.
  * VL53 and TCRT stay on the robot track.
@@ -13,6 +15,9 @@
   const BLOCK = 18, HEAT_R = 50, HUM_R = 50, FLASH_R = 140, PIR_R = 280, SONAR_R = 400, SONAR_VIS = 160;
   const FLASH_ANG = 22 * Math.PI / 180, PIR_ANG = 40 * Math.PI / 180, SONAR_ANG = 12 * Math.PI / 180;
   const AMB = { lux: 100, temp: 24, hum: 45 };
+  // Linear sphereGain left the outer R50 shell at +1% (45 → 46). A floor keeps
+  // the steam obvious inside the sphere; the source still reaches 100%.
+  const HUM_EDGE = 35, HUM_PEAK = 55;
   const REST = { ultrasonic: 6, ldr: 4, dht: 8, pir: 7, block: 9, flashlight: 7, heat: 8, humid: 8, mover: 11 };
   const SENSOR_Z = 16, STIM_Z = -24;
   const FLASH_DIR = norm([0, -0.15, 1]);
@@ -151,7 +156,10 @@
         case 'dht': {
           let temp = AMB.temp, hum = AMB.hum;
           for (const h of heats) temp += 40 * sphereGain(xyz(h), HEAT_R, p);
-          for (const h of hums) hum += 55 * sphereGain(xyz(h), HUM_R, p);
+          for (const h of hums) {
+            const g = sphereGain(xyz(h), HUM_R, p);
+            if (g > 0) hum += HUM_EDGE + (HUM_PEAK - HUM_EDGE) * g;
+          }
           out.push({ id: s.id, kind, temp: Math.round(clamp(temp, -40, 125) * 10) / 10, hum: Math.round(clamp(hum, 0, 100)) });
           break;
         }
