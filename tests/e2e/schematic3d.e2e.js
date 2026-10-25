@@ -1,0 +1,159 @@
+// v14.5.5: «Схема 3D» loads on the existing table, poses match, stimuli and the 2D canvas stay.
+const { chromium } = require('playwright-core'); const assert = require('assert');
+const URL = process.argv[2] || 'http://localhost:8765/';
+const SHOT = process.argv[3] || '/tmp';
+(async () => {
+  const b = await chromium.launch({ executablePath: process.env.CHROME || '/usr/bin/google-chrome', args: ['--no-sandbox', '--use-gl=angle', '--use-angle=swiftshader'] });
+  const pg = await b.newPage({ viewport: { width: 1400, height: 860 } });
+  const errs = [], net = [];
+  pg.on('pageerror', e => errs.push(e.message));
+  pg.on('console', m => { if (/Content Security Policy|Refused/i.test(m.text())) errs.push(m.text()); });
+  pg.on('request', r => { const u = r.url(); if (!u.startsWith(URL) && !u.startsWith('data:') && !u.startsWith('blob:')) net.push(u); });
+  await pg.goto(URL); await pg.evaluate(() => localStorage.clear()); await pg.reload(); await pg.waitForTimeout(400);
+  const ok = (c, m) => { assert.ok(c, m); console.log('✓', m); };
+
+  const csp = await pg.evaluate(() => document.querySelector('meta[http-equiv="Content-Security-Policy"]').content);
+  ok(csp.includes("connect-src 'none'") && csp.includes("script-src 'self'") && !/unsafe-inline|unsafe-eval/.test(csp), 'CSP unchanged');
+  const scripts = await pg.evaluate(() => [...document.scripts].filter(s => s.src).map(s => s.src));
+  const origin = new globalThis.URL(URL).origin;
+  ok(scripts.every(s => s.startsWith(origin) && /\?v=14\.5\.5$/.test(s.src)), 'scripts are same-origin ?v=14.5.5');
+  ok(scripts.some(s => s.includes('/schematic3d.js')) && scripts.some(s => s.includes('/vendor/three/three.min.js')), 'schematic3d and vendored Three.js');
+
+  await pg.click('#w3tab'); await pg.waitForTimeout(400);
+  ok(await pg.evaluate(() => World3D.active && World3D.view === 'world' && document.querySelector('#w3fail').hidden), 'world view still opens');
+  await pg.click('#w3pal button[data-view=schema]'); await pg.waitForTimeout(300);
+  const laid = await pg.evaluate(() => {
+    const want = ['esp32', 'esp8266', 'esp32c3', 'uno', 'pico', 'opi', 'dht22', 'hcsr04', 'pir', 'ldr'];
+    __sim.proj.parts.push(
+      { id: 'U4', type: 'uno', x: -420, y: 180, rot: 0, props: {} },
+      { id: 'U5', type: 'esp32c3', x: -420, y: -180, rot: 0, props: {} },
+      { id: 'U6', type: 'esp8266', x: 420, y: -180, rot: 0, props: {} },
+      { id: 'U7', type: 'pico', x: 460, y: 40, rot: 1, props: {} },
+      { id: 'U8', type: 'opi', x: 460, y: 220, rot: 0, props: {} },
+      { id: 'U2', type: 'hcsr04', x: 220, y: 40, rot: 0, props: { dist: 50 } },
+      { id: 'U3', type: 'dht22', x: 220, y: 160, rot: 1, props: { temp: 24, hum: 45 } },
+      { id: 'P1', type: 'pir', x: 220, y: 280, rot: 0, props: { motion: false } },
+      { id: 'R9', type: 'ldr', x: -180, y: 160, rot: 2, props: { lux: 100 } }
+    );
+    __sim.changed();
+    return { view: World3D.view, fail: document.querySelector('#w3fail').hidden, label: document.querySelector('#w3pal button[data-view=schema]').textContent, want };
+  });
+  ok(laid.view === 'schema' && laid.fail && laid.label === 'Схема 3D', 'schema view label');
+  await pg.waitForTimeout(250);
+  const detail = await pg.evaluate(() => {
+    const ang = (a, b) => Math.abs(Math.atan2(Math.sin(a - b), Math.cos(a - b)));
+    const rows = World3D.schemaDetail();
+    const parts = __sim.proj.parts;
+    const bad = [];
+    for (const p of parts) {
+      const pose = Schematic3D.pose(p);
+      const row = rows.find(r => r.id === p.id);
+      if (!row) { bad.push(p.id + ' missing'); continue; }
+      if (row.kind !== Schematic3D.kindOf(p.type)) bad.push(p.id + ' kind ' + row.kind);
+      if (Math.abs(row.x - pose.x) > 1e-6 || Math.abs(row.z - pose.z) > 1e-6 || Math.abs(row.y - pose.y) > 1e-6) bad.push(p.id + ' pos');
+      if (ang(row.yaw, pose.yaw) > 1e-4) bad.push(p.id + ' yaw ' + row.yaw + ' vs ' + pose.yaw);
+      if (row.n < 1) bad.push(p.id + ' empty');
+    }
+    const kinds = rows.map(r => r.kind);
+    return {
+      bad, n: rows.length, parts: parts.length,
+      kinds,
+      boards: ['esp32', 'esp8266', 'esp32c3', 'uno', 'pico', 'opi'].every(k => kinds.includes(k)),
+      sensors: ['dht', 'hcsr04', 'pir', 'ldr'].every(k => kinds.includes(k)),
+      deep: Math.min(...rows.filter(r => r.kind !== 'generic').map(r => r.n))
+    };
+  });
+  console.log('schema', JSON.stringify({ n: detail.n, kinds: detail.kinds, deep: detail.deep, bad: detail.bad }));
+  ok(detail.bad.length === 0 && detail.n === detail.parts && detail.boards && detail.sensors && detail.deep >= 3, 'meshes posed from the schematic ' + detail.bad.join('; '));
+  await pg.screenshot({ path: SHOT + '/schematic3d.png' });
+
+  const before = await pg.evaluate(() => {
+    const p = __sim.proj.parts.find(x => x.id === 'U1');
+    return { x: p.x, y: p.y, rot: p.rot, wires: __sim.proj.wires.length };
+  });
+  const at = await pg.evaluate(() => World3D.schemaScreen('U1'));
+  ok(at && !at.behind, 'ESP32 on screen ' + JSON.stringify(at));
+  await pg.mouse.click(at.x, at.y);
+  await pg.waitForTimeout(80);
+  const afterClick = await pg.evaluate(() => {
+    const p = __sim.proj.parts.find(x => x.id === 'U1');
+    return { x: p.x, y: p.y, rot: p.rot, wires: __sim.proj.wires.length };
+  });
+  ok(afterClick.x === before.x && afterClick.y === before.y && afterClick.rot === before.rot && afterClick.wires === before.wires, 'clicking a mesh does not move the part or drop wires');
+
+  await pg.click('#w3pal button[data-type=block]');
+  await pg.waitForTimeout(150);
+  const dragged = await (async () => {
+    const info = await pg.evaluate(() => {
+      const o = __sim.proj.world3d.stimuli.find(s => s.type === 'block');
+      return { x: o.x, z: o.z, p: World3D.screenPos('stimulus', o.id) };
+    });
+    ok(info.p && !info.p.behind, 'stimulus still pickable in schema view');
+    await pg.mouse.move(info.p.x, info.p.y);
+    await pg.mouse.down();
+    await pg.mouse.move(info.p.x + 80, info.p.y + 20, { steps: 6 });
+    await pg.mouse.up();
+    await pg.waitForTimeout(80);
+    return pg.evaluate(prev => {
+      const o = __sim.proj.world3d.stimuli.find(s => s.type === 'block');
+      const esp = __sim.proj.parts.find(p => p.id === 'U1');
+      return { moved: o.x !== prev.x || o.z !== prev.z, x: esp.x, wires: __sim.proj.wires.length };
+    }, info);
+  })();
+  ok(dragged.moved && dragged.x === before.x && dragged.wires === before.wires, 'stimulus drag still works and the schematic part stays');
+
+  await pg.evaluate(() => { __sim.select('U3'); __sim.rotate(); });
+  await pg.waitForTimeout(200);
+  const spun = await pg.evaluate(() => {
+    const p = __sim.proj.parts.find(x => x.id === 'U3');
+    const row = World3D.schemaDetail().find(r => r.id === 'U3');
+    const pose = Schematic3D.pose(p);
+    const ang = Math.abs(Math.atan2(Math.sin(row.yaw - pose.yaw), Math.cos(row.yaw - pose.yaw)));
+    return { rot: p.rot, ang, wires: __sim.proj.wires.length };
+  });
+  ok(spun.rot === 2 && spun.ang < 1e-4 && spun.wires === before.wires, 'rotate() updates the table yaw');
+
+  await pg.click('#w3pal button[data-view=world]');
+  await pg.click('#w3pal button[data-kind=dht]');
+  await pg.click('#w3pal button[data-type=heat]');
+  await pg.waitForTimeout(150);
+  const climate = await pg.evaluate(() => {
+    const w = __sim.proj.world3d;
+    const dht = w.sensors.find(s => s.kind === 'dht');
+    const heat = w.stimuli.find(s => s.type === 'heat');
+    heat.x = dht.x; heat.y = dht.y; heat.z = dht.z;
+    const read = World3D.getReadings().sensors.find(s => s.kind === 'dht');
+    const part = __sim.proj.parts.find(p => p.type === 'dht22');
+    return { temp: read.temp, prop: part.props.temp, hum: part.props.hum, view: World3D.view };
+  });
+  ok(climate.view === 'world' && climate.temp > 24 && climate.prop === climate.temp && climate.hum === 45, 'heat still writes DHT props ' + JSON.stringify(climate));
+
+  await pg.click('#w3tab'); await pg.waitForTimeout(200);
+  const back = await pg.evaluate(() => {
+    const c = document.querySelector('#center').getBoundingClientRect();
+    const el = document.elementFromPoint(c.left + c.width * 0.62, c.top + c.height * 0.45);
+    __sim.select('R1'); __sim.rotate();
+    const p = __sim.proj.parts.find(x => x.id === 'R1');
+    const svg = document.querySelector('[data-part="R1"]').getAttribute('transform');
+    return { w3: World3D.active, svg: !!(el && el.closest && el.closest('#svg')), rot: p.rot, transform: svg, wires: __sim.proj.wires.length };
+  });
+  ok(!back.w3 && back.svg && back.rot === 1 && /rotate\(90\)/.test(back.transform) && back.wires === before.wires, '2D schematic is back ' + JSON.stringify(back));
+  ok(errs.length === 0, 'no page errors ' + errs.join(' | '));
+  ok(net.length === 0, 'no off-origin requests ' + net.join(' '));
+
+  const mc = await b.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, deviceScaleFactor: 2 });
+  const ph = await mc.newPage();
+  ph.on('pageerror', e => errs.push('phone ' + e.message));
+  await ph.goto(URL); await ph.waitForTimeout(400);
+  await ph.tap('#pmTabs [data-ptab=world]'); await ph.waitForTimeout(300);
+  await ph.tap('#w3pal button[data-view=schema]'); await ph.waitForTimeout(300);
+  const phone = await ph.evaluate(() => {
+    const cv = document.querySelector('#w3cv').getBoundingClientRect();
+    return { view: World3D.view, n: World3D.schemaCount(), w: cv.width, h: cv.height, fail: document.querySelector('#w3fail').hidden };
+  });
+  ok(phone.view === 'schema' && phone.n >= 3 && phone.w > 200 && phone.h > 200 && phone.fail, 'phone schema view ' + JSON.stringify(phone));
+  await ph.screenshot({ path: SHOT + '/schematic3d-phone.png' });
+  ok(errs.length === 0, 'no phone errors ' + errs.join(' | '));
+  await b.close();
+  console.log('schematic3d e2e ok');
+})().catch(e => { console.error('FAIL', e); process.exit(1); });

@@ -256,6 +256,7 @@ body.pm #w3tab{display:none!important}
 #w3pal{width:168px;flex:0 0 168px;background:#161b27;color:#d8dee9;overflow:auto;padding:8px 8px 12px;display:flex;flex-direction:column;gap:4px}
 #w3pal .w3sec{font-size:11px;color:#8a94a8;margin:8px 0 2px;letter-spacing:.04em}
 #w3pal button{text-align:left;border-left-width:4px}
+#w3pal button.w3view.on{background:#3fb37f;color:#08140e;border-color:#3fb37f}
 #w3pal .w3k-ultrasonic{border-left-color:#4c7dff}
 #w3pal .w3k-ldr{border-left-color:#e0b15a}
 #w3pal .w3k-dht{border-left-color:#d8dee9}
