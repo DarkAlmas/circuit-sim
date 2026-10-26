@@ -133,10 +133,10 @@ test('schematic meshes do not widen the sanitize whitelist', () => {
     world3d: { sensors: [{ id: 's1', kind: 'dht', x: 1, y: 2, z: 3 }], stimuli: [], mesh: 'http://evil/a.glb', url: 'https://cdn.example/x' }
   };
   const s = global.window.sanitizeProject(raw);
-  assert.deepEqual(Object.keys(s.world3d).sort(), ['sensors', 'stimuli']);
-  assert.equal(s.world3d.sensors.length, 1);
+  assert.equal(s.world3d, undefined);
   assert.equal(s.parts[0].rot, 1);
   assert.equal(JSON.stringify(s).includes('http'), false);
+  assert.equal(JSON.stringify(s).includes('glb'), false);
 });
 
 test('wire tubes follow sanitized pin endpoints and bend points', () => {

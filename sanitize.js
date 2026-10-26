@@ -44,34 +44,14 @@
     if (typeof raw.kind === 'string' && KINDS.includes(raw.kind)) out.kind = raw.kind;
     // v9: robot car (chassis mounts, track strokes, boxes) — every field validated here first
     if (raw.robot && typeof raw.robot === 'object' && !Array.isArray(raw.robot)) out.robot = sanitizeRobot(raw.robot, byId);
-    // v14.5: 3D sensor world. Numbers and enums only; unknown keys, kinds and types are dropped.
-    if (raw.world3d && typeof raw.world3d === 'object' && !Array.isArray(raw.world3d)) out.world3d = sanitizeWorld3d(raw.world3d);
+    // v14.5.9: «Мир датчиков» is not loaded. Stimuli, world sensors, and any extra keys are dropped.
     return out;
   }
   const W3_KINDS = ['ultrasonic', 'ldr', 'dht', 'pir'];
   const W3_TYPES = ['block', 'flashlight', 'heat', 'humid', 'mover', 'tape'];
   const W3L = { sensors: 32, stimuli: 48 };
-  const ang = v => Math.round(num(v, -Math.PI, Math.PI, 0) * 10000) / 10000;
-  function sanitizeWorld3d(raw) {
-    const o = { sensors: [], stimuli: [] };
-    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return o;
-    const sids = new Set();
-    for (const s of Array.isArray(raw.sensors) ? raw.sensors.slice(0, W3L.sensors) : []) {
-      if (!s || typeof s !== 'object' || Array.isArray(s)) continue;
-      if (typeof s.id !== 'string' || !ID.test(s.id) || sids.has(s.id)) continue;
-      if (typeof s.kind !== 'string' || !W3_KINDS.includes(s.kind)) continue;
-      sids.add(s.id);
-      o.sensors.push({ id: s.id, kind: s.kind, x: num(s.x, -1e5, 1e5, 0), y: num(s.y, -1e5, 1e5, 0), z: num(s.z, -1e5, 1e5, 0), rx: ang(s.rx), ry: ang(s.ry), rz: ang(s.rz) });
-    }
-    const tids = new Set();
-    for (const t of Array.isArray(raw.stimuli) ? raw.stimuli.slice(0, W3L.stimuli) : []) {
-      if (!t || typeof t !== 'object' || Array.isArray(t)) continue;
-      if (typeof t.id !== 'string' || !ID.test(t.id) || tids.has(t.id)) continue;
-      if (typeof t.type !== 'string' || !W3_TYPES.includes(t.type)) continue;
-      tids.add(t.id);
-      o.stimuli.push({ id: t.id, type: t.type, x: num(t.x, -1e5, 1e5, 0), y: num(t.y, -1e5, 1e5, 0), z: num(t.z, -1e5, 1e5, 0) });
-    }
-    return o;
+  function sanitizeWorld3d() {
+    return { sensors: [], stimuli: [] };
   }
   const RL = { mounts: 40, strokes: 100, pts: 4000, boxes: 30 };
   const pt = (q, w, h) => Array.isArray(q) && q.length >= 2 && Number.isFinite(+q[0]) && Number.isFinite(+q[1]) ? [Math.round(num(q[0], 0, w, 0)), Math.round(num(q[1], 0, h, 0))] : null;

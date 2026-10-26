@@ -63,20 +63,41 @@ test('powered PIR drives OUT high only while motion is set', () => {
   assert.match(dead.meas.P1.extra['Движение'], /LOW/);
 });
 
-test('NTC temperature follows the 3D heat sample and does not gain a humidity prop', () => {
-  const proj = {
+test('NTC keeps its own temperature; a world heat sample is not loaded and does not write props', () => {
+  const proj = W.sanitizeProject({
     parts: [
       { id: 'N1', type: 'ntc', props: { temp: 25 } },
       { id: 'U3', type: 'dht22', props: { temp: 24, hum: 45 } }
     ],
+    wires: [],
+    world3d: {
+      sensors: [{ id: 'd', kind: 'dht', x: 0, y: 80, z: 0 }],
+      stimuli: [{ id: 'h', type: 'heat', x: 0, y: 80, z: 0 }, { id: 'u', type: 'humid', x: 0, y: 80, z: 25 }],
+      mesh: 'http://evil/a.glb'
+    }
+  });
+  assert.equal(proj.world3d, undefined);
+  assert.equal(proj.parts[0].props.temp, 25);
+  assert.equal('hum' in proj.parts[0].props, false);
+  assert.equal(proj.parts[1].props.temp, 24);
+  assert.equal(proj.parts[1].props.hum, 45);
+  assert.ok(!JSON.stringify(proj).includes('http'));
+  W.World3D.applyReadings({
+    parts: proj.parts,
     world3d: {
       sensors: [{ id: 'd', kind: 'dht', x: 0, y: 80, z: 0 }],
       stimuli: [{ id: 'h', type: 'heat', x: 0, y: 80, z: 0 }, { id: 'u', type: 'humid', x: 0, y: 80, z: 25 }]
     }
+  });
+  assert.equal(proj.parts[0].props.temp, 25);
+  assert.equal(proj.parts[1].props.temp, 24);
+  assert.equal(proj.parts[1].props.hum, 45);
+  const at = temp => {
+    const p = W.sanitizeProject({
+      parts: [{ id: 'V1', type: 'dc', props: { V: 5, rInt: 0.1 } }, { id: 'N1', type: 'ntc', props: { temp } }],
+      wires: [wire('w1', 'V1', 'p', 'N1', 'a'), wire('w2', 'V1', 'n', 'N1', 'b')]
+    });
+    return Math.abs(settle(p).meas.N1.I);
   };
-  W.World3D.applyReadings(proj);
-  assert.equal(proj.parts[0].props.temp, 64);
-  assert.equal('hum' in proj.parts[0].props, false);
-  assert.equal(proj.parts[1].props.temp, 64);
-  assert.equal(proj.parts[1].props.hum, 90);
+  assert.ok(at(64) > at(25), 'NTC current still follows the part temperature');
 });

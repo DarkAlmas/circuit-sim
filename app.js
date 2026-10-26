@@ -18,9 +18,7 @@
   function redo() { if (!redoSt.length) return; const cur = lastJ != null ? lastJ : JSON.stringify(strip(proj)); hist.push(cur); if (hist.length > 100) hist.shift(); applySnap(redoSt.pop()); }
   const locked = () => running && !shorts.length;
   function strip(p) {
-    const o = { parts: p.parts.map(({ id, type, x, y, rot, props }) => ({ id, type, x, y, rot, props })), wires: p.wires.map(({ id, a, b, pts, color }) => { const w = { id, a, b, pts }; if (color) w.color = color; return w; }), code: p.code, codes: p.codes, name: p.name, kind: p.kind, robot: p.robot };
-    if (p.world3d) o.world3d = p.world3d;
-    return o;
+    return { parts: p.parts.map(({ id, type, x, y, rot, props }) => ({ id, type, x, y, rot, props })), wires: p.wires.map(({ id, a, b, pts, color }) => { const w = { id, a, b, pts }; if (color) w.color = color; return w; }), code: p.code, codes: p.codes, name: p.name, kind: p.kind, robot: p.robot };
   }
   const uid = pre => { let i = 1; const ids = new Set([...proj.parts, ...proj.wires].map(o => o.id)); while (ids.has(pre + i)) i++; return pre + i; };
   const part = id => proj.parts.find(p => p.id === id);
@@ -397,11 +395,7 @@
     const mod = e.ctrlKey || e.metaKey, zKey = e.code === 'KeyZ' || e.key === 'z' || e.key === 'Z' || e.key === 'я' || e.key === 'Я', yKey = e.code === 'KeyY' || e.key === 'y' || e.key === 'Y' || e.key === 'н' || e.key === 'Н';
     if (mod && zKey) { e.preventDefault(); if (!locked()) { if (e.shiftKey) redo(); else undo(); } return; }
     if (mod && yKey) { e.preventDefault(); if (!locked()) redo(); return; }
-    if (window.World3D && window.World3D.active) {
-      if (e.key === 'r' || e.key === 'R' || e.key === 'к' || e.key === 'К') { window.World3D.yawSelected(e.shiftKey ? -1 : 1); return; }
-      if (e.key === 'Delete' || e.key === 'Backspace') { window.World3D.removeSelected(); return; }
-      if (e.key === 'Escape') window.World3D.show(false);
-    }
+    if (window.World3D && window.World3D.active && e.key === 'Escape') { window.World3D.show(false); return; }
     if (e.key === 'r' || e.key === 'R' || e.key === 'к' || e.key === 'К') rotate(); else if (e.key === 'Delete' || e.key === 'Backspace') del(); else if (e.key === 'Escape') { closeMenu(); cancelArm(); } });
   $('#undo').onclick = () => { if (!locked()) undo(); };
   $('#redo').onclick = () => { if (!locked()) redo(); };
@@ -419,20 +413,10 @@
       if (sv && sv.textContent !== String(p.props[k])) sv.textContent = String(p.props[k]);
     }
   }
-  window.addEventListener('world3d-readings', () => {
-    if (!window.World3D || !World3D.active) return;
-    syncSensorWidgets();
-    if (!running) render();
-  });
   function tick() {
     const mcus = proj.parts.filter(p => P[p.type].mcu), gpioBy = {}; for (const id in extra) gpioBy[id] = extra[id].gpio; if (mcus[0]) gpioBy[mcus[0].id] = gpio;
-    // v14.5.1: 3D tab open → stimulus readings own the sensor props. Tab closed → sliders stay as the student left them.
-    // The robot track (next line) still owns distance while it is driving.
-    if (window.World3D && World3D.active) World3D.applyReadings(proj);
     // v9: move the robot car first (motor rpm from the previous frame), so this frame's stamp already sees the new sensor readings
     if (window.RobotUI) RobotUI.onTick(proj, Math.min(0.05, Math.max(1e-4, lastT ? (performance.now() - lastT) / 1000 : 1 / 60)));
-    // Tape and the MPU figurine. The track (line above) keeps TCRT / VL53 / IMU while it is driving.
-    if (window.World3D && World3D.active && World3D.applyBoard) World3D.applyBoard(proj);
     const b = Netlist.build(proj, gpio, { gpioBy, vio: mcus[0] ? P[mcus[0].type].vio : 3.3 });
     // transient step: real time between frames (clamped), state re-keyed by owner part + ordinal so it survives netlist changes
     const now = performance.now(), dt = Math.min(0.05, Math.max(1e-4, lastT ? (now - lastT) / 1000 : 1 / 60)); lastT = now;
@@ -529,7 +513,7 @@
   /* sketch worker lifecycle: a crashed/hung worker (exception, OOM, infinite loop) is torn down, a fresh idle
    * worker is created right away, the console explains what happened, and the next Run uses the fresh worker. */
   let spare = null, crashes = 0;
-  const newWorker = () => new Worker('worker.js?v=14.5.8');
+  const newWorker = () => new Worker('worker.js?v=14.5.9');
   function takeWorker() { const w = spare || newWorker(); spare = null; return w; }
   function crash(msg) { if (!worker) return; worker.onmessage = worker.onerror = null; try { worker.terminate(); } catch (e) {} worker = null; gpio = {}; prevV = null; crashes++;
     try { spare = newWorker(); } catch (e) { spare = null; }
@@ -569,10 +553,6 @@
   }
   function start() {
     if (running) return; saveEditor();
-    if (window.World3D && World3D.active && World3D.ensurePairs) {
-      const added = World3D.ensurePairs(proj);
-      if (added && (added.sensors || added.stimuli) && World3D.onOpen) World3D.onOpen();
-    }
     autosave();
     proj.parts.forEach(p => { delete p.burned; delete p.on; delete p._mod; delete p._burnMsg; delete p._burnLogged; }); gpio = {}; imgs = {}; links = {}; prevV = null; simState = { vC: {}, iL: {} }; simTime = 0; lastT = 0; lastAlert = null; con.textContent = '';
     running = true; $('#run').disabled = true; $('#stop').disabled = false;
