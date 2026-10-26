@@ -5,53 +5,39 @@ require('../sanitize.js');
 require('../world3d.js');
 const W = global.window, S = W.World3D;
 
-test('world3d sanitize keeps numbers and enums, drops markup and unknown fields', () => {
+test('sanitize drops the sensor world, including markup and unknown fields', () => {
   const raw = {
     parts: [], wires: [],
     world3d: {
       sensors: [
         { id: 's1', kind: 'ultrasonic', x: '12', y: 1, z: 2, rx: 0, ry: 1, rz: -0.5, html: '<img src=x>', onclick: 'alert(1)' },
         { id: '<script>', kind: 'ldr', x: 0, y: 0, z: 0 },
-        { id: 's1', kind: 'ldr', x: 0, y: 0, z: 0 },
-        { id: 'vl', kind: 'vl53', x: 0, y: 0, z: 0 },
-        { id: 'bad', kind: 'ultrasonic', x: 1e9, y: -1e9, z: '<svg onload=alert(1)>', rx: 99, ry: -99, rz: 'no' },
-        { id: 'a'.repeat(33), kind: 'pir', x: 0, y: 0, z: 0 }
+        { id: 'bad', kind: 'ultrasonic', x: 1e9, y: -1e9, z: '<svg onload=alert(1)>', rx: 99, ry: -99, rz: 'no' }
       ],
       stimuli: [
         { id: 't1', type: 'block', x: 3, y: 4, z: 5, name: '<b>x</b>' },
-        { id: 't2', type: 'line', x: 0, y: 0, z: 0 },
         { id: 't3', type: 'flashlight', x: 1, y: 2, z: 3 },
         { id: 'nope', type: 'heat', x: 0, y: 0, z: 0, id2: '<script>' }
       ],
-      comment: '<script>alert(1)</script>'
+      comment: '<script>alert(1)</script>',
+      mesh: 'http://evil/a.glb'
     }
   };
   const s = W.sanitizeProject(raw);
-  assert.deepEqual(s.world3d.sensors.map(q => q.id), ['s1', 'bad']);
-  assert.equal(s.world3d.sensors[0].kind, 'ultrasonic');
-  assert.equal(s.world3d.sensors[0].x, 12);
-  assert.deepEqual(Object.keys(s.world3d.sensors[0]).sort(), ['id', 'kind', 'rx', 'ry', 'rz', 'x', 'y', 'z']);
-  assert.equal(s.world3d.sensors[1].x, 1e5);
-  assert.equal(s.world3d.sensors[1].y, -1e5);
-  assert.equal(s.world3d.sensors[1].z, 0);
-  assert.equal(s.world3d.sensors[1].rx, 3.1416);
-  assert.equal(s.world3d.sensors[1].ry, -3.1416);
-  assert.equal(s.world3d.sensors[1].rz, 0);
-  assert.deepEqual(s.world3d.stimuli.map(q => q.type), ['block', 'flashlight', 'heat']);
-  assert.ok(!('name' in s.world3d.stimuli[0]) && !('html' in s.world3d) && !('comment' in s.world3d));
-  const json = JSON.stringify(s.world3d);
-  assert.ok(!/[<>]/.test(json), json);
+  assert.equal(s.world3d, undefined);
+  const json = JSON.stringify(s);
+  assert.ok(!/[<>]/.test(json) && !json.includes('http') && !json.includes('glb'), json);
   assert.equal(W.sanitizeProject({ parts: [], wires: [], world3d: '<script>' }).world3d, undefined);
   assert.equal(W.sanitizeProject({ parts: [], wires: [], world3d: [] }).world3d, undefined);
+  assert.deepEqual(W.sanitizeWorld3d(raw.world3d), { sensors: [], stimuli: [] });
   assert.deepEqual(W.sanitizeWorld3d(null), { sensors: [], stimuli: [] });
 });
 
-test('world3d arrays are length-capped', () => {
+test('a huge sensor world is dropped on load', () => {
   const sensors = Array.from({ length: 40 }, (_, i) => ({ id: 's' + i, kind: 'pir', x: i, y: 0, z: 0 }));
   const stimuli = Array.from({ length: 60 }, (_, i) => ({ id: 't' + i, type: 'mover', x: i, y: 0, z: 0 }));
   const s = W.sanitizeProject({ parts: [], wires: [], world3d: { sensors, stimuli } });
-  assert.equal(s.world3d.sensors.length, W.WORLD3D_LIMITS.sensors);
-  assert.equal(s.world3d.stimuli.length, W.WORLD3D_LIMITS.stimuli);
+  assert.equal(s.world3d, undefined);
   assert.deepEqual(W.WORLD3D_KINDS, ['ultrasonic', 'ldr', 'dht', 'pir']);
   assert.deepEqual(W.WORLD3D_TYPES, ['block', 'flashlight', 'heat', 'humid', 'mover', 'tape']);
 });
@@ -162,7 +148,7 @@ test('humid inside R50 rises well above ambient 45; outside stays ambient; heat 
   assert.equal(warm(16 + 50).temp, 24);
 });
 
-test('applyReadings writes HC-SR04, LDR, DHT22 and PIR, not VL53 or TCRT', () => {
+test('applyReadings does not write HC-SR04, LDR, DHT22, PIR, VL53 or TCRT', () => {
   const proj = {
     parts: [
       { id: 'U2', type: 'hcsr04', props: { dist: 50 } },
@@ -191,19 +177,20 @@ test('applyReadings writes HC-SR04, LDR, DHT22 and PIR, not VL53 or TCRT', () =>
     }
   };
   const readings = S.applyReadings(proj);
-  assert.equal(proj.parts[0].props.dist, 41);
-  assert.equal(proj.parts[1].props.dist, 400);
-  assert.ok(proj.parts[2].props.lux > 100);
-  assert.equal(proj.parts[3].props.temp, 64);
-  assert.equal(proj.parts[3].props.hum, 90);
+  assert.equal(proj.parts[0].props.dist, 50);
+  assert.equal(proj.parts[1].props.dist, 50);
+  assert.equal(proj.parts[2].props.lux, 100);
+  assert.equal(proj.parts[3].props.temp, 24);
+  assert.equal(proj.parts[3].props.hum, 45);
   assert.equal(proj.parts[4].props.mm, 300);
   assert.equal(proj.parts[5].props.refl, 0.9);
-  assert.equal(proj.parts[6].props.motion, true);
+  assert.equal(proj.parts[6].props.motion, false);
   assert.equal(readings.sensors.length, 5);
+  assert.equal(readings.sensors[0].dist, 41);
   assert.deepEqual(S.getReadings().sensors.map(s => s.kind), []);
 });
 
-test('PIR motion is written even when the prop is missing, and NTC takes DHT temperature', () => {
+test('PIR motion and NTC temperature stay on the part when a world sample is present', () => {
   const proj = {
     parts: [
       { id: 'N1', type: 'ntc', props: { temp: 25 } },
@@ -223,14 +210,14 @@ test('PIR motion is written even when the prop is missing, and NTC takes DHT tem
     }
   };
   S.applyReadings(proj);
-  assert.equal(proj.parts[0].props.temp, 64);
+  assert.equal(proj.parts[0].props.temp, 25);
   assert.equal(proj.parts[0].props.hum, undefined);
-  assert.equal(proj.parts[1].props.temp, 64);
-  assert.equal(proj.parts[1].props.hum, 90);
-  assert.equal(proj.parts[2].props.motion, true);
+  assert.equal(proj.parts[1].props.temp, 24);
+  assert.equal(proj.parts[1].props.hum, 45);
+  assert.equal(proj.parts[2].props.motion, undefined);
 });
 
-test('ensurePairs fills a missing stimulus and does not move one that is already there', () => {
+test('ensurePairs does not add sensors or stimuli', () => {
   const proj = {
     parts: [
       { id: 'U2', type: 'hcsr04', props: { dist: 50 } },
@@ -245,24 +232,18 @@ test('ensurePairs fills a missing stimulus and does not move one that is already
     world3d: { sensors: [], stimuli: [] }
   };
   const added = S.ensurePairs(proj);
-  assert.deepEqual(proj.world3d.sensors.map(s => s.kind), ['ultrasonic', 'ldr', 'dht', 'pir']);
-  assert.deepEqual(proj.world3d.stimuli.map(s => s.type), ['block', 'flashlight', 'heat', 'humid', 'mover', 'tape']);
-  assert.ok(added.sensors >= 4 && added.stimuli >= 6);
-  const kept = proj.world3d.sensors[0].x;
-  const again = S.ensurePairs(proj);
-  assert.equal(again.sensors, 0);
-  assert.equal(again.stimuli, 0);
-  assert.equal(proj.world3d.sensors[0].x, kept);
-  assert.equal(proj.world3d.sensors.length, 4);
+  assert.deepEqual(added, { sensors: 0, stimuli: 0 });
+  assert.deepEqual(proj.world3d, { sensors: [], stimuli: [] });
   assert.equal(proj.parts.find(p => p.id === 'V1').props.mm, 300);
+  assert.equal(proj.parts.find(p => p.id === 'U2').props.dist, 50);
   proj.parts.push({ id: 'U9', type: 'hcsr04', props: { dist: 50 } });
-  S.ensurePairs(proj);
-  assert.deepEqual(proj.world3d.sensors.map(s => s.kind), ['ultrasonic', 'ldr', 'dht', 'pir', 'ultrasonic']);
-  assert.equal(proj.world3d.stimuli.filter(s => s.type === 'block').length, 2);
-  assert.equal(proj.world3d.sensors[0].x, kept);
+  const again = S.ensurePairs(proj);
+  assert.deepEqual(again, { sensors: 0, stimuli: 0 });
+  assert.equal(proj.world3d.sensors.length, 0);
+  assert.equal(proj.world3d.stimuli.length, 0);
 });
 
-test('board extras move TCRT and MPU only, and the climate formulas stay', () => {
+test('board extras do not move TCRT or MPU, and the climate formulas stay', () => {
   const climate = S.compute({
     sensors: [{ id: 'd', kind: 'dht', x: 0, y: 80, z: 0 }],
     stimuli: [{ id: 'h', type: 'heat', x: 0, y: 80, z: 0 }, { id: 'u', type: 'humid', x: 0, y: 80, z: 25 }]
@@ -282,21 +263,16 @@ test('board extras move TCRT and MPU only, and the climate formulas stay', () =>
       ]
     }
   };
-  S.applyBoard(line);
-  assert.equal(line.parts[0].props.refl, 0.05);
-  assert.equal(line.parts[1].props.gz, 20);
+  assert.equal(S.applyBoard(line), false);
+  assert.equal(line.parts[0].props.refl, 0.4);
+  assert.equal(line.parts[1].props.gz, 0);
   assert.equal(line.parts[2].props.mm, 300);
   line.world3d.stimuli[0].z = 80;
   S.applyBoard(line);
-  assert.equal(line.parts[0].props.refl, 0.9);
-  line.world3d.stimuli = [];
-  line.parts[0].props.refl = 0.4;
-  S.applyBoard(line);
-  assert.equal(line.parts[0].props.refl, 0.4, 'no tape leaves the slider alone');
-  line.world3d.stimuli = [{ id: 'tape', type: 'tape', x: 0, y: 78, z: 0 }];
+  assert.equal(line.parts[0].props.refl, 0.4);
   global.window.RobotUI = { run: {}, paused: false };
   S.applyBoard(line);
-  assert.equal(line.parts[0].props.refl, 0.4, 'the track owns reflectance while it drives');
+  assert.equal(line.parts[0].props.refl, 0.4, 'the track still owns reflectance');
   delete global.window.RobotUI;
   const lines = S.liveLines(line, { sensors: [{ id: 's1', kind: 'ultrasonic', dist: 41 }] }, { running: true, simTime: 1.2, meas: { D1: { I: 0.008 } } });
   assert.ok(lines[0].includes('Симуляция') && lines[0].includes('1.20'));

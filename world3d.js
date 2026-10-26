@@ -1,21 +1,9 @@
-/* v14.5.2: 3D sensor world. Stimulus math is unchanged (US cone 12°/400 cm,
- * flashlight 22°/140 cm, heat|humid spheres R50, PIR 40°/280 cm, table 86×46).
- * Humidity stays obvious anywhere inside the R50 steam sphere (about 80% at the
- * rim, 100% at the source, ambient 45% outside). Heat keeps the linear falloff.
- * Readings land on schematic props in kind order: hcsr04.dist, ldr.lux,
- * dht22.temp/hum, pir.motion, and ntc.temp from the same climate sample.
- * Floating #w3tags refresh in the same call as applyReadings. Cones and spheres
- * draw only for the selected or hovered object. VL53 and TCRT stay on the robot track.
- * v14.5.5: «Схема 3D» puts Schematic3D meshes on this table (pose from part x/y/rot).
- * v14.5.6: passive silhouettes and wire tubes join that view. Stimulus math is untouched.
- * v14.5.7: «Запустить» keeps the sim and the live readout in «Мир» and «Схема 3D».
- * Opening 3D adds a missing stimulus for each board sensor (HC-SR04↔cube,
- * LDR↔lamp, DHT↔heat/steam, PIR↔figurine, NTC shares the climate sample,
- * TCRT↔tape, MPU↔figurine). VL53 stays on the robot track. Reading formulas
- * (sonar cone, lux, heat, humid, PIR) are unchanged.
- * That view does not move schematic parts and does not change how readings are written.
- * Three.js is vendored (vendor/three). No network. DOM is createElement/textContent only.
- * window.World3D.getReadings() / the world3d-readings event are the solver hook. */
+/* v14.5.9: «Мир датчиков» is gone. This file only hosts «Схема 3D»
+ * (Schematic3D meshes, passive silhouettes, wire tubes, ▶ on the same table).
+ * There is no sensor/stimulus palette, no auto-pairs, and applyReadings does not
+ * write distance, lux, temperature, humidity, motion, reflectance, or IMU props.
+ * Sonar / lux / heat / humid / PIR math in compute() is unchanged and unused by the UI.
+ * Three.js is vendored (vendor/three). No network. DOM is createElement/textContent only. */
 (function () {
   'use strict';
   const KINDS = ['ultrasonic', 'ldr', 'dht', 'pir'];
@@ -244,48 +232,9 @@
     while (ids.has(pre + i)) i++;
     return pre + i;
   }
-  /* One world sensor and its stimulus per board part. Existing objects stay put.
-   * Counts only — positions use the same slots as the palette buttons. */
-  function ensurePairs(project) {
-    const w = worldBucket(project);
-    if (!w) return { sensors: 0, stimuli: 0 };
-    const parts = Array.isArray(project.parts) ? project.parts : [];
-    const n = type => parts.filter(part => part && part.type === type).length;
-    const lims = (typeof window !== 'undefined' && window.WORLD3D_LIMITS) || { sensors: 32, stimuli: 48 };
-    const haveKind = k => w.sensors.filter(s => s && s.kind === k).length;
-    const haveType = t => w.stimuli.filter(s => s && s.type === t).length;
-    let addedS = 0, addedT = 0;
-    function addS(kind) {
-      if (!KINDS.includes(kind) || w.sensors.length >= lims.sensors) return;
-      const at = slot(w.sensors.length, SENSOR_Z);
-      w.sensors.push({ id: freshId(w, 's'), kind, x: at.x, y: q2(TABLE_Y + (REST[kind] || 6)), z: at.z, rx: 0, ry: 0, rz: 0 });
-      addedS++;
-    }
-    function addT(type) {
-      if (!TYPES.includes(type) || w.stimuli.length >= lims.stimuli) return;
-      const at = slot(w.stimuli.length, STIM_Z);
-      w.stimuli.push({ id: freshId(w, 't'), type, x: at.x, y: q2(TABLE_Y + (REST[type] || 6)), z: at.z });
-      addedT++;
-    }
-    const want = {
-      ultrasonic: n('hcsr04'),
-      ldr: n('ldr'),
-      dht: Math.max(n('dht22'), n('ntc')),
-      pir: n('pir')
-    };
-    const need = {
-      block: want.ultrasonic,
-      flashlight: want.ldr,
-      heat: Math.max(n('dht22'), n('ntc')),
-      humid: n('dht22'),
-      mover: Math.max(n('pir'), n('mpu6050')),
-      tape: n('tcrt5000')
-    };
-    for (const kind of KINDS) if (want[kind] > 0 && haveKind(kind) < want[kind]) addS(kind);
-    for (const kind of KINDS) while (haveKind(kind) < want[kind]) addS(kind);
-    for (const type of TYPES) if ((need[type] || 0) > 0 && haveType(type) < need[type]) addT(type);
-    for (const type of TYPES) while (haveType(type) < (need[type] || 0)) addT(type);
-    return { sensors: addedS, stimuli: addedT };
+  /* v14.5.9: opening «Схема 3D» does not invent sensors or stimuli. */
+  function ensurePairs() {
+    return { sensors: 0, stimuli: 0 };
   }
   function tableOf(part) {
     const S = window.Schematic3D;
@@ -300,39 +249,8 @@
     const r = window.RobotUI;
     return !!(r && r.run && r.paused === false);
   }
-  /* Line tape and MPU figurine. Does not touch sonar / lux / heat / humid / PIR / VL53. */
-  function applyBoard(project) {
-    if (!project || !Array.isArray(project.parts) || trackOwns()) return false;
-    const stim = project.world3d && Array.isArray(project.world3d.stimuli) ? project.world3d.stimuli : [];
-    const tapes = stim.filter(s => s && s.type === 'tape');
-    const movers = stim.filter(s => s && s.type === 'mover');
-    let changed = false;
-    for (const part of project.parts) {
-      if (!part || !part.props || typeof part.props !== 'object') continue;
-      if (part.type === 'tcrt5000' && tapes.length) {
-        const at = tableOf(part);
-        let on = false;
-        for (const t of tapes) {
-          if (Math.hypot(at[0] - (+t.x || 0), at[1] - (+t.y || 0), at[2] - (+t.z || 0)) <= 14) { on = true; break; }
-        }
-        const refl = on ? 0.05 : 0.9;
-        if (part.props.refl !== refl) { part.props.refl = refl; changed = true; }
-      } else if (part.type === 'mpu6050' && movers.length) {
-        const at = tableOf(part);
-        let best = null, bd = 1e9;
-        for (const m of movers) {
-          const d = Math.hypot(at[0] - (+m.x || 0), at[1] - (+m.y || 0), at[2] - (+m.z || 0));
-          if (d < bd) { bd = d; best = m; }
-        }
-        if (!best || bd >= 80) continue;
-        const gz = Math.max(-250, Math.min(250, Math.round((best.x - at[0]) * 2)));
-        const acc = Math.max(-2, Math.min(2, Math.round((at[2] - best.z) / 40 * 100) / 100));
-        if (part.props.gz !== gz) { part.props.gz = gz; changed = true; }
-        if (part.props.acc !== acc) { part.props.acc = acc; changed = true; }
-      }
-    }
-    return changed;
-  }
+  /* v14.5.9: tape and the figurine do not write TCRT or MPU props. */
+  function applyBoard() { return false; }
   function partLine(part, sim) {
     if (!part || !part.props) return '';
     const pr = part.props;
@@ -356,7 +274,7 @@
     const lines = [];
     const running = !!(sim && sim.running);
     const t = sim && Number.isFinite(+sim.simTime) ? (+sim.simTime).toFixed(2) : '0.00';
-    lines.push(running ? '▶ Симуляция · ' + t + ' с' : '■ Остановлено — показания 3D');
+    lines.push(running ? '▶ Симуляция · ' + t + ' с' : '■ Остановлено');
     const sensors = readings && Array.isArray(readings.sensors) ? readings.sensors : [];
     for (const r of sensors) {
       try { lines.push(labelOf(r)); } catch (e) { if (r && r.id) lines.push(String(r.id)); }
@@ -372,24 +290,6 @@
     try {
       const readings = compute(p && p.world3d);
       last = readings;
-      if (p && Array.isArray(p.parts)) {
-        // Same kind, schematic order: 1st ultrasonic sensor → 1st HC-SR04, and so on.
-        // NTC is not a 3D kind; it copies temperature from the DHT sample at the same index.
-        const buckets = { ultrasonic: [], ldr: [], dht: [], pir: [] };
-        const ntcs = [];
-        for (const part of p.parts) {
-          const k = partKind(part.type);
-          if (k === 'ntc') ntcs.push(part);
-          else if (k && buckets[k]) buckets[k].push(part);
-        }
-        const used = { ultrasonic: 0, ldr: 0, dht: 0, pir: 0 };
-        let ntcUsed = 0;
-        for (const r of readings.sensors) {
-          const part = buckets[r.kind] && buckets[r.kind][used[r.kind]++];
-          if (part) writePart(part, r);
-          if (r.kind === 'dht' && ntcs[ntcUsed]) writePart(ntcs[ntcUsed++], { kind: 'ntc', temp: r.temp });
-        }
-      }
       const sig = sigOf(readings);
       if (sig !== lastSig) {
         lastSig = sig;
@@ -429,43 +329,23 @@
   let pickRoot = null, zoneRoot = null, ring = null, groups = new Map(), tagEls = new Map();
   let selected = null, drag = null, hoverPick = null, dirty = true, zoneKeys = [];
   let caster = null, ptr = null, hitV = null;
-  let schemaRoot = null, schemaLib = null, schemaSig = null, view = 'world';
+  let schemaRoot = null, schemaLib = null, schemaSig = null, view = 'schema';
 
   const center = $('#center');
-  const btn = el('button', { type: 'button', id: 'w3tab', textContent: '3D', title: '3D-мир датчиков' });
+  const btn = el('button', { type: 'button', id: 'w3tab', textContent: 'Схема 3D', title: 'Детали схемы на столе' });
   btn.setAttribute('aria-pressed', 'false');
   const rt = $('#rtabs'); if (rt) rt.after(btn); else if (center) center.prepend(btn);
   const pal = el('aside', { id: 'w3pal' });
-  pal.append(el('div', { className: 'w3sec', textContent: 'Вид' }));
-  const bWorld = el('button', { type: 'button', className: 'w3btn w3view on', textContent: 'Мир', title: 'Датчики и воздействия' });
-  const bSchema = el('button', { type: 'button', className: 'w3btn w3view', textContent: 'Схема 3D', title: 'Детали схемы на столе. Воздействия остаются.' });
-  bWorld.dataset.view = 'world'; bSchema.dataset.view = 'schema';
-  bWorld.setAttribute('aria-pressed', 'true'); bSchema.setAttribute('aria-pressed', 'false');
-  bWorld.onclick = () => setView('world'); bSchema.onclick = () => setView('schema');
   const bRun = el('button', { type: 'button', id: 'w3run', className: 'w3btn w3act', textContent: '▶ Запустить', title: 'Запустить симуляцию, не выходя из 3D' });
   bRun.onclick = () => toggleRun();
-  pal.append(bWorld, bSchema, bRun);
-  pal.append(el('div', { className: 'w3sec', textContent: 'Датчики' }));
-  const SENS_UI = [['ultrasonic', 'УЗ', 'Ультразвук — расстояние до куба'], ['ldr', 'LDR', 'Фоторезистор — свет фонаря'], ['dht', 'DHT', 'Температура и влажность'], ['pir', 'PIR', 'Движение фигурки в секторе']];
-  const STIM_UI = [['block', 'Куб', 'Препятствие для ультразвука'], ['flashlight', 'Фонарь', 'Свет в конусе для LDR'], ['heat', 'Тепло', 'Нагрев в радиусе для DHT'], ['humid', 'Пар', 'Влажность в радиусе для DHT'], ['mover', 'Фигурка', 'Движение для PIR и MPU'], ['tape', 'Лента', 'Чёрная полоса для TCRT5000']];
-  for (const [k, t, title] of SENS_UI) { const b = el('button', { type: 'button', className: 'w3btn w3k-' + k, textContent: t, title }); b.dataset.kind = k; b.onclick = () => addSensor(k); pal.append(b); }
-  pal.append(el('div', { className: 'w3sec', textContent: 'Воздействия' }));
-  for (const [k, t, title] of STIM_UI) { const b = el('button', { type: 'button', className: 'w3btn w3k-' + k, textContent: t, title }); b.dataset.type = k; b.onclick = () => addStim(k); pal.append(b); }
-  const bReset = el('button', { type: 'button', id: 'w3reset', className: 'w3btn w3act', textContent: 'Сброс воздействий', title: 'Сброс воздействий' });
-  const bDel = el('button', { type: 'button', id: 'w3del', className: 'w3btn w3act', textContent: 'Удалить', title: 'Удалить выбранное' });
-  const bYawL = el('button', { type: 'button', id: 'w3yawL', className: 'w3btn w3act', textContent: '↺ 15°', title: 'Повернуть датчик влево' });
-  const bYawR = el('button', { type: 'button', id: 'w3yawR', className: 'w3btn w3act', textContent: '↻ 15°', title: 'Повернуть датчик вправо' });
-  bReset.onclick = () => resetStimuli(); bDel.onclick = () => removeSelected(); bYawL.onclick = () => yawSelected(1); bYawR.onclick = () => yawSelected(-1);
-  const HINT_WORLD = 'ЛКМ по пустому — обзор, ПКМ — сдвиг, колесо — масштаб. Тяни объект по столу.';
-  const HINT_SCHEMA = 'Детали стоят как на схеме. Воздействия можно двигать. Саму схему правь на вкладке «Схема».';
-  const hint = el('p', { className: 'w3hint', textContent: HINT_WORLD });
+  const hint = el('p', { className: 'w3hint', textContent: 'Детали стоят как на схеме. ЛКМ — обзор, ПКМ — сдвиг, колесо — масштаб. Саму схему правь на вкладке «Схема».' });
   const stat = el('p', { id: 'w3stat', className: 'w3hint', textContent: '' });
-  pal.append(bReset, bDel, bYawL, bYawR, hint, stat);
+  pal.append(bRun, hint, stat);
   const stage = el('div', { id: 'w3stage' });
   const canvas = el('canvas', { id: 'w3cv' });
   const tags = el('div', { id: 'w3tags' });
   const liveEl = el('pre', { id: 'w3live' });
-  const fail = el('p', { id: 'w3fail', hidden: true, textContent: 'WebGL недоступен. Показания World3D.getReadings() всё равно считаются.' });
+  const fail = el('p', { id: 'w3fail', hidden: true, textContent: 'WebGL недоступен.' });
   stage.append(canvas, tags, liveEl, fail);
   const pane = el('div', { id: 'w3pane', hidden: true });
   pane.append(pal, stage);
@@ -489,62 +369,17 @@
   function slot(i, z0) { return { x: q2(-48 + (i % 4) * 28), z: q2(z0 - Math.floor(i / 4) * 16) }; }
   function setStat(msg) {
     if (msg) { stat.textContent = msg; return; }
-    const w = world(), nT = w ? w.stimuli.length : 0;
-    if (view === 'schema') {
-      const n = proj() && Array.isArray(proj().parts) ? proj().parts.length : 0;
-      const shown = schemaPartNodes().length;
-      stat.textContent = 'Схема 3D · деталей ' + n + (shown && shown < n ? ' · на столе ' + shown : '') + ' · воздействий ' + nT;
-      return;
-    }
-    const nS = w ? w.sensors.length : 0;
-    stat.textContent = 'Датчиков ' + nS + ' · объектов ' + nT + (selected ? ' · ' + selected.id : '');
+    const n = proj() && Array.isArray(proj().parts) ? proj().parts.length : 0;
+    const shown = schemaPartNodes().length;
+    stat.textContent = 'Схема 3D · деталей ' + n + (shown && shown < n ? ' · на столе ' + shown : '');
   }
-  function syncChrome() {
-    const sens = !!(selected && selected.role === 'sensor');
-    bYawL.disabled = bYawR.disabled = !sens; bDel.disabled = !selected; setStat();
-  }
+  function syncChrome() { setStat(); }
   function commit() {
-    applyBoard(proj());
-    applyReadings(proj()); updateZones();
     const s = window.__sim; if (s && s.changed) s.changed(); syncChrome(); syncLive();
     if (active && renderer && camera) { renderer.render(scene, camera); syncTags(); }
   }
-
-  function addSensor(kind) {
-    if (!KINDS.includes(kind)) return;
-    const w = ensure(); if (!w) return;
-    if (w.sensors.length >= lim().sensors) { setStat('Лимит датчиков'); return; }
-    const at = slot(w.sensors.length, SENSOR_Z);
-    const s = { id: alloc('s'), kind, x: at.x, y: q2(TABLE_Y + REST[kind]), z: at.z, rx: 0, ry: 0, rz: 0 };
-    w.sensors.push(s); selected = { role: 'sensor', id: s.id }; dirty = true; rebuild(); commit();
-  }
-  function addStim(type) {
-    if (!TYPES.includes(type)) return;
-    const w = ensure(); if (!w) return;
-    if (w.stimuli.length >= lim().stimuli) { setStat('Лимит объектов'); return; }
-    const at = slot(w.stimuli.length, STIM_Z);
-    const t = { id: alloc('t'), type, x: at.x, y: q2(TABLE_Y + REST[type]), z: at.z };
-    w.stimuli.push(t); selected = { role: 'stimulus', id: t.id }; dirty = true; rebuild(); commit();
-  }
-  function resetStimuli() {
-    const w = world(); if (!w || !w.stimuli.length) return;
-    w.stimuli = []; if (selected && selected.role === 'stimulus') selected = null;
-    dirty = true; rebuild(); commit();
-  }
-  function removeSelected() {
-    const w = world(); if (!w || !selected) return false;
-    const arr = selected.role === 'sensor' ? w.sensors : w.stimuli;
-    const i = arr.findIndex(o => o.id === selected.id); if (i < 0) return false;
-    arr.splice(i, 1); selected = null; drag = null; dirty = true; rebuild(); commit(); return true;
-  }
-  function yawSelected(sign) {
-    const w = world(); if (!w || !selected || selected.role !== 'sensor') return false;
-    const s = w.sensors.find(o => o.id === selected.id); if (!s) return false;
-    let deg = Math.round((s.ry || 0) * 180 / Math.PI / 15) * 15 + sign * 15;
-    while (deg > 180) deg -= 360; while (deg < -180) deg += 360;
-    s.ry = Math.round(deg * Math.PI / 180 * 10000) / 10000;
-    syncGroup(s, 'sensor'); commit(); return true;
-  }
+  function removeSelected() { return false; }
+  function yawSelected() { return false; }
 
   const SCHEMA_MAX = 160;
   const WIRE_MAX = 400;
@@ -592,14 +427,11 @@
     return mix(h, ws.length);
   }
   function applyView() {
-    const schema = view === 'schema';
-    if (schemaRoot) schemaRoot.visible = schema;
-    if (pickRoot) for (const c of pickRoot.children) if (c.userData && c.userData.role === 'sensor') c.visible = !schema;
-    if (tags) tags.hidden = schema;
-    if (bWorld) { bWorld.classList.toggle('on', !schema); bWorld.setAttribute('aria-pressed', schema ? 'false' : 'true'); }
-    if (bSchema) { bSchema.classList.toggle('on', schema); bSchema.setAttribute('aria-pressed', schema ? 'true' : 'false'); }
-    if (hint) hint.textContent = schema ? HINT_SCHEMA : HINT_WORLD;
-    if (ring && schema && selected && selected.role === 'sensor') ring.visible = false;
+    view = 'schema';
+    if (schemaRoot) schemaRoot.visible = true;
+    if (pickRoot) for (const c of pickRoot.children) if (c.userData && (c.userData.role === 'sensor' || c.userData.role === 'stimulus')) c.visible = false;
+    if (tags) tags.hidden = true;
+    if (ring) ring.visible = false;
     syncChrome();
   }
   function clearSchema() {
@@ -639,12 +471,11 @@
     }
   }
   function setView(next) {
-    if (next !== 'world' && next !== 'schema') return;
-    view = next;
+    if (next !== 'schema') return;
+    view = 'schema';
     if (active && !renderer) boot();
     applyView();
-    if (view === 'schema') { refreshSchema(true); fitSchema(); }
-    else { updateSel(); if (active) syncTags(); }
+    refreshSchema(true); fitSchema();
     syncLive();
   }
   function fitSchema() {
@@ -708,11 +539,7 @@
     const s = window.__sim;
     if (!s) return;
     if (s.running) { if (s.stop) s.stop(); }
-    else {
-      const added = ensurePairs(proj());
-      if ((added.sensors || added.stimuli) && active) { dirty = true; rebuild(); if (view === 'schema') refreshSchema(true); }
-      if (s.start) s.start();
-    }
+    else if (s.start) s.start();
     syncLive();
   }
 
@@ -778,13 +605,9 @@
     }
     if (!boot()) return;
     if (controls) controls.enabled = true;
-    const added = ensurePairs(proj());
-    if (added.sensors || added.stimuli) dirty = true;
     resize(); if (dirty) rebuild(); else { syncAll(); applyView(); }
-    if (view === 'schema') { refreshSchema(true); fitSchema(); }
-    applyBoard(proj());
-    applyReadings(proj()); updateZones(); syncChrome(); syncLive();
-    if (added.sensors || added.stimuli) { const s = window.__sim; if (s && s.changed) s.changed(); }
+    refreshSchema(true); fitSchema();
+    syncChrome(); syncLive();
     if (!raf) loop(); else if (renderer && camera) { renderer.render(scene, camera); syncTags(); }
     requestAnimationFrame(() => { if (active) resize(); });
   }
@@ -885,24 +708,11 @@
       default: unknown(r.kind);
     }
   }
-  function rebuildTags() {
-    tags.textContent = ''; tagEls = new Map();
-    const w = world(); if (!w) return;
-    for (const s of w.sensors) {
-      const t = el('div', { className: 'w3tag' }); t.dataset.id = s.id; tags.append(t); tagEls.set(s.id, t);
-    }
-  }
+  function rebuildTags() { tags.textContent = ''; tagEls = new Map(); }
   function rebuild() {
     if (!renderer) { dirty = true; return; }
     clearGroup(pickRoot); groups = new Map();
-    const w = world() || { sensors: [], stimuli: [] };
-    for (const s of w.sensors) {
-      const g = makeSensor(s.kind); g.userData = { role: 'sensor', id: s.id, kind: s.kind }; pickRoot.add(g); groups.set('sensor:' + s.id, g); syncGroup(s, 'sensor');
-    }
-    for (const t of w.stimuli) {
-      const g = makeStim(t.type); g.userData = { role: 'stimulus', id: t.id, type: t.type }; pickRoot.add(g); groups.set('stimulus:' + t.id, g); syncGroup(t, 'stimulus');
-    }
-    if (selected && !groups.has(selected.role + ':' + selected.id)) selected = null;
+    selected = null; hoverPick = null;
     rebuildTags(); updateSel(); updateZones(); applyView(); dirty = false; syncChrome();
   }
   function syncGroup(o, role) {
@@ -1066,7 +876,7 @@
       o.x = q2(clamp(p.x, -TABLE_HX + 8, TABLE_HX - 8));
       o.z = q2(clamp(p.z, -TABLE_HZ + 8, TABLE_HZ - 8));
       syncGroup(o, drag.role); updateSel();
-      applyReadings(proj()); updateZones();
+      updateZones();
       if (renderer && camera) renderer.render(scene, camera);
       syncTags();
       return;
@@ -1094,7 +904,7 @@
   api.syncLive = () => syncLive();
   api.onOpen = () => {
     dirty = true; schemaSig = null; selected = null; hoverPick = null; drag = null;
-    if (active) { rebuild(); if (view === 'schema') refreshSchema(true); applyReadings(proj()); updateZones(); }
+    if (active) { rebuild(); refreshSchema(true); updateZones(); }
   };
   api.setView = setView;
   api.schemaCount = () => schemaPartNodes().length;

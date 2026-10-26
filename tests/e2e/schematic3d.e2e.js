@@ -1,4 +1,4 @@
-// v14.5.8: «Схема 3D» loads on the existing table, poses match, stimuli and the 2D canvas stay.
+// v14.5.9: «Схема 3D» loads on the table. The sensor world (Мир, stimuli, auto-pairs) is gone.
 const { chromium } = require('playwright-core'); const assert = require('assert');
 const URL = process.argv[2] || 'http://localhost:8765/';
 const SHOT = process.argv[3] || '/tmp';
@@ -16,12 +16,19 @@ const SHOT = process.argv[3] || '/tmp';
   ok(csp.includes("connect-src 'none'") && csp.includes("script-src 'self'") && !/unsafe-inline|unsafe-eval/.test(csp), 'CSP unchanged');
   const scripts = await pg.evaluate(() => [...document.scripts].filter(s => s.src).map(s => s.src));
   const origin = new globalThis.URL(URL).origin;
-  ok(scripts.every(s => s.startsWith(origin) && /\?v=14\.5\.8$/.test(s)), 'scripts are same-origin ?v=14.5.8');
+  ok(scripts.every(s => s.startsWith(origin) && /\?v=14\.5\.9$/.test(s)), 'scripts are same-origin ?v=14.5.9');
   ok(scripts.some(s => s.includes('/schematic3d.js')) && scripts.some(s => s.includes('/vendor/three/three.min.js')), 'schematic3d and vendored Three.js');
 
   await pg.click('#w3tab'); await pg.waitForTimeout(400);
-  ok(await pg.evaluate(() => World3D.active && World3D.view === 'world' && document.querySelector('#w3fail').hidden), 'world view still opens');
-  await pg.click('#w3pal button[data-view=schema]'); await pg.waitForTimeout(300);
+  const opened = await pg.evaluate(() => ({
+    active: World3D.active,
+    view: World3D.view,
+    fail: document.querySelector('#w3fail').hidden,
+    tab: document.querySelector('#w3tab').textContent,
+    mir: [...document.querySelectorAll('#w3pal button')].some(b => b.textContent === 'Мир' || b.dataset.view === 'world' || b.dataset.kind || b.dataset.type),
+    world: __sim.proj.world3d
+  }));
+  ok(opened.active && opened.view === 'schema' && opened.fail && opened.tab === 'Схема 3D' && !opened.mir && opened.world == null, 'Схема 3D opens with no Мир palette ' + JSON.stringify(opened));
   const laid = await pg.evaluate(() => {
     const want = ['esp32', 'esp8266', 'esp32c3', 'uno', 'pico', 'opi', 'dht22', 'hcsr04', 'pir', 'ldr'];
     __sim.proj.parts.push(
@@ -36,9 +43,9 @@ const SHOT = process.argv[3] || '/tmp';
       { id: 'R9', type: 'ldr', x: -180, y: 160, rot: 2, props: { lux: 100 } }
     );
     __sim.changed();
-    return { view: World3D.view, fail: document.querySelector('#w3fail').hidden, label: document.querySelector('#w3pal button[data-view=schema]').textContent, want };
+    return { view: World3D.view, fail: document.querySelector('#w3fail').hidden, want };
   });
-  ok(laid.view === 'schema' && laid.fail && laid.label === 'Схема 3D', 'schema view label');
+  ok(laid.view === 'schema' && laid.fail, 'schema view stays on');
   await pg.waitForTimeout(250);
   const detail = await pg.evaluate(() => {
     const ang = (a, b) => Math.abs(Math.atan2(Math.sin(a - b), Math.cos(a - b)));
@@ -83,27 +90,6 @@ const SHOT = process.argv[3] || '/tmp';
   });
   ok(afterClick.x === before.x && afterClick.y === before.y && afterClick.rot === before.rot && afterClick.wires === before.wires, 'clicking a mesh does not move the part or drop wires');
 
-  await pg.click('#w3pal button[data-type=block]');
-  await pg.waitForTimeout(150);
-  const dragged = await (async () => {
-    const info = await pg.evaluate(() => {
-      const o = __sim.proj.world3d.stimuli.find(s => s.type === 'block');
-      return { x: o.x, z: o.z, p: World3D.screenPos('stimulus', o.id) };
-    });
-    ok(info.p && !info.p.behind, 'stimulus still pickable in schema view');
-    await pg.mouse.move(info.p.x, info.p.y);
-    await pg.mouse.down();
-    await pg.mouse.move(info.p.x + 80, info.p.y + 20, { steps: 6 });
-    await pg.mouse.up();
-    await pg.waitForTimeout(80);
-    return pg.evaluate(prev => {
-      const o = __sim.proj.world3d.stimuli.find(s => s.type === 'block');
-      const esp = __sim.proj.parts.find(p => p.id === 'U1');
-      return { moved: o.x !== prev.x || o.z !== prev.z, x: esp.x, wires: __sim.proj.wires.length };
-    }, info);
-  })();
-  ok(dragged.moved && dragged.x === before.x && dragged.wires === before.wires, 'stimulus drag still works and the schematic part stays');
-
   await pg.evaluate(() => { __sim.select('U3'); __sim.rotate(); });
   await pg.waitForTimeout(200);
   const spun = await pg.evaluate(() => {
@@ -115,20 +101,20 @@ const SHOT = process.argv[3] || '/tmp';
   });
   ok(spun.rot === 2 && spun.ang < 1e-4 && spun.wires === before.wires, 'rotate() updates the table yaw');
 
-  await pg.click('#w3pal button[data-view=world]');
-  await pg.click('#w3pal button[data-kind=dht]');
-  await pg.click('#w3pal button[data-type=heat]');
-  await pg.waitForTimeout(150);
-  const climate = await pg.evaluate(() => {
-    const w = __sim.proj.world3d;
-    const dht = w.sensors.find(s => s.kind === 'dht');
-    const heat = w.stimuli.find(s => s.type === 'heat');
-    heat.x = dht.x; heat.y = dht.y; heat.z = dht.z;
-    const read = World3D.getReadings().sensors.find(s => s.kind === 'dht');
-    const part = __sim.proj.parts.find(p => p.type === 'dht22');
-    return { temp: read.temp, prop: part.props.temp, hum: part.props.hum, view: World3D.view };
+  const kept = await pg.evaluate(() => {
+    const dht = __sim.proj.parts.find(p => p.type === 'dht22');
+    const before = { temp: dht.props.temp, hum: dht.props.hum, dist: __sim.proj.parts.find(p => p.type === 'hcsr04').props.dist };
+    __sim.proj.world3d = { sensors: [{ id: 'd', kind: 'dht', x: 0, y: 80, z: 0 }], stimuli: [{ id: 'h', type: 'heat', x: 0, y: 80, z: 0 }] };
+    World3D.applyReadings(__sim.proj);
+    World3D.ensurePairs(__sim.proj);
+    return { before, temp: dht.props.temp, hum: dht.props.hum, dist: __sim.proj.parts.find(p => p.type === 'hcsr04').props.dist, view: World3D.view, added: __sim.proj.world3d && __sim.proj.world3d.stimuli && __sim.proj.world3d.stimuli.length };
   });
-  ok(climate.view === 'world' && climate.temp > 24 && climate.prop === climate.temp && climate.hum === 45, 'heat still writes DHT props ' + JSON.stringify(climate));
+  ok(kept.temp === kept.before.temp && kept.hum === kept.before.hum && kept.dist === kept.before.dist && kept.view === 'schema' && kept.added === 1, 'stimuli do not rewrite sensor props ' + JSON.stringify(kept));
+
+  await pg.click('#w3run'); await pg.waitForTimeout(300);
+  const ran = await pg.evaluate(() => ({ running: __sim.running, view: World3D.view, bar: document.querySelector('#w3run').textContent, wires: World3D.schemaWireCount() }));
+  ok(ran.running && ran.view === 'schema' && ran.bar === '■ Стоп' && ran.wires >= 3, '▶ runs inside Схема 3D ' + JSON.stringify(ran));
+  await pg.click('#w3run'); await pg.waitForTimeout(150);
 
   await pg.click('#w3tab'); await pg.waitForTimeout(200);
   const back = await pg.evaluate(() => {
@@ -154,7 +140,6 @@ const SHOT = process.argv[3] || '/tmp';
   ph.on('pageerror', e => errs.push('phone ' + e.message));
   await ph.goto(URL); await ph.waitForTimeout(400);
   await ph.tap('#pmTabs [data-ptab=world]'); await ph.waitForTimeout(300);
-  await ph.tap('#w3pal button[data-view=schema]'); await ph.waitForTimeout(300);
   const phone = await ph.evaluate(() => {
     const cv = document.querySelector('#w3cv').getBoundingClientRect();
     return { view: World3D.view, n: World3D.schemaCount(), w: cv.width, h: cv.height, fail: document.querySelector('#w3fail').hidden };
