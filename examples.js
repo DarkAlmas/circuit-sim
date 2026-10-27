@@ -658,3 +658,35 @@ void loop() {
   delay(50);
 }` };
 })();
+/* FastLED writes the same WS2812 strip as Adafruit_NeoPixel (D.strip / strip8). */
+(function () {
+  const W = (id, a, ap, b, bp) => ({ id, a: { part: a, pin: ap }, b: { part: b, pin: bp } });
+  window.EXAMPLES['Пример: FastLED и лента WS2812'] = { kind: 'uno', name: 'FastLED: лента 8 LED',
+    parts: [{ id: 'U1', type: 'uno', x: 0, y: 0, rot: 0 }, { id: 'H1', type: 'strip8', x: -280, y: -40, rot: 0 }],
+    wires: [W('w1', 'U1', '5V', 'H1', 'VCC'), W('w2', 'U1', 'GND', 'H1', 'GND'), W('w3', 'U1', 'D6', 'H1', 'DIN')],
+    code: `// FastLED, лента 8× WS2812B. Uno: DIN = D6, питание 5V и GND.
+// На ESP32 тот же скетч: DATA_PIN — номер GPIO, к которому подключён DIN.
+#include <FastLED.h>
+
+#define NUM_LEDS 8
+#define DATA_PIN 6
+
+CRGB leds[NUM_LEDS];
+
+void setup() {
+  FastLED.addLeds<WS2812B, DATA_PIN, GRB>(leds, NUM_LEDS);
+  FastLED.setBrightness(80);
+  FastLED.clear();
+}
+
+int t = 0;
+void loop() {
+  for (int i = 0; i < NUM_LEDS; i++) leds[i] = CRGB::Black;
+  leds[t % NUM_LEDS] = CRGB::Red;
+  leds[(t + 1) % NUM_LEDS] = CRGB(0, 180, 0);
+  leds[(t + 2) % NUM_LEDS] = CHSV(160, 255, 255);
+  FastLED.show();
+  t++;
+  delay(80);
+}` };
+})();
