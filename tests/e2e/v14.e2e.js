@@ -9,7 +9,7 @@ const SHOT = process.argv[3] || '/tmp';
   pg.on('console', m => { if (/Content Security Policy|Refused/i.test(m.text())) errs.push(m.text()); });
   await pg.goto(URL); await pg.evaluate(() => localStorage.clear()); await pg.reload(); await pg.waitForTimeout(300);
   const ok = (c, m) => { assert.ok(c, m); console.log('✓', m); };
-  ok(await pg.evaluate(() => [...document.scripts].filter(s => s.src).every(s => /\?v=14\.6\.6$/.test(s.src))), 'scripts ?v=14.6.6');
+  ok(await pg.evaluate(() => [...document.scripts].filter(s => s.src).every(s => /\?v=14\.6\.7$/.test(s.src))), 'scripts ?v=14.6.7');
 
   const thumbs = await pg.evaluate(() => {
     const items = [...document.querySelectorAll('#palette .item')];

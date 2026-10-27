@@ -263,7 +263,9 @@
             focusCode();
             return;
           }
-          var result = A.replacePatch(S.proj, proposal);
+          /* Clear → sanitize AI schema → load. No merge with leftovers on the canvas. */
+          var empty = { parts: [], wires: [], code: '', name: S.proj && S.proj.name, kind: S.proj && S.proj.kind };
+          var result = A.replacePatch(empty, proposal);
           var placed = result.project.parts.length || result.project.wires.length;
           if (!placed && !result.sketchApplied) {
             markApplied(msg, btn, false);
@@ -273,6 +275,8 @@
           if (placed) {
             S.replaceProject(result.project);
             if (result.partIds[0]) S.select(result.partIds[0]);
+            if (result.sketchApplied) S.replaceSketch(result.project.code || '');
+            else S.replaceSketch('');
             if (result.editorBoard && S.codeFor) S.codeFor(result.editorBoard);
           } else if (result.sketchApplied) {
             S.replaceSketch(result.project.code);
@@ -280,7 +284,7 @@
           }
           markApplied(msg, btn, true);
           var note = result.notes.length ? ' ' + result.notes.join('. ') + '.' : '';
-          var sketchNote = result.sketchApplied ? ' Скетч записан в редактор.' : '';
+          var sketchNote = result.sketchApplied ? ' Скетч записан в редактор.' : ' Старый скетч сброшен.';
           flash('Холст заменён: ' + result.project.parts.length + ' дет., ' + result.project.wires.length + ' пров.' + sketchNote + ' Отмена — кнопкой Отменить. Симуляция не запущена.' + note);
           return;
         }

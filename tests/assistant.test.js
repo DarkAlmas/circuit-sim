@@ -14,12 +14,12 @@ test('page CSP stays connect-src none and scripts are versioned', () => {
   assert.ok(m, 'csp meta');
   assert.ok(m[1].includes("connect-src 'none'"));
   assert.ok(!/connect-src\s+https?:/.test(m[1]));
-  assert.ok(html.includes('assistant-core.js?v=14.6.6') && html.includes('assistant.js?v=14.6.6'));
-  assert.ok(html.includes('style.css?v=14.6.6'));
-  assert.equal(A.VERSION, '14.6.6');
-  assert.ok(read('sw-assistant.js').includes('assistant-core.js?v=14.6.6'));
-  assert.ok(read('assistant-net.js').includes("VERSION = '14.6.6'"));
-  assert.ok(read('app.js').includes("new Worker('worker.js?v=14.6.6')"));
+  assert.ok(html.includes('assistant-core.js?v=14.6.7') && html.includes('assistant.js?v=14.6.7'));
+  assert.ok(html.includes('style.css?v=14.6.7'));
+  assert.equal(A.VERSION, '14.6.7');
+  assert.ok(read('sw-assistant.js').includes('assistant-core.js?v=14.6.7'));
+  assert.ok(read('assistant-net.js').includes("VERSION = '14.6.7'"));
+  assert.ok(read('app.js').includes("new Worker('worker.js?v=14.6.7')"));
 });
 
 test('assistant sources do not eval, inject HTML, or call a CDN', () => {
@@ -122,7 +122,7 @@ test('frame CSP names only the chosen origin', () => {
   assert.ok(doc.csp.includes('connect-src https://api.openai.com;'));
   assert.ok(doc.csp.includes("frame-ancestors 'self'"));
   assert.ok(!/unsafe-inline|unsafe-eval|\*/.test(doc.csp));
-  assert.ok(doc.html.includes('assistant-net.js?v=14.6.6'));
+  assert.ok(doc.html.includes('assistant-net.js?v=14.6.7'));
   assert.ok(!doc.html.includes('/v1'));
   assert.equal(A.frameDocument('https://evil.com"; script-src \'unsafe-inline\''), null);
   assert.equal(A.frameDocument('http://8.8.8.8'), null);
@@ -179,6 +179,7 @@ test('prompt carries context and never the API key', () => {
   });
   const sys = schemaReq.body.messages[0].content;
   assert.ok(sys.includes('заменяет холст'));
+  assert.ok(sys.includes('с нуля') || sys.includes('не дописывай'));
   assert.ok(sys.includes('"sketch"'));
   assert.ok(sys.includes('полный список'));
   assert.ok(schemaReq.body.messages[schemaReq.body.messages.length - 1].content.includes('Применить заменит холст'));
@@ -259,7 +260,7 @@ test('apply replaces the canvas, whitelists parts, and writes a schema sketch', 
   assert.equal(led.props.Vf, 10);
   assert.equal(led.x, 300);
   assert.ok(!('onclick' in led) && !('nope' in led.props));
-  assert.equal(bad.project.code, 'void setup(){ /* keep */ }');
+  assert.equal(bad.project.code, '');
   assert.equal(bad.project.kind, 'analog');
   assert.equal(bad.project.name, 'лампа');
   assert.deepEqual(bad.wireIds, ['w1']);
@@ -298,6 +299,50 @@ test('apply replaces the canvas, whitelists parts, and writes a schema sketch', 
   assert.equal({}.polluted, undefined);
 });
 
+test('sanitizeSketch unfolds literal \\n when the sketch is one escaped line', () => {
+  const raw = '#define LED1 4\\n#define LED2 2\\n\\nvoid setup() {\\n pinMode(LED1, OUTPUT);\\n}\\nvoid loop(){\\n digitalWrite(LED1, HIGH);\\n}';
+  const out = A.sanitizeSketch(raw);
+  assert.ok(out.includes('\n'));
+  assert.ok(!out.includes('\\n') || out.split('\n').length > 3);
+  assert.ok(out.split('\n')[0].includes('#define LED1 4'));
+  assert.ok(out.includes('void setup()'));
+  const proper = 'void setup(){\n  Serial.println("hi\\n");\n}\n';
+  assert.equal(A.sanitizeSketch(proper), proper);
+});
+
+test('apply drops old canvas parts and replaces sketch (no leftovers / append)', () => {
+  const out = A.replacePatch({
+    name: 'old', kind: 'esp32',
+    code: '#include <FastLED.h>\nvoid setup(){ FastLED.addLeds<WS2812,6>(leds,8); }\nvoid loop(){ FastLED.show(); }',
+    parts: [
+      { id: 'U1', type: 'esp32', x: 0, y: 0 },
+      { id: 'D9', type: 'led', x: 200, y: 0, props: { color: 'синий' } },
+      { id: 'R9', type: 'resistor', x: 400, y: 0, props: { R: 330 } }
+    ],
+    wires: [{ id: 'wOld', a: { part: 'U1', pin: '2' }, b: { part: 'R9', pin: 'a' } }]
+  }, {
+    parts: [
+      { id: 'U1', type: 'esp32', x: 0, y: 0 },
+      { id: 'R1', type: 'resistor', x: 180, y: 40, props: { R: 220 } },
+      { id: 'D1', type: 'led', x: 300, y: 40, props: { color: 'красный' } }
+    ],
+    wires: [
+      { id: 'w1', a: { part: 'U1', pin: '2' }, b: { part: 'R1', pin: 'a' } },
+      { id: 'w2', a: { part: 'R1', pin: 'b' }, b: { part: 'D1', pin: 'a' } },
+      { id: 'w3', a: { part: 'D1', pin: 'b' }, b: { part: 'U1', pin: 'GND' } }
+    ],
+    sketch: 'void setup(){ pinMode(2, OUTPUT); }\nvoid loop(){ digitalWrite(2, HIGH); delay(500); digitalWrite(2, LOW); delay(500); }'
+  });
+  assert.equal(out.project.parts.length, 3);
+  assert.ok(!out.project.parts.some(p => p.id === 'D9' || p.id === 'R9'));
+  assert.ok(!out.project.wires.some(w => w.id === 'wOld'));
+  assert.equal(out.sketchApplied, true);
+  assert.ok(out.project.code.includes('pinMode(2'));
+  assert.ok(!out.project.code.includes('FastLED'));
+  assert.ok(!out.project.code.includes('WS2812'));
+  assert.equal(out.project.code.includes('#include'), false);
+});
+
 test('replace keeps a long wire list and repairs a truncated schema', () => {
   const parts = [];
   const wires = [];
@@ -318,7 +363,7 @@ test('replace keeps a long wire list and repairs a truncated schema', () => {
   const fixed = A.replacePatch({ parts: [{ id: 'OLD', type: 'led', x: 0, y: 0 }], wires: [], code: 'keep' }, parsed.proposal);
   assert.deepEqual(fixed.project.parts.map(p => p.id), ['R1', 'R2', 'R3']);
   assert.equal(fixed.project.wires.length, 2);
-  assert.equal(fixed.project.code, 'keep');
+  assert.equal(fixed.project.code, '');
 });
 
 test('apply control sits with Send and schema copy says replace', () => {
