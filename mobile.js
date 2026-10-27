@@ -23,6 +23,7 @@
   mi('pmImport', '⬆ Импорт', () => $('#import').click());
   mi('pmSettings', '⚙ Настройки', () => { const s = window.__sim; if (s) s.openSettings(); });
   const pmPower = mi('pmPower', '⚡ Питание: выкл', () => { const s = sim(); if (s && s.togglePortPower) s.togglePortPower(); });
+  mi('pmAssist', '✦ Помощник', () => { if (window.Assistant) window.Assistant.open(); });
   body.append(menu);
   bMore.onclick = e => { e.stopPropagation(); menu.hidden = !menu.hidden; };
   document.addEventListener('pointerdown', e => { if (!menu.hidden && !menu.contains(e.target) && e.target !== bMore) menu.hidden = true; });
@@ -61,7 +62,9 @@
     host.prepend(h); let y0 = 0, h0 = 0, on = false, moved = false;
     h.addEventListener('pointerdown', e => { if (!body.classList.contains('pm')) return; on = true; moved = false; y0 = e.clientY; const box = key === 'bside' ? $('#bottom') : host; h0 = box.getBoundingClientRect().height; h.setPointerCapture(e.pointerId); e.preventDefault(); });
     h.addEventListener('pointermove', e => { if (!on) return; const d = y0 - e.clientY; if (Math.abs(d) > 6) moved = true; setH(key, Math.max(30, h0 + d) / vh()); });
-    const up = e => { if (!on) return; on = false; const box = key === 'bside' ? $('#bottom') : host, f = box.getBoundingClientRect().height / vh(), sn = SNAP[key];
+    const up = e => { if (!on) return; on = false;
+      if (moved) { const stopClick = ev => { if (!ev.isTrusted) return; ev.preventDefault(); ev.stopPropagation(); }; document.addEventListener('click', stopClick, true); setTimeout(() => document.removeEventListener('click', stopClick, true), 0); }
+      const box = key === 'bside' ? $('#bottom') : host, f = box.getBoundingClientRect().height / vh(), sn = SNAP[key];
       if (!moved) { if (key === 'bside') { const open = body.dataset.ser !== 'open'; body.dataset.ser = open ? 'open' : ''; setH(key, null); } return; }
       if (key === 'bside') { const open = f > 0.2; body.dataset.ser = open ? 'open' : ''; setH(key, open ? nearest(f, sn.slice(1)) : null); return; }
       if (f < sn[0] * 0.75) { setH(key, null); closeSheet(); return; }

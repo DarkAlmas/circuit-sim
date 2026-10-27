@@ -1,12 +1,13 @@
 <!doctype html>
 <html lang="ru"><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; connect-src 'none'; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'none'"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>Схемотехник — симулятор Arduino, ESP32, Pico, Orange Pi</title><link rel="icon" href="data:,"><link rel="stylesheet" href="style.css?v=14.6.1"></head>
+<title>Схемотехник — симулятор Arduino, ESP32, Pico, Orange Pi</title><link rel="icon" href="data:,"><link rel="stylesheet" href="style.css?v=14.6.2"></head>
 <body>
 <header>
   <b class="logo">⚡ Схемотехник</b>
   <button id="run" class="go">▶ Запустить</button><button id="stop" disabled>■ Стоп</button>
   <button type="button" id="portPower" title="Реальное питание: ESP и Arduino работают только от USB, 5V или VIN. Выключено — как раньше, питание есть всегда." aria-pressed="false">⚡ Питание</button>
   <button id="codeTab">Код</button>
+  <button type="button" id="assistTab" title="Помощник">✦ Помощник</button>
   <span class="sep"></span>
   <select id="projects" title="Проекты"></select>
   <button id="save">Сохранить</button><button id="new">Новый</button>
@@ -29,7 +30,37 @@
     <div id="codePane" hidden><div class="codebar">Код (Arduino C или Python для Orange Pi). Плата: <b id="boardName">—</b> <select id="codeFor" hidden title="Чей скетч редактировать"></select></div><textarea id="code" spellcheck="false"></textarea></div>
     <div id="alert" hidden></div>
   </section>
-  <aside id="right"><h3>Свойства</h3><div id="props"><p class="muted">Выбери деталь или провод</p></div></aside>
+  <aside id="right">
+    <div id="sideTabs" class="seg" role="tablist" aria-label="Правая панель">
+      <button type="button" id="sideProps" role="tab" aria-selected="true" aria-controls="sidePropsPane">Свойства</button>
+      <button type="button" id="sideAssist" role="tab" aria-selected="false" aria-controls="sideAssistPane">✦ Помощник</button>
+    </div>
+    <div id="sidePropsPane" role="tabpanel">
+      <h3>Свойства</h3>
+      <div id="props"><p class="muted">Выбери деталь или провод</p></div>
+    </div>
+    <div id="sideAssistPane" role="tabpanel" hidden>
+      <div id="assistMode" class="seg" role="group" aria-label="Режим помощника">
+        <button type="button" data-mode="schema" class="on" aria-pressed="true">Схема</button>
+        <button type="button" data-mode="code" aria-pressed="false">Код</button>
+      </div>
+      <div id="assistLog" aria-live="polite"></div>
+      <p class="muted" id="assistEmpty">Ответ — текст и кнопка «Применить». Схема и скетч не меняются, пока вы сами её не нажмёте.</p>
+      <textarea id="assistInput" maxlength="4000" placeholder="Спросите про схему или скетч. Enter — отправить, Shift+Enter — новая строка."></textarea>
+      <div class="row"><button type="button" id="assistSend">Отправить</button></div>
+      <p class="muted" id="assistStatus"></p>
+      <div id="assistCfg">
+        <div class="srow"><span>Разрешить запросы к ИИ</span><button type="button" id="assistOn" class="setsw" role="switch" aria-checked="false" aria-label="Разрешить запросы к ИИ"></button></div>
+        <label class="prop">Адрес прокси<input id="assistUrl" type="text" inputmode="url" autocomplete="off" spellcheck="false" placeholder="https://api.openai.com/v1"></label>
+        <label class="prop">Модель<input id="assistModel" type="text" autocomplete="off" spellcheck="false" maxlength="64"></label>
+        <label class="prop">API-ключ<input id="assistKey" type="password" autocomplete="off" spellcheck="false" placeholder="только в этом браузере"></label>
+        <label id="assistRememberRow"><input id="assistRemember" type="checkbox"> Запомнить ключ в браузере</label>
+        <button type="button" id="assistForget">Забыть ключ</button>
+        <p class="hint" id="assistHint"></p>
+        <p class="muted">Ключ не пишется в проект. «Применить» для схемы добавляет детали и провода после проверки, для кода заменяет скетч в редакторе. Запуск по-прежнему кнопкой ▶.</p>
+      </div>
+    </div>
+  </aside>
 </main>
 <nav id="mbar"><button id="mParts">＋ Детали</button><button id="mWire" aria-pressed="false">〰 Провод</button><button id="mProps">⚙ Свойства</button><button id="mCode">&lt;/&gt; Код</button></nav>
 <footer id="bottom"><div id="codeDock"></div><div id="bside">
@@ -39,5 +70,5 @@
 <div id="newModal" class="modal" hidden><div class="mbox"><div class="mhead"><b>Новый проект</b><button id="newClose" title="Закрыть">✕</button></div><div id="newCards" class="ncards"></div></div></div>
 <div id="hdmiFull" class="modal" hidden><div class="hbox"><div class="mhead"><b>Монитор HDMI · 1920×1080</b><button id="hdmiClose" title="Закрыть">✕</button></div><canvas id="hdmiCanvas" width="1920" height="1080"></canvas></div></div>
 <div id="simSettings" class="modal" hidden role="dialog" aria-modal="true" aria-labelledby="simSettingsTitle"><div class="mbox sbox"><div class="mhead"><b id="simSettingsTitle">Настройки симулятора</b><button type="button" id="simSettingsClose">Закрыть</button></div><div class="srow"><span>Меню по удержанию</span><button type="button" id="setHold" class="setsw" role="switch" aria-checked="false" aria-label="Меню по удержанию"></button></div><div class="srow"><span>Свойства на схеме</span><button type="button" id="setCanvas" class="setsw" role="switch" aria-checked="true" aria-label="Свойства на схеме"></button></div><div class="srow"><span>Шрифт подписей</span><div id="setFont" class="seg" role="group" aria-label="Шрифт подписей"><button type="button" data-font="small" aria-pressed="false">Мелкий</button><button type="button" data-font="normal" class="on" aria-pressed="true">Обычный</button><button type="button" data-font="large" aria-pressed="false">Крупный</button></div></div><div class="srow"><span>Кнопка «Провод»</span><button type="button" id="setWire" class="setsw" role="switch" aria-checked="true" aria-label="Кнопка «Провод»"></button></div><div class="srow"><span>Кнопка «Удалить»</span><button type="button" id="setDel" class="setsw" role="switch" aria-checked="true" aria-label="Кнопка «Удалить»"></button></div><div class="srow"><span>Шрифт кода</span><div id="setCodeFont" class="seg" role="group" aria-label="Шрифт кода"><button type="button" data-size="14" class="on" aria-pressed="true">14</button><button type="button" data-size="16" aria-pressed="false">16</button></div></div><p class="muted" id="simSettingsHint">Удаление, поворот и дублирование — в Свойствах и на нижней панели.</p></div></div>
-<script src="solver.js?v=14.6.1"></script><script src="parts.js?v=14.6.1"></script><script src="parts2.js?v=14.6.1"></script><script src="devices.js?v=14.6.1"></script><script src="parts3.js?v=14.6.1"></script><script src="chassis.js?v=14.6.1"></script><script src="robot.js?v=14.6.1"></script><script src="sanitize.js?v=14.6.1"></script><script src="netlist.js?v=14.6.1"></script><script src="shorts.js?v=14.6.1"></script><script src="examples.js?v=14.6.1"></script><script src="app.js?v=14.6.1"></script><script src="robotui.js?v=14.6.1"></script><script src="vendor/three/three.min.js?v=14.6.1"></script><script src="vendor/three/OrbitControls.js?v=14.6.1"></script><script src="schematic3d.js?v=14.6.1"></script><script src="world3d.js?v=14.6.1"></script><script src="mobile.js?v=14.6.1"></script>
+<script src="solver.js?v=14.6.2"></script><script src="parts.js?v=14.6.2"></script><script src="parts2.js?v=14.6.2"></script><script src="devices.js?v=14.6.2"></script><script src="parts3.js?v=14.6.2"></script><script src="chassis.js?v=14.6.2"></script><script src="robot.js?v=14.6.2"></script><script src="sanitize.js?v=14.6.2"></script><script src="netlist.js?v=14.6.2"></script><script src="shorts.js?v=14.6.2"></script><script src="examples.js?v=14.6.2"></script><script src="app.js?v=14.6.2"></script><script src="assistant-core.js?v=14.6.2"></script><script src="assistant.js?v=14.6.2"></script><script src="robotui.js?v=14.6.2"></script><script src="vendor/three/three.min.js?v=14.6.2"></script><script src="vendor/three/OrbitControls.js?v=14.6.2"></script><script src="schematic3d.js?v=14.6.2"></script><script src="world3d.js?v=14.6.2"></script><script src="mobile.js?v=14.6.2"></script>
 </body></html>
