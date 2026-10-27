@@ -3,7 +3,7 @@
    and a sketch is only text until the existing worker transpiles it. */
 (function () {
   'use strict';
-  var VERSION = '14.6.5';
+  var VERSION = '14.6.6';
   var SETTINGS_KEY = 'circuitsim.assistant';
   var KEY_KEY = 'circuitsim.assistant.key';
   var DEFAULT_BASE = 'http://127.0.0.1:11434/v1';
@@ -13,7 +13,6 @@
   var HTTPS_ORIGIN = /^https:\/\/[A-Za-z0-9.-]{1,253}(?::[0-9]{1,5})?$/;
   var HTTP_ORIGIN = /^http:\/\/(?:localhost|\[::1\]|127(?:\.\d{1,3}){3}|10(?:\.\d{1,3}){3}|192\.168(?:\.\d{1,3}){2}|172\.(?:1[6-9]|2\d|3[0-1])(?:\.\d{1,3}){2})(?::[0-9]{1,5})?$/;
   var MODEL_RE = /^[A-Za-z0-9._:@+/-]{1,64}$/;
-  var PIN_RE = /^[A-Za-z0-9_-]{1,32}$/;
   var PRE = { resistor: 'R', ldr: 'R', ntc: 'R', led: 'D', diode: 'D', npn: 'Q', button: 'S', switch: 'S', pot: 'RV', dc: 'V', battery: 'B', gnd: 'G', breadboard: 'BB', voltmeter: 'PV', ammeter: 'PA' };
 
   function deps() {
@@ -133,20 +132,122 @@
     return s.split(key).join('••••');
   }
 
+  function limits() {
+    var L = deps().LIMITS || {};
+    return { parts: L.parts || 500, wires: L.wires || 2000 };
+  }
+
+  /* A cut-off model reply still yields every complete object. Incomplete tail is dropped. */
+  function salvageJson(src) {
+    var s = String(src || '').trim();
+    if (!s || (s.charAt(0) !== '{' && s.charAt(0) !== '[')) return null;
+    try { return JSON.parse(s); } catch (e0) { /* repair */ }
+    var cuts = [];
+    var inStr = false, esc = false;
+    var depth = 0;
+    for (var i = 0; i < s.length; i++) {
+      var c = s.charAt(i);
+      if (inStr) {
+        if (esc) esc = false;
+        else if (c === '\\') esc = true;
+        else if (c === '"') inStr = false;
+        continue;
+      }
+      if (c === '"') { inStr = true; continue; }
+      if (c === '{' || c === '[') depth++;
+      else if ((c === '}' || c === ']') && depth) depth--;
+      else if (c === ',' && depth) cuts.push(i);
+    }
+    function closeAndParse(body) {
+      var t = body.replace(/[\s,]+$/, '');
+      var st = [], str = false, es = false;
+      for (var n = 0; n < t.length; n++) {
+        var ch = t.charAt(n);
+        if (str) {
+          if (es) es = false;
+          else if (ch === '\\') es = true;
+          else if (ch === '"') str = false;
+          continue;
+        }
+        if (ch === '"') { str = true; continue; }
+        if (ch === '{' || ch === '[') st.push(ch);
+        else if ((ch === '}' || ch === ']') && st.length) st.pop();
+      }
+      if (str) t = t.replace(/"[^"\\]*$/, '').replace(/[\s,:]+$/, '');
+      t = t.replace(/([{,])\s*"[^"\\]*"\s*$/, '$1');
+      t = t.replace(/[\s,]+$/, '');
+      t = t.replace(/:\s*$/, ':null');
+      while (st.length) t += st.pop() === '{' ? '}' : ']';
+      try {
+        var parsed = JSON.parse(t);
+        return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : null;
+      } catch (err) { return null; }
+    }
+    var hit = closeAndParse(s);
+    if (hit) return hit;
+    var tries = 0;
+    for (var k = cuts.length - 1; k >= 0 && tries < 80; k--, tries++) {
+      hit = closeAndParse(s.slice(0, cuts[k]));
+      if (hit) return hit;
+    }
+    return null;
+  }
+
+  function fencedBlocks(src) {
+    var blocks = [];
+    var i = 0;
+    while (i < src.length) {
+      var open = src.indexOf('```', i);
+      if (open < 0) break;
+      var lineEnd = src.indexOf('\n', open + 3);
+      var start = lineEnd < 0 ? src.length : lineEnd + 1;
+      var close = src.indexOf('```', start);
+      if (close < 0) { blocks.push(src.slice(start)); break; }
+      blocks.push(src.slice(start, close));
+      i = close + 3;
+    }
+    return blocks;
+  }
+
+  /* Bare JSON, a ``` fence, or "json" then an object. Trailing prose is cut off. */
+  function jsonCandidates(src) {
+    var blocks = fencedBlocks(src);
+    var t = String(src || '').trim();
+    var at = t.indexOf('{');
+    if (at >= 0) blocks.push(t.slice(at));
+    return blocks;
+  }
+
   function proposalFrom(block, mode) {
-    var j;
-    try { j = JSON.parse(block); } catch (e) { return null; }
+    var direct = null;
+    try { direct = JSON.parse(String(block || '').trim()); } catch (e) { direct = null; }
+    var repaired = false;
+    var j = direct && typeof direct === 'object' && !Array.isArray(direct) ? direct : null;
+    if (!j) {
+      j = salvageJson(block);
+      repaired = !!j;
+    }
     if (!j || typeof j !== 'object' || Array.isArray(j)) return null;
+    var cap = limits();
     switch (mode) {
       case 'schema': {
-        var parts = Array.isArray(j.parts) ? j.parts.slice(0, 40) : [];
-        var wires = Array.isArray(j.wires) ? j.wires.slice(0, 80) : [];
-        if (!parts.length && !wires.length) return null;
-        return { mode: 'schema', parts: parts, wires: wires };
+        var parts = Array.isArray(j.parts) ? j.parts.slice(0, cap.parts) : [];
+        var wires = Array.isArray(j.wires) ? j.wires.slice(0, cap.wires) : [];
+        var nets = Array.isArray(j.nets) ? j.nets.slice(0, cap.wires) : [];
+        var sketch = typeof j.sketch === 'string' ? j.sketch : '';
+        if (!parts.length && !wires.length && !nets.length && !sketch.trim()) return null;
+        var proposal = { mode: 'schema', parts: parts, wires: wires, nets: nets };
+        if (sketch) proposal.sketch = sketch;
+        if (Array.isArray(j.parts) && j.parts.length > parts.length) proposal.partsCut = true;
+        if (Array.isArray(j.wires) && j.wires.length > wires.length) proposal.wiresCut = true;
+        if (j.sketches && typeof j.sketches === 'object' && !Array.isArray(j.sketches)) proposal.sketches = j.sketches;
+        if (typeof j.board === 'string') proposal.board = j.board;
+        if (repaired) proposal.repaired = true;
+        return proposal;
       }
       case 'code': {
         if (typeof j.sketch !== 'string' || !j.sketch.trim()) return null;
-        return { mode: 'code', sketch: j.sketch };
+        return { mode: 'code', sketch: j.sketch, repaired: repaired };
       }
       default: {
         var unknown = mode;
@@ -157,15 +258,19 @@
 
   function parseReply(raw, mode) {
     var src = String(raw || '').slice(0, 200000);
-    var re = /```(?:json)?[^\n]*\n?([\s\S]*?)```/gi;
-    var blocks = [];
-    var m;
-    while ((m = re.exec(src))) blocks.push(m[1]);
-    if (!blocks.length && src.trim().charAt(0) === '{') blocks.push(src.trim());
+    var blocks = jsonCandidates(src);
     var proposal = null;
-    for (var i = blocks.length - 1; i >= 0 && !proposal; i--) proposal = proposalFrom(blocks[i], mode);
-    var text = proposal ? src.replace(/```(?:json)?[^\n]*\n?[\s\S]*?```/gi, '').trim() : src.trim();
+    var i;
+    for (i = blocks.length - 1; i >= 0 && !proposal; i--) {
+      try {
+        var direct = JSON.parse(String(blocks[i] || '').trim());
+        if (direct && typeof direct === 'object' && !Array.isArray(direct)) proposal = proposalFrom(JSON.stringify(direct), mode);
+      } catch (e) { /* this candidate is truncated or has trailing prose */ }
+    }
+    for (i = blocks.length - 1; i >= 0 && !proposal; i--) proposal = proposalFrom(blocks[i], mode);
+    var text = proposal ? src.replace(/```(?:json)?[^\n]*\n?[\s\S]*?(?:```|$)/gi, '').trim() : src.trim();
     if (proposal && text.charAt(0) === '{') text = '';
+    if (proposal && /^json\b/i.test(text) && text.indexOf('{') !== -1) text = text.slice(0, text.indexOf('{')).replace(/json\s*$/i, '').trim();
     return { text: text, proposal: proposal };
   }
 
@@ -208,41 +313,69 @@
     return one.parts[0] || null;
   }
 
-  function anchor(project) {
-    var parts = project && Array.isArray(project.parts) ? project.parts : [];
-    var maxX = -Infinity, minY = Infinity, any = false;
-    for (var i = 0; i < parts.length; i++) {
-      if (Number.isFinite(+parts[i].x)) { any = true; if (+parts[i].x > maxX) maxX = +parts[i].x; }
-      if (Number.isFinite(+parts[i].y) && +parts[i].y < minY) minY = +parts[i].y;
+  function resolvePin(type, pin) {
+    var pins = (deps().PARTS[type] && deps().PARTS[type].pins) || [];
+    if (!pins.length || typeof pin !== 'string') return '';
+    var raw = pin.trim();
+    if (!raw || raw.length > 32) return '';
+    var i;
+    for (i = 0; i < pins.length; i++) if (pins[i].id === raw) return pins[i].id;
+    var low = raw.toLowerCase();
+    var idHits = [];
+    for (i = 0; i < pins.length; i++) if (String(pins[i].id).toLowerCase() === low) idHits.push(pins[i].id);
+    if (idHits.length === 1) return idHits[0];
+    var gpio = /^(?:gpio|io|d)(\d+)$/i.exec(raw);
+    if (gpio) {
+      for (i = 0; i < pins.length; i++) if (pins[i].id === gpio[1]) return pins[i].id;
     }
-    if (!any) return { x: 80, y: 80 };
-    return { x: maxX + 160, y: Number.isFinite(minY) ? minY : 80 };
+    var labelHits = [];
+    for (i = 0; i < pins.length; i++) if (String(pins[i].label || '').toLowerCase() === low) labelHits.push(pins[i].id);
+    if (labelHits.length === 1) return labelHits[0];
+    if (/^gnd$/i.test(raw)) {
+      for (i = 0; i < pins.length; i++) if (pins[i].id === 'GND') return 'GND';
+    }
+    if (/^(?:3v3|3\.3v|vcc)$/i.test(raw)) {
+      for (i = 0; i < pins.length; i++) if (pins[i].id === '3V3') return '3V3';
+    }
+    return '';
   }
 
-  function endOf(e, map, projectIds) {
-    if (!e || typeof e !== 'object' || typeof e.part !== 'string' || typeof e.pin !== 'string' || !PIN_RE.test(e.pin)) return null;
-    var part = map.has(e.part) ? map.get(e.part) : (projectIds.has(e.part) ? e.part : '');
-    if (!part) return null;
-    return { part: part, pin: e.pin };
+  function endOf(e, map, types) {
+    var partName = '', pinName = '';
+    if (typeof e === 'string') {
+      var dot = e.indexOf('.');
+      if (dot < 1) return null;
+      partName = e.slice(0, dot);
+      pinName = e.slice(dot + 1);
+    } else if (e && typeof e === 'object' && typeof e.part === 'string' && (typeof e.pin === 'string' || typeof e.pin === 'number')) {
+      partName = e.part;
+      pinName = String(e.pin);
+    } else return null;
+    if (!map.has(partName)) return null;
+    var part = map.get(partName);
+    var pin = resolvePin(types.get(part), pinName);
+    if (!pin) return null;
+    return { part: part, pin: pin };
   }
 
-  function mergePatch(project, patch) {
+  /* «Применить» replaces the canvas. Old parts are not kept and ids are not remapped onto them. */
+  function replacePatch(project, patch) {
     var D = deps();
     if (typeof D.sanitizeProject !== 'function') throw new Error('нет sanitize');
     var base = project && typeof project === 'object' ? project : {};
-    var partsIn = patch && Array.isArray(patch.parts) ? patch.parts.slice(0, 40) : [];
-    var wiresIn = patch && Array.isArray(patch.wires) ? patch.wires.slice(0, 80) : [];
+    var cap = limits();
+    var partsIn = patch && Array.isArray(patch.parts) ? patch.parts.slice(0, cap.parts) : [];
+    var wiresIn = patch && Array.isArray(patch.wires) ? patch.wires.slice(0, cap.wires) : [];
+    var netsIn = patch && Array.isArray(patch.nets) ? patch.nets.slice(0, cap.wires) : [];
     var used = new Set();
-    var projectIds = new Set();
-    var oldParts = Array.isArray(base.parts) ? base.parts : [];
-    var oldWires = Array.isArray(base.wires) ? base.wires : [];
-    for (var i = 0; i < oldParts.length; i++) if (oldParts[i] && oldParts[i].id) { used.add(oldParts[i].id); projectIds.add(oldParts[i].id); }
-    for (var j = 0; j < oldWires.length; j++) if (oldWires[j] && oldWires[j].id) used.add(oldWires[j].id);
     var map = new Map();
+    var types = new Map();
     var fresh = [];
     var notes = [];
-    var spot = anchor(base);
     var slot = 0;
+    if (patch && patch.repaired) notes.push('ответ обрезан: взяты только целые объекты');
+    if (patch && patch.partsCut) notes.push('список деталей обрезан по лимиту');
+    if (patch && patch.wiresCut) notes.push('список проводов обрезан по лимиту');
     for (var p = 0; p < partsIn.length; p++) {
       var raw = partsIn[p];
       var cleaned = cleanPart(raw);
@@ -254,44 +387,87 @@
       if (given && !map.has(given)) map.set(given, id);
       var row = { id: id, type: cleaned.type, x: cleaned.x, y: cleaned.y, rot: cleaned.rot, props: cleaned.props };
       if (!raw || !Number.isFinite(Number(raw.x)) || !Number.isFinite(Number(raw.y))) {
-        row.x = spot.x;
-        row.y = spot.y + slot * 100;
+        row.x = 80 + (slot % 6) * 140;
+        row.y = 80 + Math.floor(slot / 6) * 110;
         slot++;
       }
+      types.set(id, row.type);
       fresh.push(row);
     }
+    var seenEdge = new Set();
     var freshWires = [];
-    for (var w = 0; w < wiresIn.length; w++) {
-      var rw = wiresIn[w];
-      var a = endOf(rw && rw.a, map, projectIds);
-      var b = endOf(rw && rw.b, map, projectIds);
-      if (!a || !b) { notes.push('провод без своих выводов'); continue; }
+    var skipped = 0;
+    function pushWire(a, b, rw) {
+      if (!a || !b || (a.part === b.part && a.pin === b.pin)) { skipped++; return; }
+      var k1 = a.part + '.' + a.pin, k2 = b.part + '.' + b.pin;
+      var key = k1 < k2 ? k1 + '|' + k2 : k2 + '|' + k1;
+      if (seenEdge.has(key)) return;
+      seenEdge.add(key);
       var wid = rw && typeof rw.id === 'string' && D.ID.test(rw.id) && !used.has(rw.id) ? rw.id : alloc('w', used);
-      if (!wid) continue;
+      if (!wid) { skipped++; return; }
       used.add(wid);
       var wire = { id: wid, a: a, b: b };
-      if (Array.isArray(rw.pts)) wire.pts = rw.pts.slice(0, 50);
-      if (typeof rw.color === 'string') wire.color = rw.color;
+      if (rw && Array.isArray(rw.pts)) wire.pts = rw.pts.slice(0, 50);
+      if (rw && typeof rw.color === 'string') wire.color = rw.color;
       freshWires.push(wire);
     }
-    var merged = {
-      parts: oldParts.concat(fresh),
-      wires: oldWires.concat(freshWires),
-      code: typeof base.code === 'string' ? base.code : '',
-      codes: base.codes, name: base.name, kind: base.kind, robot: base.robot
-    };
+    for (var w = 0; w < wiresIn.length; w++) {
+      var rw = wiresIn[w];
+      pushWire(endOf(rw && rw.a, map, types), endOf(rw && rw.b, map, types), rw);
+    }
+    for (var n = 0; n < netsIn.length; n++) {
+      var net = netsIn[n];
+      var pins = net && Array.isArray(net.pins) ? net.pins : (Array.isArray(net) ? net : []);
+      var ends = [];
+      for (var e = 0; e < pins.length; e++) {
+        var end = endOf(pins[e], map, types);
+        if (end) ends.push(end);
+        else skipped++;
+      }
+      for (var c = 1; c < ends.length; c++) pushWire(ends[0], ends[c], null);
+    }
+    if (skipped) notes.push('провод без своих выводов');
+    var mcus = fresh.filter(function (q) { return !!(D.PARTS[q.type] && D.PARTS[q.type].mcu); });
+    var primary = mcus.length ? mcus[0].id : '';
+    var code = typeof base.code === 'string' ? base.code : '';
+    var codes = {};
+    var wrote = false;
+    var editorBoard = '';
+    function putSketch(id, text) {
+      var s = sanitizeSketch(text);
+      if (!s) return;
+      var target = id && map.has(id) ? map.get(id) : id;
+      if (!target || target === primary) { code = s; editorBoard = primary; wrote = true; return; }
+      var known = false;
+      for (var i = 0; i < mcus.length; i++) if (mcus[i].id === target) known = true;
+      if (!known) return;
+      codes[target] = s;
+      wrote = true;
+      if (!editorBoard) editorBoard = target;
+    }
+    var board = patch && typeof patch.board === 'string' ? patch.board : '';
+    if (patch && typeof patch.sketch === 'string') putSketch(board || primary, patch.sketch);
+    var extra = patch && patch.sketches && typeof patch.sketches === 'object' && !Array.isArray(patch.sketches) ? patch.sketches : null;
+    if (extra) {
+      for (var sid in extra) {
+        if (!Object.prototype.hasOwnProperty.call(extra, sid)) continue;
+        putSketch(sid, extra[sid]);
+      }
+    }
+    var merged = { parts: fresh, wires: freshWires, code: code, name: base.name, kind: base.kind };
+    if (Object.keys(codes).length) merged.codes = codes;
     var out = D.sanitizeProject(merged);
-    var oldP = new Set(oldParts.map(function (q) { return q && q.id; }));
-    var oldW = new Set(oldWires.map(function (q) { return q && q.id; }));
-    var addedWires = out.wires.filter(function (q) { return !oldW.has(q.id); }).map(function (q) { return q.id; });
-    if (freshWires.length && addedWires.length < freshWires.length) notes.push('часть проводов отброшена');
+    if (freshWires.length && out.wires.length < freshWires.length) notes.push('часть проводов отброшена');
     var seen = {};
     var uniq = [];
-    for (var n = 0; n < notes.length && uniq.length < 6; n++) if (!seen[notes[n]]) { seen[notes[n]] = 1; uniq.push(notes[n]); }
+    for (var u = 0; u < notes.length && uniq.length < 6; u++) if (!seen[notes[u]]) { seen[notes[u]] = 1; uniq.push(notes[u]); }
     return {
       project: out,
-      addedParts: out.parts.filter(function (q) { return !oldP.has(q.id); }).map(function (q) { return q.id; }),
-      addedWires: addedWires,
+      replaced: true,
+      partIds: out.parts.map(function (q) { return q.id; }),
+      wireIds: out.wires.map(function (q) { return q.id; }),
+      sketchApplied: wrote,
+      editorBoard: editorBoard,
       notes: uniq
     };
   }
@@ -329,11 +505,13 @@
   var SYSTEM = [
     'Ты помощник симулятора схем «Схемотехник». Отвечай по-русски, коротко.',
     'Не пиши, что схема уже изменена: пользователь сам нажимает «Применить».',
-    'После текста один блок ```json и ничего после него.',
-    'Режим «схема»: {"parts":[{"id":"R1","type":"resistor","x":120,"y":80,"rot":0,"props":{"R":220}}],"wires":[{"id":"w1","a":{"part":"R1","pin":"a"},"b":{"part":"D1","pin":"a"}}]}',
-    'type и pin — только id из списка (pin — это id в скобках, не подпись на корпусе). Лишние поля отбрасываются.',
-    'Чтобы соединить новую деталь с уже стоящей, укажи id стоящей и не создавай новую с тем же id.',
-    'Режим «код»: {"sketch":"полный текст скетча"} — Arduino C или Python для Orange Pi.',
+    '«Применить» в режиме схемы заменяет холст целиком этим JSON (старые детали удаляются, отмена — кнопка Отменить) и записывает sketch в редактор кода платы.',
+    'После текста один блок ```json и ничего после него. JSON должен быть закончен: не обрывай массивы.',
+    'Режим «схема»: {"parts":[{"id":"R1","type":"resistor","x":120,"y":80,"rot":0,"props":{"R":220}},{"id":"D1","type":"led","x":240,"y":80,"rot":0,"props":{"color":"красный"}},{"id":"U1","type":"esp32","x":0,"y":0}],"wires":[{"id":"w1","a":{"part":"U1","pin":"2"},"b":{"part":"R1","pin":"a"}},{"id":"w2","a":{"part":"R1","pin":"b"},"b":{"part":"D1","pin":"a"}},{"id":"w3","a":{"part":"D1","pin":"b"},"b":{"part":"U1","pin":"GND"}}],"nets":[{"pins":[{"part":"U1","pin":"GND"},{"part":"D1","pin":"b"}]}],"sketch":"void setup(){ pinMode(2, OUTPUT); }\\nvoid loop(){ digitalWrite(2, HIGH); delay(500); digitalWrite(2, LOW); delay(500); }"}',
+    'parts — полная схема, не дополнение к уже стоящим деталям. type — только id из списка. pin — id в скобках, не подпись на корпусе. У платы числовой вывод пиши как id, например "2", не "GPIO2".',
+    'wires — полный список. Каждый нужный контакт — отдельный провод между двумя выводами. Не пиши «и так далее», не пропускай землю, питание и сигнал, даже если схема большая. nets дублирует те же узлы короче: все выводы одной сети в pins. Достаточно полного wires или полного nets.',
+    'sketch в режиме схемы обязателен: полный текст скетча этой схемы (Arduino C или Python для Orange Pi). Для второй платы добавь "sketches":{"U2":"полный текст"} с id платы из parts.',
+    'Режим «код»: только {"sketch":"полный текст скетча"}, без parts и wires. Схему не предлагай.',
     'Не вставляй HTML и не проси выполнить код на странице.'
   ].join('\n');
 
@@ -341,6 +519,17 @@
     switch (mode) {
       case 'schema': return 'схема';
       case 'code': return 'код';
+      default: {
+        var unknown = mode;
+        throw new Error('неизвестный режим: ' + unknown);
+      }
+    }
+  }
+
+  function modeHint(mode) {
+    switch (mode) {
+      case 'schema': return 'Нужна полная схема: все parts, все wires или nets на каждый узел и sketch. Применить заменит холст.';
+      case 'code': return 'Нужен только полный sketch. Схему не меняй.';
       default: {
         var unknown = mode;
         throw new Error('неизвестный режим: ' + unknown);
@@ -368,6 +557,7 @@
     }
     var user = [
       'Режим: ' + modeLabel(o.mode),
+      modeHint(o.mode),
       'Детали (type(пины)): ' + redact(String(o.catalog || '').slice(0, 7000), key),
       'Схема: ' + redact(String(o.netlist || '').slice(0, 2500), key),
       'Скетч: ' + redact(String(o.sketch || '').slice(0, 4000), key),
@@ -377,7 +567,7 @@
     return {
       url: url,
       origin: origin,
-      body: { model: settings.model, temperature: 0.2, stream: false, messages: messages }
+      body: { model: settings.model, temperature: 0.2, max_tokens: 8192, stream: false, messages: messages }
     };
   }
 
@@ -411,7 +601,7 @@
     keyRequired: keyRequired, preset: preset,
     frameCsp: frameCsp, frameDocument: frameDocument,
     sanitizeSettings: sanitizeSettings, sanitizeKey: sanitizeKey, redact: redact,
-    parseReply: parseReply, sanitizeSketch: sanitizeSketch, mergePatch: mergePatch,
+    parseReply: parseReply, sanitizeSketch: sanitizeSketch, replacePatch: replacePatch,
     partCatalog: partCatalog, briefNetlist: briefNetlist, briefSketch: briefSketch,
     buildRequest: buildRequest, completionText: completionText, explainHttp: explainHttp
   };

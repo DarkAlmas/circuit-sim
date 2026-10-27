@@ -13,7 +13,7 @@ async function device(b, phone) {
   const load = async (n, p = pg) => { if (phone) await p.tap('#pmTabs [data-ptab=schema]'); await p.selectOption('#projects', EXN(n)); await p.waitForTimeout(400); };
   const play = async (p = pg) => { if (phone) await p.tap('#pmPlay'); else await p.click('#rPlay'); };
   const robot = () => ev(() => __sim.proj.robot);
-  ok(await ev(() => [...document.scripts].filter(s => s.src).every(s => /\?v=(13|14|14\.1|14\.2|14\.3|14\.4|14\.5|14\.5\.1|14\.5\.2|14\.5\.3|14\.5\.5|14\.5\.6|14\.5\.7|14\.5\.9|14\.6\.0|14\.6\.1|14\.6\.5)$/.test(s.src)) && !!window.Chassis), 'scripts ?v=13, chassis.js loaded');
+  ok(await ev(() => [...document.scripts].filter(s => s.src).every(s => /\?v=(13|14|14\.1|14\.2|14\.3|14\.4|14\.5|14\.5\.1|14\.5\.2|14\.5\.3|14\.5\.5|14\.5\.6|14\.5\.7|14\.5\.9|14\.6\.0|14\.6\.1|14\.6\.5|14\.6\.6)$/.test(s.src)) && !!window.Chassis), 'scripts ?v=13, chassis.js loaded');
   if (phone) ok(await ev(() => document.body.classList.contains('pm')), 'portrait phone UI');
   await load('Робот-машинка на трассе (простой)'); await tab('chassis');
   // 1) body: rect/round/poly sized in mm on a 5 mm grid

@@ -9,6 +9,7 @@
   var mode = 'schema';
   var thread = [];
   var seq = 0;
+  var pendingApply = null;
   var busy = false;
   var pending = null;
   var frameReady = null;
@@ -93,10 +94,10 @@
     }
     if (local) {
       var extra = ollama ? ' Если Ollama не отвечает, в терминале: ' + ollamaPull() + '.' : '';
-      el.textContent = 'Ключ не нужен. Запросы пойдут только на ' + origin + ' без заголовка Authorization.' + extra + ' «Применить» добавит детали или заменит скетч — кнопка ▶ сама не нажмётся.';
+      el.textContent = 'Ключ не нужен. Запросы пойдут только на ' + origin + ' без заголовка Authorization.' + extra + ' «Применить» заменит холст схемой или скетч в редакторе — кнопка ▶ сама не нажмётся.';
       return;
     }
-    el.textContent = 'Запросы пойдут только на ' + origin + '. Прокси должен разрешать CORS. «Применить» добавит детали или заменит скетч — кнопка ▶ сама не нажмётся.';
+    el.textContent = 'Запросы пойдут только на ' + origin + '. Прокси должен разрешать CORS. «Применить» заменит холст схемой или скетч в редакторе — кнопка ▶ сама не нажмётся.';
   }
   function paint() {
     var sw = $('#assistOn');
@@ -189,12 +190,32 @@
       b.type = 'button';
       b.className = 'apply';
       b.textContent = 'Применить';
+      msg._btn = b;
       b.addEventListener('click', function () { applyMsg(msg, b); });
       box.appendChild(b);
     }
     log.appendChild(box);
     while (log.children.length > 40) log.removeChild(log.firstChild);
     log.scrollTop = log.scrollHeight;
+  }
+  function syncApply(msg) {
+    pendingApply = msg && msg.proposal ? msg : null;
+    var b = $('#assistApply');
+    if (!b) return;
+    if (!pendingApply) { b.hidden = true; return; }
+    b.hidden = false;
+    b.disabled = false;
+    b.textContent = 'Применить';
+    if (b.scrollIntoView) b.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  }
+  function markApplied(msg, btn, ok) {
+    var label = ok ? 'Применено' : 'Не применено';
+    var nodes = [btn, msg && msg._btn, pendingApply === msg ? $('#assistApply') : null];
+    for (var i = 0; i < nodes.length; i++) {
+      if (!nodes[i]) continue;
+      nodes[i].disabled = true;
+      nodes[i].textContent = label;
+    }
   }
   function presentReply(which, raw) {
     var parsed = A.parseReply(A.redact(String(raw || ''), readKey()), which);
@@ -203,6 +224,7 @@
     thread.push({ role: 'assistant', text: text });
     if (thread.length > 40) thread.shift();
     bubble(msg);
+    syncApply(msg);
     return msg;
   }
 
@@ -216,33 +238,50 @@
   }
   function applyMsg(msg, btn) {
     var S = sim();
-    if (!S || !msg.proposal) return;
+    if (!S || !msg || !msg.proposal) return;
     try {
       switch (msg.proposal.mode) {
         case 'code': {
           var sketch = A.sanitizeSketch(msg.proposal.sketch);
-          if (!sketch) { flash('Скетч пустой.'); return; }
+          if (!sketch) { markApplied(msg, btn, false); flash('Скетч пустой.'); return; }
           S.replaceSketch(sketch);
-          btn.disabled = true;
-          btn.textContent = 'Применено';
-          flash('Скетч записан в редактор. Запуск — кнопкой ▶: код пойдёт в прежний транслятор и worker.');
+          markApplied(msg, btn, true);
+          flash('Скетч записан в редактор. Запуск — кнопкой ▶: код пойдёт в прежний транслятор и worker. Отмена — кнопкой Отменить.');
           focusCode();
           return;
         }
         case 'schema': {
           if (S.flushEditor) S.flushEditor();
-          var result = A.mergePatch(S.proj, msg.proposal);
-          if (!result.addedParts.length && !result.addedWires.length) {
-            btn.disabled = true;
-            btn.textContent = 'Не применено';
-            flash('Ничего не добавлено. ' + result.notes.join(' '));
+          var proposal = msg.proposal;
+          var hasCircuit = (proposal.parts && proposal.parts.length) || (proposal.wires && proposal.wires.length) || (proposal.nets && proposal.nets.length);
+          if (!hasCircuit) {
+            var only = A.sanitizeSketch(proposal.sketch);
+            if (!only) { markApplied(msg, btn, false); flash('В ответе нет схемы и скетча.'); return; }
+            S.replaceSketch(only);
+            markApplied(msg, btn, true);
+            flash('Скетч записан в редактор. Холст не менялся. Запуск — кнопкой ▶. Отмена — кнопкой Отменить.');
+            focusCode();
             return;
           }
-          S.replaceProject(result.project);
-          if (result.addedParts[0]) S.select(result.addedParts[0]);
-          btn.disabled = true;
-          btn.textContent = 'Применено';
-          flash('Добавлено: ' + result.addedParts.concat(result.addedWires).join(', ') + '. Симуляция не запущена.');
+          var result = A.replacePatch(S.proj, proposal);
+          var placed = result.project.parts.length || result.project.wires.length;
+          if (!placed && !result.sketchApplied) {
+            markApplied(msg, btn, false);
+            flash('Схема пустая после проверки. ' + result.notes.join(' '));
+            return;
+          }
+          if (placed) {
+            S.replaceProject(result.project);
+            if (result.partIds[0]) S.select(result.partIds[0]);
+            if (result.editorBoard && S.codeFor) S.codeFor(result.editorBoard);
+          } else if (result.sketchApplied) {
+            S.replaceSketch(result.project.code);
+            focusCode();
+          }
+          markApplied(msg, btn, true);
+          var note = result.notes.length ? ' ' + result.notes.join('. ') + '.' : '';
+          var sketchNote = result.sketchApplied ? ' Скетч записан в редактор.' : '';
+          flash('Холст заменён: ' + result.project.parts.length + ' дет., ' + result.project.wires.length + ' пров.' + sketchNote + ' Отмена — кнопкой Отменить. Симуляция не запущена.' + note);
           return;
         }
         default: {
@@ -460,6 +499,8 @@
     });
     var sendBtn = $('#assistSend');
     if (sendBtn) sendBtn.addEventListener('click', send);
+    var applyBtn = $('#assistApply');
+    if (applyBtn) applyBtn.addEventListener('click', function () { if (pendingApply) applyMsg(pendingApply, applyBtn); });
     var input = $('#assistInput');
     if (input) input.addEventListener('keydown', function (e) {
       if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
