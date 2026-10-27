@@ -3,7 +3,7 @@
    and a sketch is only text until the existing worker transpiles it. */
 (function () {
   'use strict';
-  var VERSION = '14.6.3';
+  var VERSION = '14.6.4';
   var SETTINGS_KEY = 'circuitsim.assistant';
   var KEY_KEY = 'circuitsim.assistant.key';
   var DEFAULT_BASE = 'http://127.0.0.1:11434/v1';
@@ -82,7 +82,7 @@
   function preset(name) {
     switch (name) {
       case 'ollama': return { baseUrl: DEFAULT_BASE, model: DEFAULT_MODEL };
-      case 'groq': return { baseUrl: 'https://api.groq.com/openai/v1', model: 'llama-3.1-8b-instant' };
+      case 'groq': return { baseUrl: 'https://api.groq.com/openai/v1', model: 'openai/gpt-oss-20b' };
       default: {
         var unknown = name;
         throw new Error('неизвестный пресет: ' + unknown);

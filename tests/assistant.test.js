@@ -14,12 +14,12 @@ test('page CSP stays connect-src none and scripts are versioned', () => {
   assert.ok(m, 'csp meta');
   assert.ok(m[1].includes("connect-src 'none'"));
   assert.ok(!/connect-src\s+https?:/.test(m[1]));
-  assert.ok(html.includes('assistant-core.js?v=14.6.3') && html.includes('assistant.js?v=14.6.3'));
-  assert.ok(html.includes('style.css?v=14.6.3'));
-  assert.equal(A.VERSION, '14.6.3');
-  assert.ok(read('sw-assistant.js').includes('assistant-core.js?v=14.6.3'));
-  assert.ok(read('assistant-net.js').includes("VERSION = '14.6.3'"));
-  assert.ok(read('app.js').includes("new Worker('worker.js?v=14.6.3')"));
+  assert.ok(html.includes('assistant-core.js?v=14.6.4') && html.includes('assistant.js?v=14.6.4'));
+  assert.ok(html.includes('style.css?v=14.6.4'));
+  assert.equal(A.VERSION, '14.6.4');
+  assert.ok(read('sw-assistant.js').includes('assistant-core.js?v=14.6.4'));
+  assert.ok(read('assistant-net.js').includes("VERSION = '14.6.4'"));
+  assert.ok(read('app.js').includes("new Worker('worker.js?v=14.6.4')"));
 });
 
 test('assistant sources do not eval, inject HTML, or call a CDN', () => {
@@ -71,7 +71,7 @@ test('local Ollama needs no key; https OpenAI-style still does', () => {
   const ollama = A.preset('ollama');
   const groq = A.preset('groq');
   assert.deepEqual(ollama, { baseUrl: 'http://127.0.0.1:11434/v1', model: 'llama3.2' });
-  assert.deepEqual(groq, { baseUrl: 'https://api.groq.com/openai/v1', model: 'llama-3.1-8b-instant' });
+  assert.deepEqual(groq, { baseUrl: 'https://api.groq.com/openai/v1', model: 'openai/gpt-oss-20b' });
   assert.ok(ollama.model.length <= 64 && groq.model.length <= 64);
   assert.equal(A.keyRequired(ollama.baseUrl), false);
   assert.equal(A.keyRequired(groq.baseUrl), true);
@@ -85,7 +85,7 @@ test('local Ollama needs no key; https OpenAI-style still does', () => {
   assert.equal(A.buildRequest({ settings: { enabled: true, baseUrl: 'https://api.openai.com/v1', model: 'gpt-4o-mini' }, mode: 'schema', question: 'мигни' }), null);
   const paid = A.buildRequest({ settings: { enabled: true, baseUrl: groq.baseUrl, model: groq.model }, key: 'gsk-user-pasted', mode: 'code', question: 'мигни' });
   assert.equal(paid.url, 'https://api.groq.com/openai/v1/chat/completions');
-  assert.equal(paid.body.model, 'llama-3.1-8b-instant');
+  assert.equal(paid.body.model, 'openai/gpt-oss-20b');
   assert.ok(!('key' in paid));
   assert.ok(!JSON.stringify(paid).includes('gsk-user-pasted'));
   assert.throws(() => A.preset('nope'));
@@ -106,7 +106,7 @@ test('frame CSP names only the chosen origin', () => {
   assert.ok(doc.csp.includes('connect-src https://api.openai.com;'));
   assert.ok(doc.csp.includes("frame-ancestors 'self'"));
   assert.ok(!/unsafe-inline|unsafe-eval|\*/.test(doc.csp));
-  assert.ok(doc.html.includes('assistant-net.js?v=14.6.3'));
+  assert.ok(doc.html.includes('assistant-net.js?v=14.6.4'));
   assert.ok(!doc.html.includes('/v1'));
   assert.equal(A.frameDocument('https://evil.com"; script-src \'unsafe-inline\''), null);
   assert.equal(A.frameDocument('http://8.8.8.8'), null);

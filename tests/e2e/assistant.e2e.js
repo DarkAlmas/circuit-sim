@@ -1,4 +1,4 @@
-// Assistant panel: offline by default, Apply does not eval, opt-in CSP is one origin. ?v=14.6.3.
+// Assistant panel: offline by default, Apply does not eval, opt-in CSP is one origin. ?v=14.6.4.
 const { chromium } = require('playwright-core');
 const assert = require('assert');
 const URL = process.argv[2] || 'http://127.0.0.1:8765/';
@@ -25,7 +25,7 @@ const URL = process.argv[2] || 'http://127.0.0.1:8765/';
 
   const meta = await page.evaluate(() => document.querySelector('meta[http-equiv="Content-Security-Policy"]').content);
   ok(meta.includes("connect-src 'none'") && !/unsafe-inline|unsafe-eval/.test(meta), 'main CSP still connect-src none');
-  ok(await page.evaluate(() => [...document.scripts].filter(s => s.src).every(s => /\?v=14\.6\.3$/.test(s.src))), 'scripts ?v=14.6.3');
+  ok(await page.evaluate(() => [...document.scripts].filter(s => s.src).every(s => /\?v=14\.6\.4$/.test(s.src))), 'scripts ?v=14.6.4');
   await page.evaluate(() => fetch('https://example.com/leak').catch(() => {}));
   await page.waitForTimeout(200);
   ok(csp.some(t => /example\.com/.test(t)), 'main page fetch is refused by CSP: ' + csp.join(' | '));
@@ -68,7 +68,7 @@ const URL = process.argv[2] || 'http://127.0.0.1:8765/';
   ok(look.send === 'rgb(31, 107, 58)', 'send stays the primary button: ' + look.send);
   const beforePresets = external.length;
   await page.click('#assistPresetGroq');
-  ok(await page.evaluate(() => Assistant.settings.baseUrl === 'https://api.groq.com/openai/v1' && Assistant.settings.model === 'llama-3.1-8b-instant'), 'Groq preset fills url and model');
+  ok(await page.evaluate(() => Assistant.settings.baseUrl === 'https://api.groq.com/openai/v1' && Assistant.settings.model === 'openai/gpt-oss-20b'), 'Groq preset fills url and model');
   ok((await page.textContent('#assistKeyNote')).trim() === 'без ключа запросы не уйдут', 'Groq still needs a pasted key');
   await page.click('#assistPresetOllama');
   ok(await page.evaluate(() => Assistant.settings.baseUrl === 'http://127.0.0.1:11434/v1' && Assistant.settings.model === 'llama3.2'), 'Ollama preset restores the local endpoint');
