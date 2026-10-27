@@ -100,12 +100,15 @@
     if (tabA) { tabA.classList.toggle('on', assist); tabA.setAttribute('aria-selected', assist ? 'true' : 'false'); }
     if (tabP) { tabP.classList.toggle('on', !assist); tabP.setAttribute('aria-selected', assist ? 'false' : 'true'); }
   }
+  var openingAssist = false;
   function open() {
     showTab('assist');
+    openingAssist = true;
     if (document.body.classList.contains('pm') && document.body.dataset.sheet !== 'props') {
       var b = $('#mProps');
       if (b) b.click();
     }
+    openingAssist = false;
     var input = $('#assistInput');
     if (input) setTimeout(function () { input.focus(); }, 0);
   }
@@ -341,6 +344,8 @@
     var sideA = $('#sideAssist'), sideP = $('#sideProps');
     if (sideA) sideA.addEventListener('click', open);
     if (sideP) sideP.addEventListener('click', function () { showTab('props'); });
+    var mProps = $('#mProps');
+    if (mProps) mProps.addEventListener('click', function () { if (!openingAssist) showTab('props'); });
     var modes = $('#assistMode');
     if (modes) modes.addEventListener('click', function (e) {
       var b = e.target.closest('button[data-mode]');

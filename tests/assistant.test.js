@@ -14,12 +14,12 @@ test('page CSP stays connect-src none and scripts are versioned', () => {
   assert.ok(m, 'csp meta');
   assert.ok(m[1].includes("connect-src 'none'"));
   assert.ok(!/connect-src\s+https?:/.test(m[1]));
-  assert.ok(html.includes('assistant-core.js?v=14.6.1') && html.includes('assistant.js?v=14.6.1'));
-  assert.ok(html.includes('style.css?v=14.6.1'));
-  assert.equal(A.VERSION, '14.6.1');
-  assert.ok(read('sw-assistant.js').includes('assistant-core.js?v=14.6.1'));
-  assert.ok(read('assistant-net.js').includes("VERSION = '14.6.1'"));
-  assert.ok(read('app.js').includes("new Worker('worker.js?v=14.6.1')"));
+  assert.ok(html.includes('assistant-core.js?v=14.6.2') && html.includes('assistant.js?v=14.6.2'));
+  assert.ok(html.includes('style.css?v=14.6.2'));
+  assert.equal(A.VERSION, '14.6.2');
+  assert.ok(read('sw-assistant.js').includes('assistant-core.js?v=14.6.2'));
+  assert.ok(read('assistant-net.js').includes("VERSION = '14.6.2'"));
+  assert.ok(read('app.js').includes("new Worker('worker.js?v=14.6.2')"));
 });
 
 test('assistant sources do not eval, inject HTML, or call a CDN', () => {
@@ -55,7 +55,7 @@ test('frame CSP names only the chosen origin', () => {
   assert.ok(doc.csp.includes('connect-src https://api.openai.com;'));
   assert.ok(doc.csp.includes("frame-ancestors 'self'"));
   assert.ok(!/unsafe-inline|unsafe-eval|\*/.test(doc.csp));
-  assert.ok(doc.html.includes('assistant-net.js?v=14.6.1'));
+  assert.ok(doc.html.includes('assistant-net.js?v=14.6.2'));
   assert.ok(!doc.html.includes('/v1'));
   assert.equal(A.frameDocument('https://evil.com"; script-src \'unsafe-inline\''), null);
   assert.equal(A.frameDocument('http://8.8.8.8'), null);
