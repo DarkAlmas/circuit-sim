@@ -252,6 +252,12 @@
   const c3g = id => { const m = /^G(\d+)$/.exec(id); return m ? +m[1] : null; };
   P.esp32c3 = L.mcu({ kind: 'esp32c3', name: 'ESP32-C3 SuperMini', short: 'ESP32-C3', group: 'Платы', vio: 3.3, builtin: 8, pinMax: 0.04, w: 60, L: C3_L, R: C3_R,
     supplies: { '5V': 5, '3V3': 3.3 }, gpio: c3g, lab: id => /^G\d/.test(id) ? id.slice(1) : id, pcb: '#151515', chipName: 'ESP32-C3', sub: 'RISC-V · 3,3 В', ledName: 'LED8',
+    usbKind: 'c', usbName: 'Type-C',
+    power: { gnd: 'GND', sense: ['5V', '3V3'], usbI: 0.04,
+      deadMsg: 'ESP32-C3 без питания: нажми Type-C или подай ≥ 4,4 В на 5V либо ≥ 2,9 В на 3V3',
+      usb: [{ pin: '5V', V: 5 }, { pin: '3V3', V: 3.3 }],
+      inputs: [{ pin: '5V', min: 4.4, I: 0.08, out: [{ pin: '3V3', V: 3.3 }] }],
+      direct: [{ pin: '3V3', min: 2.9 }] },
     hint: id => id === 'GND' ? 'GND (земля)' : id === '5V' ? '5V (USB / вход 5 В)' : id === '3V3' ? '3V3 (выход 3,3 В)' : 'GPIO' + c3g(id) + (c3g(id) <= 4 ? ' (АЦП, A' + c3g(id) + ')' : '') + (c3g(id) === 8 ? ' — синий светодиод (горит при LOW)' : '') + (c3g(id) === 9 ? ' — кнопка BOOT' : '') + (c3g(id) >= 20 ? c3g(id) === 20 ? ' (RX)' : ' (TX)' : '') });
   P.esp32c3.ledInv = true;
   /* Over-voltage / pin-current burn lives on the board model (same idea as NRF24 > 3.6 V). 5V and VIN are power inputs and do not burn. */
@@ -259,6 +265,7 @@
   P.esp32c3.stamp = function (p, ctx) { if (p.burned) { p._els = {}; return; } return c3stamp.call(this, p, ctx); };
   P.esp32c3.check = function (p, m, ctx) {
     if (p.burned) return { level: 'burn', msg: p._burnMsg || 'Плата сгорела: 0 В на GPIO' };
+    if (ctx && ctx.portPower && m && m.powered === false) return { level: 'warn', msg: 'ESP32-C3 без питания: нажми Type-C или подай ≥ 4,4 В на 5V либо ≥ 2,9 В на 3V3' };
     const vg = ctx.v(p, 'GND');
     for (const q of P.esp32c3.pins) {
       if (q.id === '5V' || q.id === 'VIN' || /^GND/.test(q.id)) continue;
@@ -273,4 +280,96 @@
       return { level: 'burn', msg: p._burnMsg };
     }
   };
+
+  /* ---------- IP5306 / TP5400 / adjustable buck ---------- */
+  function bankPins(withKey) {
+    const left = [
+      { id: 'BAT+', label: 'BAT+', hint: 'BAT+: плюс аккумулятора Li-ion' },
+      { id: 'BAT-', label: 'BAT−', hint: 'BAT−: минус аккумулятора (внутри соединён с GND)' },
+    ];
+    if (withKey) left.push({ id: 'KEY', hint: 'KEY: кнопка включения, замыкание на GND включает boost' });
+    const right = [
+      { id: 'VIN', hint: 'VIN: вход 5 В (USB), заряд и питание выхода' },
+      { id: 'GND', hint: 'GND: общий минус' },
+      { id: '5V', hint: '5V: выход boost, около 5 В' },
+    ];
+    return [...col(left, -78), ...col(right, 78)];
+  }
+  function bankMeasure(p, ctx) {
+    const st = p._st || {};
+    const Vo = vd(p, ctx, '5V', 'GND'), Vin = vd(p, ctx, 'VIN', 'GND'), Vbat = vd(p, ctx, 'BAT+', 'BAT-');
+    const Io = st.boost ? (st.Io || 0) : 0, Ivin = st.Ivin || 0, Idis = st.Idis || 0, Ichg = st.Ichg || 0;
+    const pinI = { '5V': Io, VIN: -Ivin, 'BAT+': Ichg - Idis, 'BAT-': Idis - Ichg, GND: Ivin - Io };
+    if (p.type === 'ip5306') pinI.KEY = 0;
+    const mode = !st.boost ? 'выкл' : st.chg ? 'заряд и 5 В' : 'boost от батареи';
+    return { U: Vo, I: Io, P: Math.abs(Vo * Io), Vin, Vo, Vbat, Io, Ivin, Idis, Ichg, pinI,
+      extra: { 'Uбат': fN(Vbat, 2) + ' В', 'Uвх': fN(Vin, 2) + ' В', 'Uвых': fN(Vo, 2) + ' В', 'Режим': mode } };
+  }
+  function bankCheck(name, p, m, ctx) {
+    if (m.Vin > 8) { if (!p.burned) { p.burned = true; if (ctx && ctx.dirty) ctx.dirty(); } return { level: 'burn', msg: `${name} сгорел: на VIN ${fN(m.Vin, 1)} В (максимум 6 В)` }; }
+    if (m.Vin > 6.5) return { level: 'warn', msg: `${name}: VIN ${fN(m.Vin, 1)} В выше 6 В` };
+    if (m.Io > 2) return { level: 'warn', msg: `${name}: ток выхода ${fU(m.Io, 'А')} больше 2 А` };
+    if (m.Idis > 2.4) return { level: 'warn', msg: `${name}: ток батареи ${fU(m.Idis, 'А')} больше 2,4 А` };
+  }
+  function bankStamp(p, ctx, opt) {
+    const st = p._st || (p._st = {});
+    st.latch = !!p.keyLatch;
+    const n = id => ctx.n(p, id);
+    if (p.burned) { st.boost = false; st.chg = false; st.on = false; st.Ivin = 0; st.Idis = 0; st.Io = 0;
+      ctx.add({ type: 'R', a: n('5V'), b: n('GND'), R: 1e7 }); return; }
+    ctx.dev(D.powerBank(ctx, { batP: n('BAT+'), batN: n('BAT-'), vin: n('VIN'), gnd: n('GND'), out: n('5V'), key: opt.always ? null : n('KEY') }, st, opt));
+  }
+  const ipPins = bankPins(true);
+  P.ip5306 = { name: '🔋 IP5306', group: 'Питание', prefix: 'U', pins: ipPins, box: [-86, -40, 172, 80],
+    draw: p => { const on = !!p.keyLatch;
+      return `${legsX(ipPins)}<rect x="-58" y="-32" width="116" height="64" rx="4" fill="#12306b" stroke="#0a1c40"/>
+        <text x="0" y="-4" class="lbl">IP5306</text>
+        <g class="keybtn"><circle cx="0" cy="16" r="8" fill="${on ? '#3c3' : '#1a1a1a'}" stroke="#cfd6df"/><text x="0" y="19" text-anchor="middle" class="tiny" fill="#fff">KEY</text><rect class="keybtn" x="-14" y="2" width="28" height="28" fill="transparent"/></g>
+        ${ipPins.map(q => `<text x="${q.x < 0 ? q.x + 12 : q.x - 12}" y="${q.y + 3}" class="tiny lightt" text-anchor="${q.x < 0 ? 'start' : 'end'}">${q.label}</text>`).join('')}`; },
+    stamp(p, ctx) { bankStamp(p, ctx, {}); },
+    measure: (p, sol, ctx) => bankMeasure(p, ctx),
+    check: (p, m, ctx) => bankCheck('IP5306', p, m, ctx) };
+  const tpPins = bankPins(false);
+  P.tp5400 = { name: '🔋 TP5400', group: 'Питание', prefix: 'U', pins: tpPins, box: [-86, -40, 172, 80],
+    draw: () => `${legsX(tpPins)}<rect x="-58" y="-32" width="116" height="64" rx="4" fill="#8d1d2c" stroke="#4a0c14"/>
+      <text x="0" y="-2" class="lbl">TP5400</text><text x="0" y="16" class="tiny lightt">заряд + 5 В</text>
+      ${tpPins.map(q => `<text x="${q.x < 0 ? q.x + 12 : q.x - 12}" y="${q.y + 3}" class="tiny lightt" text-anchor="${q.x < 0 ? 'start' : 'end'}">${q.label}</text>`).join('')}`,
+    stamp(p, ctx) { bankStamp(p, ctx, { always: true }); },
+    measure: (p, sol, ctx) => bankMeasure(p, ctx),
+    check: (p, m, ctx) => bankCheck('TP5400', p, m, ctx) };
+  const buckPins = [
+    pin('IN+', -60, -12, 'VIN+: вход понижайки, 4–40 В', 'VIN+'),
+    pin('IN-', -60, 12, 'VIN−: минус входа', 'VIN−'),
+    pin('OUT+', 60, -12, 'VOUT+: выход', 'VOUT+'),
+    pin('OUT-', 60, 12, 'VOUT−: минус выхода', 'VOUT−'),
+  ];
+  P.buck = { name: '⬇️ Buck', group: 'Питание', prefix: 'U', props: { Vout: 5 }, pins: buckPins, box: [-64, -34, 128, 64],
+    draw: p => { const vset = Math.max(0.8, Math.min(24, +p.props.Vout || 5)), ang = -135 + 270 * ((vset - 0.8) / 23.2);
+      const st = p._st || {};
+      return `${legsX(buckPins)}<rect x="-50" y="-26" width="100" height="52" rx="3" fill="#146b45" stroke="#0c3d28"/>
+        <text x="-8" y="-2" class="tiny lightt">Vin</text>
+        <g class="knob" transform="rotate(${ang.toFixed(1)} 22 -8)"><circle cx="22" cy="-8" r="9" fill="#e8e8e8" stroke="#666"/><rect x="20.6" y="-16" width="2.8" height="8" fill="#333"/></g>
+        <text x="0" y="18" class="lbl">Vout ${fN(vset, 1)} В</text>
+        ${st.on === false ? '<circle cx="-36" cy="-14" r="3" fill="#400"/>' : '<circle cx="-36" cy="-14" r="3" fill="#3e3"/>'}
+        ${buckPins.map(q => `<text x="${q.x < 0 ? -46 : 46}" y="${q.y + 3}" class="tiny lightt" text-anchor="${q.x < 0 ? 'start' : 'end'}">${q.label}</text>`).join('')}`; },
+    stamp(p, ctx) {
+      const st = p._st || (p._st = {}), n = ['IN+', 'IN-', 'OUT+', 'OUT-'].map(k => ctx.n(p, k));
+      const V = Math.max(0.8, Math.min(24, +p.props.Vout || 5));
+      if (p.burned || !n.every(ok)) { st.on = false; st.reg = false; st.Vcmd = 0; st.Iin = 0; ctx.add({ type: 'R', a: n[2], b: n[3], R: 1e7 }); return; }
+      ctx.dev(D.buck(ctx, n[0], n[1], n[2], n[3], V, st));
+    },
+    measure(p, sol, ctx) {
+      const st = p._st || {}, Vin = vd(p, ctx, 'IN+', 'IN-'), Vo = vd(p, ctx, 'OUT+', 'OUT-');
+      const Iin = st.Iin || 0, Io = st.Io || 0;
+      const mode = !st.on ? 'выкл' : st.reg ? 'регулирует' : 'просадка';
+      return { U: Vo, I: Io, P: Math.abs(Vo * Io), Vin, Vo, Iin, Io, pinI: { 'IN+': -Iin, 'IN-': Iin, 'OUT+': Io, 'OUT-': -Io },
+        extra: { 'Uвх': fN(Vin, 2) + ' В', 'Uвых': fN(Vo, 2) + ' В', 'Режим': mode, 'КПД': '88 %' } };
+    },
+    check(p, m, ctx) {
+      const st = p._st || {};
+      if (m.Vin > 45) { if (!p.burned) { p.burned = true; if (ctx && ctx.dirty) ctx.dirty(); } return { level: 'burn', msg: `Buck сгорел: на входе ${fN(m.Vin, 1)} В (максимум 40 В)` }; }
+      if (m.Vin > 0.5 && !st.on) return { level: 'warn', msg: `Buck: вход ${fN(m.Vin, 1)} В вне диапазона 4–40 В` };
+      if (st.on && !st.reg) return { level: 'warn', msg: `Понижайка не повышает: на выходе ≈ вход минус 1 В (задано ${fN(st.target || p.props.Vout, 1)} В)` };
+      if ((st.Iin || 0) > 3) return { level: 'warn', msg: `Входной ток Buck ${fU(st.Iin, 'А')} больше 3 А` };
+    } };
 })();

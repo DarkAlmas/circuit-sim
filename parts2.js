@@ -22,16 +22,26 @@
     const def = {
       name: c.name, group: c.group, mcu: c.kind, vio: c.vio, builtin: c.builtin, pins, gpioOf: id => c.gpio(id), prefix: 'U',
       supplies: c.dip ? undefined : c.supplies, chip: !!c.dip, lang: c.lang || 'c',
+      usbKind: c.usbKind || '', usbName: c.usbName || '', power: c.power,
       ground: c.dip ? undefined : id => /^GND/.test(id),
       box: c.dip ? [pins[0].x - 9, -24, (c.top.length - 1) * 10 + 18, 48] : [-c.w - 4, -c.H / 2 - 6, 2 * c.w + 8, c.H + 12],
       draw: (p, st) => c.dip ? drawDip(c, pins, p, st) : drawBoard(c, pins, p, st),
       stamp(p, ctx) {
-        p._els = {};
+        p._els = {}; p._load = null;
         if (c.dip) { p._q = ctx.add({ type: 'R', a: ctx.n(p, c.vcc), b: ctx.n(p, gnd), R: 5000 }); p._els[c.vcc] = p._q;
           for (const [a, b] of c.bridge || []) ctx.add({ type: 'R', a: ctx.n(p, a), b: ctx.n(p, b), R: 0.01 }); }
-        else for (const id in c.supplies) { source(p, ctx, id, gnd, c.supplies[id], 0.1); p._els[id] = p._r; }
-        const powered = !c.dip || (p._pw || 0) > 2.7, ref = ctx.n(p, gnd);
-        for (const q of pins) { const g = c.gpio(q.id); if (g == null || !powered) continue;
+        else {
+          const port = !!(ctx && ctx.portPower && c.power);
+          if (!port) {
+            p._hot = true; p._sourced = null; p._pwr = null;
+            for (const id in c.supplies) { source(p, ctx, id, gnd, c.supplies[id], 0.1); p._els[id] = p._r; }
+          } else L.stampPlan(p, ctx, c.power, c.power.gnd || gnd);
+        }
+        const port = !c.dip && !!(ctx && ctx.portPower && c.power);
+        const powered = c.dip ? (p._pw || 0) > 2.7 : (!port || !!p._hot);
+        if (!powered) return;
+        const ref = ctx.n(p, gnd);
+        for (const q of pins) { const g = c.gpio(q.id); if (g == null) continue;
           const s = ctx.gpio(g, p.id) || { mode: 'INPUT' };
           if (s.mode === 'OUTPUT') { const m = ctx.node(); p._els[q.id] = ctx.add({ type: 'R', a: m, b: ctx.n(p, q.id), R: 25 }); ctx.add({ type: 'V', p: m, n: ref > 0 ? ref : 0, V: c.vio * (s.val || 0) }); }
           else if (s.mode === 'INPUT_PULLUP') { const m = ctx.node(); p._els[q.id] = ctx.add({ type: 'R', a: m, b: ctx.n(p, q.id), R: 40000 }); ctx.add({ type: 'V', p: m, n: ref > 0 ? ref : 0, V: c.vio }); } }
@@ -39,10 +49,18 @@
       measure(p, sol, ctx) {
         const pinI = pinsI(p, sol); let Pw = 0; for (const id in pinI) Pw += Math.abs(ctx.v(p, id) * pinI[id]);
         if (c.dip) { const pw = vdiff(p, ctx, c.vcc, gnd); if ((pw > 2.7) !== ((p._pw || 0) > 2.7)) ctx.dirty(); p._pw = pw; pinI[c.vcc] = -pinI[c.vcc]; }
-        const srcI = c.dip ? 0 : Math.max(0, ...Object.keys(pinI).filter(k => k in c.supplies).map(k => Math.abs(pinI[k])));
-        return { U: c.dip ? p._pw : c.vio, I: Object.entries(pinI).filter(([k]) => !(c.supplies && k in c.supplies)).reduce((a, [, b]) => a + Math.max(0, -b), 0), P: Pw, pinI, out: !c.dip, srcI };
+        const port = !c.dip && !!(ctx && ctx.portPower && c.power);
+        if (port) L.applyLoad(pinI, p, sol);
+        const alive = c.dip ? (p._pw || 0) > 2.7 : (port ? L.noteRails(p, ctx, c.power) : true);
+        let srcI = 0;
+        if (!c.dip && c.supplies) for (const k in pinI) if (k in c.supplies) srcI = Math.max(srcI, Math.abs(pinI[k]));
+        const loadI = Object.entries(pinI).filter(([k]) => !(c.supplies && k in c.supplies)).reduce((a, [, b]) => a + Math.max(0, -b), 0);
+        const out = { U: c.dip ? p._pw : (alive ? c.vio : 0), I: alive ? loadI : 0, P: Pw, pinI, out: !c.dip && !!alive, srcI, powered: !!alive };
+        if (port) out.extra = { 'Питание': alive ? (p.usb ? 'USB подключен' : 'от схемы') : 'нет' };
+        return out;
       },
-      check(p, m) {
+      check(p, m, ctx) {
+        if (!c.dip && ctx && ctx.portPower && c.power && m && m.powered === false) return { level: 'warn', msg: c.power.deadMsg };
         if (c.dip && !(p._pw > 2.7)) return { level: 'warn', msg: `${c.short} не запитан: подключи ${c.vcc} к +${c.vio} В и ${gnd} к минусу` };
         for (const q of pins) { if (c.gpio(q.id) == null) continue; const i = Math.abs(m.pinI[q.id] || 0); if (i > c.pinMax) return { level: 'warn', msg: `Ток вывода ${q.label} ${fU(i, 'А')} больше допустимых ${fU(c.pinMax, 'А')} для ${c.short}. Поставь резистор` }; }
       },
@@ -52,11 +70,11 @@
   function drawBoard(c, pins, p, st) {
     const T = -c.H / 2, B = c.H / 2, W = c.w - 2;
     return `<rect x="${-W}" y="${T}" width="${2 * W}" height="${c.H}" rx="6" fill="${c.pcb}" stroke="#000" stroke-width="1.5"/>
-      <rect x="-14" y="${T - 4}" width="28" height="16" rx="2" fill="#c0c4c9" stroke="#80868d"/><rect x="-9" y="${T + 1}" width="18" height="6" rx="1" fill="#555"/>
+      ${L.usbGlyph(c.usbKind || 'micro', 0, T + 8, !!(p && p.usb), 'up')}
       ${c.extra ? c.extra(T, B, W) : ''}
       <rect x="-26" y="${T + 40}" width="52" height="52" rx="2" fill="#1d1f22" stroke="#3a3d42"/><text x="0" y="${T + 64}" class="chip lightt">${c.chipName}</text><text x="0" y="${T + 76}" class="tiny lightt">${c.sub}</text>
       ${pins.map(q => `<rect x="${q.x < 0 ? -W : W - 8}" y="${q.y - 4}" width="8" height="8" fill="#0c0c0c" stroke="#444"/><circle cx="${q.x < 0 ? -W + 4 : W - 4}" cy="${q.y}" r="2.2" fill="#d4b13a"/><line x1="${q.x}" y1="${q.y}" x2="${q.x < 0 ? -W : W}" y2="${q.y}" class="lead"/><text x="${q.x < 0 ? -W + 12 : W - 12}" y="${q.y + 3.5}" class="plabel blbl" text-anchor="${q.x < 0 ? 'start' : 'end'}">${q.label}</text>`).join('')}
-      <rect x="-16" y="${B - 22}" width="8" height="5" rx="1" fill="#d22"/><text x="-12" y="${B - 26}" class="tiny lightt">PWR</text>
+      <rect x="-16" y="${B - 22}" width="8" height="5" rx="1" fill="${st.powered === false ? '#400' : '#d22'}"/><text x="-12" y="${B - 26}" class="tiny lightt">PWR</text>
       ${st.led2 ? `<circle cx="12" cy="${B - 20}" r="9" fill="#fb3" opacity=".5" filter="url(#glow)"/>` : ''}<rect x="8" y="${B - 22}" width="8" height="5" rx="1" fill="${st.led2 ? '#fd6' : '#4a3a10'}"/><text x="12" y="${B - 26}" class="tiny lightt">${c.ledName}</text>`;
   }
   function drawDip(c, pins, p, st) {
@@ -66,25 +84,47 @@
       <circle cx="${x0 + 6}" cy="8" r="1.6" fill="#333"/><text x="${x0 + w / 2}" y="2" class="tiny lightt">${c.chipName}</text>
       ${(p._pw || 0) > 2.7 && st.led2 !== undefined ? '' : ''}`;
   }
-  const UNO_L = ['IOREF', 'RST', '3V3', '5V', 'GND', 'GND2', 'A0', 'A1', 'A2', 'A3', 'A4', 'A5'];
+  const UNO_L = ['IOREF', 'RST', '3V3', '5V', 'GND', 'GND2', 'VIN', 'A0', 'A1', 'A2', 'A3', 'A4', 'A5'];
   const UNO_R = ['D13', 'D12', 'D11', 'D10', 'D9', 'D8', 'D7', 'D6', 'D5', 'D4', 'D3', 'D2', 'D1', 'D0', 'GND3', 'AREF'];
   const arduinoGpio = id => { let m = /^D(\d+)$/.exec(id); if (m) return +m[1]; m = /^A([0-5])$/.exec(id); if (m) return 14 + +m[1]; return null; };
-  const arduinoHint = id => /^GND/.test(id) ? 'GND (земля)' : id === '5V' ? '5V (питание 5 В)' : id === '3V3' ? '3V3 (3,3 В, до 50 мА)' : /^A\d/.test(id) ? id + ' (аналоговый вход, цифровой ' + arduinoGpio(id) + ')' : /^D\d/.test(id) ? 'цифровой вывод ' + id.slice(1) + ([3, 5, 6, 9, 10, 11].includes(arduinoGpio(id)) ? ' (ШИМ ~)' : '') : id;
+  const arduinoHint = id => /^GND/.test(id) ? 'GND (земля)' : id === '5V' ? '5V (питание 5 В)' : id === '3V3' ? '3V3 (3,3 В, до 50 мА)' : id === 'VIN' ? 'VIN (разъём DC, от 6,5 В)' : /^A\d/.test(id) ? id + ' (аналоговый вход, цифровой ' + arduinoGpio(id) + ')' : /^D\d/.test(id) ? 'цифровой вывод ' + id.slice(1) + ([3, 5, 6, 9, 10, 11].includes(arduinoGpio(id)) ? ' (ШИМ ~)' : '') : id;
   const glab = id => id.replace(/^GND\d$/, 'GND');
   L.mcu = mcu;
   P.uno = mcu({ kind: 'uno', name: 'Arduino Uno (ATmega328P)', short: 'Arduino Uno', group: 'Платы', vio: 5, builtin: 13, pinMax: 0.04, w: 90, L: UNO_L, R: UNO_R,
     supplies: { '5V': 5, '3V3': 3.3, IOREF: 5 }, gpio: arduinoGpio, hint: arduinoHint, lab: glab, pcb: '#0f6f86', chipName: 'ATmega328P', sub: '16 МГц · 5 В', ledName: 'L',
+    usbKind: 'b', usbName: 'USB-B',
+    power: { gnd: 'GND', sense: ['VIN', '5V', '3V3'], usbI: 0.05,
+      deadMsg: 'Arduino Uno без питания: нажми USB или подай ≥ 6,5 В на VIN либо ≥ 4,4 В на 5V',
+      usb: [{ pin: '5V', V: 5 }, { pin: '3V3', V: 3.3 }, { pin: 'IOREF', V: 5 }],
+      inputs: [
+        { pin: 'VIN', min: 6.5, I: 0.05, out: [{ pin: '5V', V: 5 }, { pin: '3V3', V: 3.3 }, { pin: 'IOREF', V: 5 }] },
+        { pin: '5V', min: 4.4, I: 0.04, out: [{ pin: '3V3', V: 3.3 }, { pin: 'IOREF', V: 5 }] }] },
     extra: (T, B, W) => `<rect x="${-W + 8}" y="${B - 40}" width="30" height="26" rx="3" fill="#222" stroke="#000"/><text x="${-W + 23}" y="${B - 44}" class="tiny lightt">DC</text><text x="0" y="${B - 40}" class="chip lightt">UNO</text>` });
   const PICO_L = ['GP0', 'GP1', 'GND', 'GP2', 'GP3', 'GP4', 'GP5', 'GND2', 'GP6', 'GP7', 'GP8', 'GP9', 'GND3', 'GP10', 'GP11', 'GP12', 'GP13', 'GND4', 'GP14', 'GP15'];
   const PICO_R = ['VBUS', 'VSYS', 'GND5', '3V3', 'GP28', 'GND6', 'GP27', 'GP26', 'RUN', 'GP22', 'GND7', 'GP21', 'GP20', 'GP19', 'GP18', 'GND8', 'GP17', 'GP16'];
   const picoGpio = id => { const m = /^GP(\d+)$/.exec(id); return m ? +m[1] : null; };
   P.pico = mcu({ kind: 'pico', name: 'Raspberry Pi Pico (RP2040)', short: 'Pico', group: 'Платы', vio: 3.3, builtin: 25, pinMax: 0.012, w: 70, L: PICO_L, R: PICO_R,
     supplies: { VBUS: 5, VSYS: 4.8, '3V3': 3.3 }, gpio: picoGpio, lab: glab, pcb: '#1f7a3a', chipName: 'RP2040', sub: '133 МГц · 3,3 В', ledName: 'GP25',
+    usbKind: 'micro', usbName: 'Micro-USB',
+    power: { gnd: 'GND', sense: ['VBUS', 'VSYS', '3V3'], usbI: 0.03,
+      deadMsg: 'Pico без питания: нажми Micro-USB или подай ≥ 4,4 В на VBUS, ≥ 1,8 В на VSYS либо ≥ 2,9 В на 3V3',
+      usb: [{ pin: 'VBUS', V: 5 }, { pin: 'VSYS', V: 4.7 }, { pin: '3V3', V: 3.3 }],
+      inputs: [
+        { pin: 'VBUS', min: 4.4, I: 0.03, out: [{ pin: 'VSYS', V: 4.7 }, { pin: '3V3', V: 3.3 }] },
+        { pin: 'VSYS', min: 1.8, I: 0.02, out: [{ pin: '3V3', V: 3.3 }] }],
+      direct: [{ pin: '3V3', min: 2.9 }] },
     hint: id => /^GND/.test(id) ? 'GND (земля)' : id === 'VBUS' ? 'VBUS (5 В от USB)' : id === 'VSYS' ? 'VSYS (≈4,8 В)' : id === '3V3' ? '3V3 (выход 3,3 В)' : /^GP2[678]$/.test(id) ? id + ' (ADC' + (picoGpio(id) - 26) + ', A' + (picoGpio(id) - 26) + ')' : /^GP/.test(id) ? 'GPIO' + picoGpio(id) : id });
   const OPI_L = ['3V3', '5V', 'GND', 'G0', 'G1', 'G2', 'G3', 'G4', 'G5', 'G6', 'G7'];
   const OPI_R = ['HDMI', '5Vb', 'GND2', 'G8', 'G9', 'G10', 'G11', 'G12', 'G13', 'G14', 'G15'];
   P.opi = mcu({ kind: 'opi', lang: 'python', name: 'Orange Pi (Python + HDMI)', short: 'Orange Pi', group: 'Платы', vio: 3.3, builtin: null, pinMax: 0.016, w: 90, L: OPI_L, R: OPI_R,
     supplies: { '3V3': 3.3, '5V': 5, '5Vb': 5 }, gpio: id => { const m = /^G(\d+)$/.exec(id); return m ? +m[1] : null; }, pcb: '#1b1b1b', chipName: 'Allwinner H3', sub: 'Linux · Python', ledName: 'ACT',
+    usbKind: 'micro', usbName: 'Micro-USB',
+    power: { gnd: 'GND', sense: ['5V', '5Vb', '3V3'], usbI: 0.3,
+      deadMsg: 'Orange Pi без питания: нажми Micro-USB или подай ≥ 4,5 В на 5V',
+      usb: [{ pin: '5V', V: 5 }, { pin: '5Vb', V: 5 }, { pin: '3V3', V: 3.3 }],
+      inputs: [
+        { pin: '5V', min: 4.5, I: 0.3, out: [{ pin: '5Vb', V: 5 }, { pin: '3V3', V: 3.3 }] },
+        { pin: '5Vb', min: 4.5, I: 0.3, out: [{ pin: '5V', V: 5 }, { pin: '3V3', V: 3.3 }] }] },
     lab: id => id === 'HDMI' ? 'HDMI' : /^G\d/.test(id) ? 'GPIO' + id.slice(1) : glab(id).replace('5Vb', '5V'),
     hint: id => id === 'HDMI' ? 'HDMI-выход: соедини с монитором' : /^GND/.test(id) ? 'GND (земля)' : /^5V/.test(id) ? '5V' : id === '3V3' ? '3V3' : 'GPIO' + id.slice(1) + ' (номер для GPIO.setup)',
     extra: (T, B, W) => `<rect x="${W - 40}" y="${T + 6}" width="30" height="14" rx="2" fill="#aaa" stroke="#555"/><text x="${W - 25}" y="${T + 30}" class="tiny lightt">HDMI</text><rect x="${-W + 8}" y="${T + 6}" width="30" height="22" fill="#9aa" stroke="#555"/><text x="${-W + 23}" y="${T + 36}" class="tiny lightt">LAN</text>` });

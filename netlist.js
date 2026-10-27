@@ -38,6 +38,7 @@
       gpio: (g, id) => ((hooks.gpioBy && id && hooks.gpioBy[id]) || gpio)[g],
       dev: d => { if (d) devs.push(d); return d; },
       vio: hooks.vio || 3.3,
+      portPower: !!hooks.portPower,
       wired: (p, pin) => { if (!N.sz) { N.sz = new Map(); for (const k of [...N.allKeys]) { const r = N.find(k); N.sz.set(r, (N.sz.get(r) || 0) + 1); } } return (N.sz.get(N.find(key(p.id, pin))) || 0) > 1; },
     };
     for (const p of project.parts) { cur = p.id; P[p.type].stamp(p, ctx); }

@@ -22,6 +22,7 @@
   mi('pmExport', '⬇ Экспорт', () => $('#export').click());
   mi('pmImport', '⬆ Импорт', () => $('#import').click());
   mi('pmSettings', '⚙ Настройки', () => { const s = window.__sim; if (s) s.openSettings(); });
+  const pmPower = mi('pmPower', '⚡ Питание: выкл', () => { const s = sim(); if (s && s.togglePortPower) s.togglePortPower(); });
   body.append(menu);
   bMore.onclick = e => { e.stopPropagation(); menu.hidden = !menu.hidden; };
   document.addEventListener('pointerdown', e => { if (!menu.hidden && !menu.contains(e.target) && e.target !== bMore) menu.hidden = true; });
@@ -109,6 +110,7 @@
     if (!car && (k === 'chassis' || k === 'track')) k = 'schema';
     body.dataset.ptab = k; for (const [n, b] of Object.entries(T)) { b.classList.toggle('on', n === k); b.setAttribute('aria-selected', String(n === k)); }
     const p = playing(); bPlay.textContent = p ? '⏸' : '▶'; bPlay.classList.toggle('go', !p); bPlay.setAttribute('aria-label', p ? 'Пауза' : 'Запустить');
+    if (pmPower && sim()) pmPower.textContent = sim().ui && sim().ui.portPower ? '⚡ Питание: вкл' : '⚡ Питание: выкл';
     bDel.disabled = !(sim() && sim().sel);
     const sk = selKey(); if (sk && sk !== lastSel && k === 'schema' && body.dataset.sheet !== 'parts' && body.dataset.sheet !== 'props') { $('#mProps').click(); requestAnimationFrame(reveal); }
     lastSel = sk; }

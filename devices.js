@@ -20,7 +20,49 @@
   const ocv = s => 3.0 + 1.2 * Math.max(0, Math.min(1, s)) - 0.15 * Math.exp(-20 * s);
   function liion(ctx, p, n, st = { soc: 1 }, capAh = 2.0) {
     const k = ctx.add({ type: 'V', p, n, V: ocv(st.soc), rInt: 0.1, iShort: 4 });
-    return { st, step(sol, dt) { const I = sol.currents[k]; st.soc = Math.max(0, st.soc - I * dt / (capAh * 3600)); st.I = I; st.V = ocv(st.soc) - 0.1 * I; st.empty = st.soc <= 0; } };
+    return { st, step(sol, dt) { const I = sol.currents[k]; st.soc = Math.max(0, Math.min(1, st.soc - I * dt / (capAh * 3600))); st.I = I; st.V = ocv(st.soc) - 0.1 * I; st.empty = st.soc <= 0; } };
+  }
+  // IP5306 / TP5400: заряд Li-ion до 4,2 В (rInt задаёт ток) и boost 5 В, КПД ~0,85–0,88.
+  // opt.always — TP5400 держит выход, пока есть батарея или VIN. IP5306 включает KEY/защёлку или VIN.
+  function powerBank(ctx, pins, st = {}, opt = {}) {
+    const batP = pins.batP, batN = pins.batN, vin = pins.vin, gnd = pins.gnd, out = pins.out, key = pins.key;
+    if (batN !== gnd) ctx.add({ type: 'R', a: batN, b: gnd, R: 0.02 });
+    if (key != null && !opt.always) { const pu = ctx.node(); ctx.add({ type: 'V', p: pu, n: gnd, V: 3.3 }); ctx.add({ type: 'R', a: pu, b: key, R: 1e5 }); }
+    const boostOn = !!st.boost, chgOn = !!st.chg;
+    const vo = boostOn ? ctx.add({ type: 'V', p: out, n: gnd, V: 5, rInt: 0.08, iShort: 2.4 }) : ctx.add({ type: 'R', a: out, b: gnd, R: 1e7 });
+    const ch = chgOn ? ctx.add({ type: 'V', p: batP, n: batN, V: 4.2, rInt: 1.1, iShort: 2 }) : null;
+    const iin = ctx.add({ type: 'I', a: vin, b: gnd, I: Math.max(0, +st.Ivin || 0) });
+    const idis = ctx.add({ type: 'I', a: batP, b: batN, I: Math.max(0, +st.Idis || 0) });
+    return { st, vo, ch, iin, idis, step(sol) {
+      const Vbat = sol.v[batP] - sol.v[batN], Vin = sol.v[vin] - sol.v[gnd], Vo = sol.v[out] - sol.v[gnd];
+      const Vkey = key != null ? sol.v[key] - sol.v[gnd] : 3.3;
+      const keyDown = !!opt.always || !!st.latch || (key != null && Vkey < 0.8);
+      const batOk = Vbat >= 2.8 && Vbat <= 4.35, vinOk = Vin >= 4.4 && Vin <= 6;
+      const Io = boostOn ? Math.max(0, sol.currents[vo] || 0) : 0;
+      const Ichg = ch != null ? Math.max(0, sol.currents[ch] || 0) : 0;
+      const Pout = Math.max(0, Vo) * Io;
+      const boost = opt.always ? (batOk || vinOk) : ((batOk && keyDown) || vinOk);
+      st.Vbat = Vbat; st.Vin = Vin; st.Vo = Vo; st.Io = Io; st.Ichg = Ichg; st.keyDown = !opt.always && keyDown;
+      st.boost = !!boost; st.on = !!boost; st.chg = false; st.Ivin = 0; st.Idis = 0;
+      if (!boost) return;
+      if (vinOk) { st.chg = Vbat >= 2.5 && Vbat < 4.22; st.Ivin = (Pout + Ichg * 4.2) / (0.88 * Math.max(Vin, 1)); }
+      else if (batOk) st.Idis = Pout / (0.85 * Math.max(Vbat, 2.5));
+    } };
+  }
+  // Понижающий преобразователь: Uвых ≤ Uвх − 0,5 В, иначе просадка ~1 В. КПД 0,88. Вход 4–40 В.
+  function buck(ctx, inP, inN, outP, outN, Vset = 5, st = {}) {
+    const on = !!st.on, Vcmd = on ? Math.max(0, +st.Vcmd || 0) : 0;
+    const vo = on && Vcmd > 0.2 ? ctx.add({ type: 'V', p: outP, n: outN, V: Vcmd, rInt: 0.08, iShort: 3 }) : ctx.add({ type: 'R', a: outP, b: outN, R: 1e7 });
+    const iin = ctx.add({ type: 'I', a: inP, b: inN, I: Math.max(0, +st.Iin || 0) });
+    return { st, vo, iin, step(sol) {
+      const Vin = sol.v[inP] - sol.v[inN], Vo = sol.v[outP] - sol.v[outN];
+      const Io = on && Vcmd > 0.2 ? Math.max(0, sol.currents[vo] || 0) : 0;
+      const target = Math.max(0.8, Math.min(24, +Vset || 5)), vinOk = Vin >= 4 && Vin <= 40;
+      st.Vin = Vin; st.Vo = Vo; st.Io = Io; st.target = target; st.Pout = Math.max(0, Vo) * Io;
+      if (!vinOk) { st.on = false; st.reg = false; st.Vcmd = 0; st.Iin = 0; return; }
+      st.on = true; st.reg = target <= Vin - 0.5; st.Vcmd = st.reg ? target : Math.max(0, Vin - 1);
+      st.Iin = st.Pout / (0.88 * Math.max(Vin, 1));
+    } };
   }
   // повышающий преобразователь (MT3608/XL6009): вход 2–24 В, выход задаётся, КПД 0.9
   function boost(ctx, inP, inN, outP, outN, Vout = 12, st = { Iin: 0 }) {
@@ -68,7 +110,7 @@
   // TCRT5000: выход фототранзистора, refl 0 (чёрное) … 1 (белое) → ток коллектора до 1 мА
   function tcrtCurrent(refl) { return 1e-3 * Math.max(0, Math.min(1, refl)); }
   function context() { const els = []; let n = 1; return { els, node: () => n++, nodeCount: () => n, add: e => (els.push(e), els.length - 1) }; }
-  const api = { MOTORS, motor, liion, ocv, boost, hbridge, HB, LOADS, load, tcrtCurrent, context, levelShift };
+  const api = { MOTORS, motor, liion, ocv, boost, buck, powerBank, hbridge, HB, LOADS, load, tcrtCurrent, context, levelShift };
   if (typeof module !== 'undefined' && module.exports) module.exports = api; else root.Devices = api;
 })(typeof window !== 'undefined' ? window : globalThis);
 
