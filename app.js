@@ -102,11 +102,15 @@
           ['a', 'b'].map(k => { const q = pinPos(part(w[k].part), w[k].pin); return `<circle class="wend" data-wire="${esc(w.id)}" data-end="${k}" cx="${q[0]}" cy="${q[1]}" r="${(9 / cam.s).toFixed(2)}"/>`; }).join('') : ''); }).join('');
     partsL.innerHTML = [...proj.parts].sort((a, b) => !!P[b.type].strips - !!P[a.type].strips).map(p => { const d = P[p.type], [bx, by, bw, bh] = bbox(p.type), c = checks[p.id];
       const bi = d.builtin ?? 2, dk = d.display, link = links[p.id];
+      const boardMcu = !!(d.mcu && !d.chip);
+      const poweredNow = !!(meas[p.id] && meas[p.id].powered);
+      const dead = !!(ui.portPower && boardMcu && !p.usb && !poweredNow);
       const st = { I: meas[p.id]?.I, m: meas[p.id], burned: p.burned, running, led2: running && gpioOf(p.id)[bi]?.mode === 'OUTPUT' && (d.ledInv ? !(gpioOf(p.id)[bi].val > 0) : gpioOf(p.id)[bi].val > 0),
-        mod: dk ? p._mod : null, img: dk ? imgs[dk] : null, on: link ? link.on : undefined, why: link ? link.why : '', anim: animT[p.id] || 0 };
+        mod: dk ? p._mod : null, img: dk ? imgs[dk] : null, on: link ? link.on : undefined, why: link ? link.why : '', anim: animT[p.id] || 0,
+        powered: meas[p.id] ? meas[p.id].powered : (ui.portPower && boardMcu && !p.usb ? false : undefined) };
       const sh = shortSet.has(p.id) || shorts.some(z => z.source === p.id), t = performance.now() / 1000;
       const smoke = p.burned ? [0, 1, 2].map(k => { const f = ((t * 0.6 + k / 3) % 1); return `<circle class="smoke" cx="${Math.sin((t + k) * 2) * 6 * f}" cy="${by - 4 - f * 40}" r="${4 + f * 10}" opacity="${(0.55 * (1 - f)).toFixed(2)}"/>`; }).join('') : '';
-      return `<g class="part${sel && sel.part === p.id ? ' sel' : ''}${c ? ' ' + c.level : ''}${p.burned ? ' burned' : ''}${sh ? ' short' + (blink ? ' on' : '') : ''}" data-part="${esc(p.id)}" transform="translate(${p.x} ${p.y}) rotate(${(p.rot || 0) * 90})">
+      return `<g class="part${sel && sel.part === p.id ? ' sel' : ''}${c ? ' ' + c.level : ''}${p.burned ? ' burned' : ''}${dead ? ' dead' : ''}${sh ? ' short' + (blink ? ' on' : '') : ''}" data-part="${esc(p.id)}" transform="translate(${p.x} ${p.y}) rotate(${(p.rot || 0) * 90})">
         <rect class="hit" x="${bx}" y="${by}" width="${bw}" height="${bh}" rx="6"/><g class="art">${d.draw(p, st)}</g>${smoke}
         ${d.pins.map(q => `<circle class="pin${d.strips ? ' hole' : ''}${armed && armed.part === p.id && armed.pin === q.id ? ' armed' : ''}" data-pin="${q.id}" cx="${q.x}" cy="${q.y}" r="${d.strips ? 3 : 4}"/>`).join('')}</g>`; }).join('');
     $('#simbar').hidden = !running; $('#simbar').classList.toggle('bad', !!shorts.length); $('#svg').classList.toggle('locked', locked());
@@ -163,9 +167,12 @@
             <select id="e12"><option value="">E12…</option>${E12V.map(v => `<option value="${v}"${v === pr.R ? ' selected' : ''}>${esc(fmtUnit(v, 'Ом'))}</option>`).join('')}</select></span></label>
             <div class="bands">${resistorBands(pr.R).map(c => `<svg viewBox="0 0 10 20"><rect width="10" height="20" fill="${c}"/></svg>`).join('')}</div>`; }
         else if (k === 'motion') h += `<label class="prop">Движение <input data-k="motion" type="checkbox"${pr.motion ? ' checked' : ''}></label>`;
+        else if (k === 'Vout' && p.type === 'buck') h += `<label class="prop">Uвых: <b class="sv" data-sv="Vout">${esc(pr.Vout)}</b> В<input data-k="Vout" type="range" min="0.8" max="24" step="0.1" value="${esc(pr.Vout)}"></label>`;
         else if (SLIDERS[k]) { const [nm, u, lo, hi, stp] = SLIDERS[k]; h += `<label class="prop">${nm}: <b class="sv" data-sv="${k}">${esc(pr[k])}</b> ${u}<input data-k="${k}" type="range" min="${lo}" max="${hi}" step="${stp}" value="${esc(pr[k])}"></label>`; }
         else { const ui = PROP_UI[k] || [k, '', 'any']; h += `<label class="prop">${ui[0]}${ui[1] ? ', ' + ui[1] : ''}<input data-k="${k}" type="${k === 'pos' ? 'range' : 'number'}" step="${ui[2]}" ${k === 'pos' ? 'min="0" max="1"' : 'min="0"'} value="${esc(pr[k])}"></label>`; }
       } }
+    if (d.mcu && !d.chip && d.usbKind) h += `<div class="row"><button type="button" id="usbToggle">${p.usb ? d.usbName + ' подключен' : d.usbName + ' не подключен'}</button></div><p class="muted">Порт на плате. Учитывается, когда включено «⚡ Питание».</p>`;
+    if (p.type === 'ip5306') h += `<div class="row"><button type="button" id="keyToggle">${p.keyLatch ? 'KEY: вкл' : 'KEY: выкл'}</button></div>`;
     h += '<h4>Сейчас</h4>';
     if (p.burned) h += `<div class="burnt">🔥 Сгорела<button id="fix">Заменить</button></div>`;
     h += `<div class="cards">${['U', 'I', 'P'].map(q => `<div class="card" data-q="${q}"><span class="cl">${q}</span><b class="cv">—</b><div class="bar"><i></i></div></div>`).join('')}</div>
@@ -182,6 +189,8 @@
     if ($('#e12')) $('#e12').onchange = e => { if (!e.target.value) return; p.props.R = +e.target.value; commitProp(); props(); };
     el.querySelectorAll('[data-color]').forEach(b => b.onclick = () => { const n = b.dataset.color; if (!Object.prototype.hasOwnProperty.call(LED_COLORS, n)) return; p.props.color = n; p.props.Vf = LED_COLORS[n][1]; commitProp(); props(); });
     $('#rot').onclick = rotate; $('#del').onclick = del; $('#showCalc').onclick = e => { e.preventDefault(); showTab('calc'); };
+    if ($('#usbToggle')) $('#usbToggle').onclick = () => { p.usb = !p.usb; p._pwr = null; p._sourced = null; p._hot = null; prevV = null; props(); render(); };
+    if ($('#keyToggle')) $('#keyToggle').onclick = () => { p.keyLatch = !p.keyLatch; prevV = null; props(); render(); };
     if ($('#fix')) $('#fix').onclick = () => { delete p.burned; delete checks[p.id]; lastAlert = null; changed(); };
     live();
   }
@@ -198,7 +207,10 @@
     const ex = $('#extra'); if (!ex) return;
     ex.textContent = '';
     const row = (k, v) => { const d = document.createElement('div'); const a = document.createElement('span'); a.textContent = k; const b = document.createElement('b'); b.textContent = v; d.append(a, b); ex.appendChild(d); };
-    if (m && !isShort && m.extra) { row('Iб', fU(m.extra.Ib, 'А')); row('Uбэ', fU(m.extra.Vbe, 'В')); row('β = Iк/Iб', fmtNum(m.I / m.extra.Ib, 1)); }
+    if (m && !isShort && m.extra) {
+      if (Number.isFinite(m.extra.Ib)) { row('Iб', fU(m.extra.Ib, 'А')); row('Uбэ', fU(m.extra.Vbe, 'В')); row('β = Iк/Iб', fmtNum(m.I / m.extra.Ib, 1)); }
+      else for (const [k, v] of Object.entries(m.extra)) if (v == null || typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean') row(k, String(v));
+    }
   }
 
   /* ---------- «Расчёт» panel ---------- */
@@ -257,7 +269,8 @@
   let holdArmUntil = 0;
   svg.addEventListener('pointerdown', e => {
     if (e.pointerType === 'mouse') holdArmUntil = 0;
-    { const t = performance.now(), L = lastDown; lastDown = { t, x: e.clientX, y: e.clientY }; if (L && t - L.t < 400 && Math.hypot(e.clientX - L.x, e.clientY - L.y) < 6 && pointers.size === 0) { lastDown = null; onDbl(e); return; } }
+    const ctl = e.target.closest && e.target.closest('.usbport, .keybtn, .knob');
+    { const t = performance.now(), L = lastDown; lastDown = { t, x: e.clientX, y: e.clientY }; if (!ctl && L && t - L.t < 400 && Math.hypot(e.clientX - L.x, e.clientY - L.y) < 6 && pointers.size === 0) { lastDown = null; onDbl(e); return; } }
     if (e.isPrimary) pointers.clear(); pointers.set(e.pointerId, { x: e.clientX, y: e.clientY }); try { svg.setPointerCapture(e.pointerId); } catch (_) {}
     if (pointers.size === 2) { if (drag && drag.press && P[drag.press.type].interactive === 'momentary') drag.press.on = false; pinchStart(); return; }
     if (pointers.size > 2) return;
@@ -265,9 +278,18 @@
     let pinEl = e.target.closest('.pin'), partEl = e.target.closest('.part'); let wireEl = bestWire(e.clientX, e.clientY, e.target.closest('.whit, .wire')); const bendEl = e.target.closest('.bend'), endEl = e.target.closest('.wend') || document.elementsFromPoint(e.clientX, e.clientY).find(el => el.classList && el.classList.contains('wend'));
     if (!pinEl && touch && !endEl && !bendEl) { const np = nearestPin(e.clientX, e.clientY, wireEl ? 7 : partEl ? 12 : 22); if (np) { pinEl = np.pinEl; partEl = np.partEl; } }
     if (pinEl && touch && !wireMode && !armed && !wiresAt({ part: partEl.dataset.part, pin: pinEl.dataset.pin }).length) { const w = wireNear(e.clientX, e.clientY, 8); if (w) { wireEl = w; pinEl = null; partEl = null; } }
-    if (!pinEl && !wireEl && partEl && !e.target.closest('.knob, .btnp')) { const w = wireNear(e.clientX, e.clientY, touch ? 9 : 5); if (w) { wireEl = w; partEl = null; } }
+    if (!pinEl && !wireEl && partEl && !e.target.closest('.knob, .btnp, .usbport, .keybtn')) { const w = wireNear(e.clientX, e.clientY, touch ? 9 : 5); if (w) { wireEl = w; partEl = null; } }
+    const portEl = e.target.closest('.usbport, .keybtn');
+    if (portEl && partEl) {
+      const p = part(partEl.dataset.part); sel = { part: p.id };
+      if (portEl.classList.contains('usbport') && P[p.type].usbKind) { p.usb = !p.usb; p._pwr = null; p._sourced = null; p._hot = null; }
+      else if (portEl.classList.contains('keybtn') && p.type === 'ip5306') p.keyLatch = !p.keyLatch;
+      prevV = null; props(); render(); return;
+    }
     if (!pinEl) startLong(e);
-    const knobEl = e.target.closest('.knob'); if (knobEl && partEl) { const p = part(partEl.dataset.part); sel = { part: p.id }; props(); drag = { knob: p, x0: e.clientX, y0: e.clientY, pos0: p.props.pos }; return; }
+    const knobEl = e.target.closest('.knob'); if (knobEl && partEl) { const p = part(partEl.dataset.part); sel = { part: p.id }; props();
+      const key = p.type === 'buck' ? 'Vout' : 'pos', lo = key === 'Vout' ? 0.8 : 0, hi = key === 'Vout' ? 24 : 1;
+      drag = { knob: p, key, lo, hi, x0: e.clientX, y0: e.clientY, pos0: +p.props[key] || 0 }; return; }
     if (endEl && !locked()) { const w = proj.wires.find(x => x.id === endEl.dataset.wire); if (w) { drag = { wend: w, end: endEl.dataset.end }; return; } }
     if (bendEl && !locked()) { const w = proj.wires.find(x => x.id === bendEl.dataset.wire); drag = { bend: w, i: +bendEl.dataset.i }; return; }
     if (pinEl && !locked() && !(running && P[part(partEl.dataset.part).type].interactive)) {
@@ -299,7 +321,15 @@
     if (drag && drag.pinch && pointers.size >= 2) { const [a, b] = [...pointers.values()], d = Math.hypot(a.x - b.x, a.y - b.y), c = [(a.x + b.x) / 2, (a.y + b.y) / 2];
       cam = { ...drag.cam0 }; zoomAt(drag.c0[0], drag.c0[1], drag.s0 * d / Math.max(1, drag.d0)); cam.x += c[0] - drag.c0[0]; cam.y += c[1] - drag.c0[1]; if (!running) render(); }
     else if (drag && drag.part) { const [wx, wy] = toWorld(e.clientX, e.clientY); const nx = snap(wx - drag.dx), ny = snap(wy - drag.dy); if (nx !== drag.part.x || ny !== drag.part.y) { drag.part.x = nx; drag.part.y = ny; drag.moved = true; } if (!running) render(); }
-    else if (drag && drag.knob) { drag.knob.props.pos = Math.min(1, Math.max(0, drag.pos0 + ((e.clientX - drag.x0) - (e.clientY - drag.y0)) / 150)); drag.moved = true; const i = document.querySelector('#props input[data-k="pos"]'); if (i) i.value = drag.knob.props.pos; prevV = null; if (!running) render(); }
+    else if (drag && drag.knob) {
+      const span = (drag.hi ?? 1) - (drag.lo ?? 0);
+      let next = drag.pos0 + ((e.clientX - drag.x0) - (e.clientY - drag.y0)) / 150 * span;
+      next = Math.min(drag.hi ?? 1, Math.max(drag.lo ?? 0, next));
+      if (drag.key === 'Vout') next = Math.round(next * 10) / 10;
+      drag.knob.props[drag.key || 'pos'] = next; drag.moved = true;
+      const i = document.querySelector(`#props input[data-k="${drag.key || 'pos'}"]`); if (i) i.value = next;
+      const sv = document.querySelector(`#props [data-sv="${drag.key || 'pos'}"]`); if (sv) sv.textContent = String(next);
+      prevV = null; if (!running) render(); }
     else if (drag && drag.bend) { const [wx, wy] = toWorld(e.clientX, e.clientY); drag.bend.pts[drag.i] = [snap(wx), snap(wy)]; drag.moved = true; if (!running) render(); }
     else if (drag && drag.wend) { const o = drag.wend[drag.end === 'a' ? 'b' : 'a'], [ax, ay] = pinPos(part(o.part), o.pin), [bx, by] = toWorld(e.clientX, e.clientY); temp.setAttribute('d', `M${ax} ${ay} L${bx} ${by}`); drag.moved = true; }
     else if (drag && drag.pan) { if (drag.armTap && Math.hypot(e.clientX - drag.armTap[0], e.clientY - drag.armTap[1]) < 8) return; drag.armTap = null; cam.x = e.clientX - drag.x; cam.y = e.clientY - drag.y; if (!running) render(); }
@@ -417,7 +447,7 @@
     const mcus = proj.parts.filter(p => P[p.type].mcu), gpioBy = {}; for (const id in extra) gpioBy[id] = extra[id].gpio; if (mcus[0]) gpioBy[mcus[0].id] = gpio;
     // v9: move the robot car first (motor rpm from the previous frame), so this frame's stamp already sees the new sensor readings
     if (window.RobotUI) RobotUI.onTick(proj, Math.min(0.05, Math.max(1e-4, lastT ? (performance.now() - lastT) / 1000 : 1 / 60)));
-    const b = Netlist.build(proj, gpio, { gpioBy, vio: mcus[0] ? P[mcus[0].type].vio : 3.3 });
+    const b = Netlist.build(proj, gpio, { gpioBy, vio: mcus[0] ? P[mcus[0].type].vio : 3.3, portPower: !!ui.portPower });
     // transient step: real time between frames (clamped), state re-keyed by owner part + ordinal so it survives netlist changes
     const now = performance.now(), dt = Math.min(0.05, Math.max(1e-4, lastT ? (now - lastT) / 1000 : 1 / 60)); lastT = now;
     const keys = elKeys(b.owners), st = { vC: {}, iL: {} };
@@ -513,7 +543,7 @@
   /* sketch worker lifecycle: a crashed/hung worker (exception, OOM, infinite loop) is torn down, a fresh idle
    * worker is created right away, the console explains what happened, and the next Run uses the fresh worker. */
   let spare = null, crashes = 0;
-  const newWorker = () => new Worker('worker.js?v=14.5.9');
+  const newWorker = () => new Worker('worker.js?v=14.6.0');
   function takeWorker() { const w = spare || newWorker(); spare = null; return w; }
   function crash(msg) { if (!worker) return; worker.onmessage = worker.onerror = null; try { worker.terminate(); } catch (e) {} worker = null; gpio = {}; prevV = null; crashes++;
     try { spare = newWorker(); } catch (e) { spare = null; }
@@ -642,7 +672,8 @@
       labelFont: src.labelFont !== undefined ? src.labelFont : ui.labelFont,
       showWireBtn: src.showWireBtn !== undefined ? src.showWireBtn : ui.showWireBtn,
       showDelBtn: src.showDelBtn !== undefined ? src.showDelBtn : ui.showDelBtn,
-      codeFont: src.codeFont !== undefined ? src.codeFont : ui.codeFont
+      codeFont: src.codeFont !== undefined ? src.codeFont : ui.codeFont,
+      portPower: src.portPower !== undefined ? src.portPower : ui.portPower
     });
     try { localStorage.setItem(UI_KEY, JSON.stringify(ui)); } catch (e) {}
     applyUi();
@@ -662,7 +693,15 @@
     if (g) for (const b of g.querySelectorAll('button')) { const on = b.dataset.font === ui.labelFont; b.classList.toggle('on', on); b.setAttribute('aria-pressed', on ? 'true' : 'false'); }
     const cg = $('#setCodeFont');
     if (cg) for (const b of cg.querySelectorAll('button')) { const on = +b.dataset.size === ui.codeFont; b.classList.toggle('on', on); b.setAttribute('aria-pressed', on ? 'true' : 'false'); }
+    const pb = $('#portPower');
+    if (pb) { pb.classList.toggle('on', !!ui.portPower); pb.setAttribute('aria-pressed', ui.portPower ? 'true' : 'false'); }
+    if (window.__pm && window.__pm.sync) window.__pm.sync();
     syncCanvasCards();
+  }
+  function togglePortPower() {
+    setUi({ portPower: !ui.portPower });
+    for (const p of proj.parts) { p._pwr = null; p._sourced = null; p._hot = null; }
+    prevV = null; render();
   }
   function openSettings() { applyUi(); const m = $('#simSettings'); if (m) m.hidden = false; }
   function closeSettings() { const m = $('#simSettings'); if (m) m.hidden = true; }
@@ -689,6 +728,7 @@
     const left = Math.max(4, Math.min(cx - w / 2, parent.width - w - 4)), t = Math.max(4, Math.min(top - h - 8, parent.height - h - 4));
     box.style.left = Math.round(left) + 'px'; box.style.top = Math.round(t) + 'px';
   }
+  $('#portPower').onclick = togglePortPower;
   $('#simMore').onclick = openSettings;
   $('#simSettingsClose').onclick = closeSettings;
   $('#simSettings').addEventListener('click', e => { if (e.target.id === 'simSettings') closeSettings(); });
@@ -721,5 +761,5 @@
   lastJ = JSON.stringify(strip(proj)); syncHist();
   layout(); palette(); projList(); $('#code').value = proj.code ?? DEFAULT_CODE; fit(); applyUi(); render(); props(); calc();
   window.addEventListener('resize', () => { if (!running) render(); });
-  window.__sim = { fit: () => { fit(); render(); }, del: () => del(), rotate: () => rotate(), get proj() { return proj; }, get running() { return running; }, changed() { changed(); }, select(id) { sel = id && part(id) ? { part: id } : null; render(); props(); }, get sel() { return sel; }, get wireMode() { return wireMode; }, get armed() { return armed; }, get meas() { return meas; }, start, stop, undo, redo, get gpio() { return gpio; }, get shorts() { return shorts; }, get crashes() { return crashes; }, get simTime() { return simTime; }, get hasWorker() { return !!worker; }, get worker() { return worker; }, get hasSpare() { return !!spare; }, get rf() { return rf; }, get extra() { return Object.keys(extra); }, codeFor: id => setCodeTarget(id), get cam() { return cam; }, render: () => render(), select: id => { sel = { part: id }; props(); calc(); render(); }, openSettings, setUi, get ui() { return ui; } };
+  window.__sim = { fit: () => { fit(); render(); }, del: () => del(), rotate: () => rotate(), get proj() { return proj; }, get running() { return running; }, changed() { changed(); }, select(id) { sel = id && part(id) ? { part: id } : null; render(); props(); }, get sel() { return sel; }, get wireMode() { return wireMode; }, get armed() { return armed; }, get meas() { return meas; }, start, stop, undo, redo, get gpio() { return gpio; }, get shorts() { return shorts; }, get crashes() { return crashes; }, get simTime() { return simTime; }, get hasWorker() { return !!worker; }, get worker() { return worker; }, get hasSpare() { return !!spare; }, get rf() { return rf; }, get extra() { return Object.keys(extra); }, codeFor: id => setCodeTarget(id), get cam() { return cam; }, render: () => render(), select: id => { sel = { part: id }; props(); calc(); render(); }, openSettings, setUi, togglePortPower, get ui() { return ui; } };
 })();

@@ -5,6 +5,7 @@ header{display:flex;gap:6px;align-items:center;padding:6px 10px;background:#1a20
 .logo{margin-right:10px;color:#ffd34d}.sep{flex:0 0 12px}.status{margin-left:auto;color:#8a94a8}
 button,.btn,select,input,textarea{background:#252d3f;color:#d8dee9;border:1px solid #39435a;border-radius:6px;padding:5px 10px;font:inherit;cursor:pointer}
 button:hover,.btn:hover{background:#2f3950}button:disabled{opacity:.4;cursor:default}button.go{background:#1f6b3a;border-color:#2c8a4c}button.on{background:#3a4a6e}
+#portPower.on{background:#1f6b3a;border-color:#2c8a4c}
 main{flex:1;display:flex;min-height:0}
 #left{width:220px;padding:8px;overflow:auto;background:#161b27;border-right:1px solid #2a3242}#left input{width:100%}
 #right{width:260px;padding:8px 12px;overflow:auto;background:#161b27;border-left:1px solid #2a3242}
@@ -48,7 +49,8 @@ footer{background:#161b27;border-top:1px solid #2a3242}.tabs{display:flex;gap:4p
 .leg{stroke:#b8c0cc;stroke-width:2;fill:none}.res{fill:#e3c99a;stroke:#a88a5a}
 .pin{fill:transparent;stroke:#c9a227;stroke-width:1.2;cursor:crosshair}.pin:hover,.pin.armed{fill:#4aff8a;stroke:#fff;stroke-width:1.5}
 .pin.hole{fill:#3a3a3a;stroke:#999;stroke-width:.6}.pin.hole:hover{fill:#4aff8a}
-.part.burned .art{filter:grayscale(1) brightness(.55)}.smoke{fill:#9aa0a8;pointer-events:none}
+.part.burned .art,.part.dead .art{filter:grayscale(1) brightness(.55)}.part.dead .art{filter:grayscale(1) brightness(.62)}.smoke{fill:#9aa0a8;pointer-events:none}
+.usbport,.keybtn{cursor:pointer}
 .part.short.on>.hit{stroke:#ff2b2b;stroke-width:3;fill:#ff2b2b33;stroke-dasharray:none}
 .wire.short{stroke:#7a1010!important}.wire.short.on{stroke:#ff2b2b!important}
 .wsel{fill:none;stroke:#fff;stroke-width:7;stroke-linejoin:round;stroke-linecap:round;pointer-events:none}

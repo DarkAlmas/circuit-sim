@@ -38,7 +38,7 @@
     button: 'button', switch: 'switch', voltmeter: 'meter', ammeter: 'meter',
     dc: 'supply', battery: 'battery', liion: 'cell', gnd: 'gnd',
     buzzer: 'buzzer', motor: 'motor', ttmotor: 'motor', coreless: 'motor', servo: 'servo', relay: 'relay',
-    usbuart: 'module', boost: 'module', l298n: 'module', drv8833: 'module', lvlshift: 'module',
+    usbuart: 'module', boost: 'module', buck: 'module', ip5306: 'module', tp5400: 'module', l298n: 'module', drv8833: 'module', lvlshift: 'module',
     tcrt5000: 'module', vl53l0x: 'module', mpu6050: 'module', nrf24: 'module',
     oled: 'panel', lcd1602: 'panel', monitor: 'panel', seg7: 'panel', wsm8: 'panel', wsm16: 'panel', max7219: 'panel',
     strip8: 'strip', ring16: 'ring'

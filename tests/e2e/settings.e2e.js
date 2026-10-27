@@ -1,4 +1,4 @@
-// Settings UI: hold menu defaults off, three controls, prefs persist, junk localStorage is dropped. ?v=14.5.9.
+// Settings UI: hold menu defaults off, three controls, prefs persist, junk localStorage is dropped. ?v=14.6.0.
 const { chromium } = require('playwright-core'); const assert = require('assert');
 const URL = process.argv[2] || 'http://localhost:8765/';
 (async () => {
@@ -10,11 +10,11 @@ const URL = process.argv[2] || 'http://localhost:8765/';
   await pg.goto(URL); await pg.evaluate(() => localStorage.clear()); await pg.reload(); await pg.waitForTimeout(300);
   const ok = (c, m) => { assert.ok(c, m); console.log('✓', m); };
 
-  ok(await pg.evaluate(() => [...document.scripts].every(s => !s.src || /\?v=14\.5\.9$/.test(s.src)) && /style\.css\?v=14\.5\.9$/.test(document.querySelector('link[rel=stylesheet]').href)), 'cache stays ?v=14.5.9');
+  ok(await pg.evaluate(() => [...document.scripts].every(s => !s.src || /\?v=14\.6\.0$/.test(s.src)) && /style\.css\?v=14\.6\.0$/.test(document.querySelector('link[rel=stylesheet]').href)), 'cache stays ?v=14.6.0');
   const csp = await pg.evaluate(() => document.querySelector('meta[http-equiv="Content-Security-Policy"]').content);
   ok(csp.startsWith("default-src 'self'") && csp.includes("script-src 'self'") && !/unsafe-inline/.test(csp), 'CSP unchanged');
-  const UI_KEYS = 'canvasProps,codeFont,holdMenu,labelFont,showDelBtn,showWireBtn';
-  ok(await pg.evaluate(() => __sim.ui.holdMenu === false && __sim.ui.canvasProps === true && __sim.ui.labelFont === 'normal' && __sim.ui.showWireBtn === true && __sim.ui.showDelBtn === true && __sim.ui.codeFont === 14), 'defaults: hold off, canvas props on, wire and delete on, code font 14');
+  const UI_KEYS = 'canvasProps,codeFont,holdMenu,labelFont,portPower,showDelBtn,showWireBtn';
+  ok(await pg.evaluate(() => __sim.ui.holdMenu === false && __sim.ui.canvasProps === true && __sim.ui.labelFont === 'normal' && __sim.ui.showWireBtn === true && __sim.ui.showDelBtn === true && __sim.ui.codeFont === 14 && __sim.ui.portPower === false), 'defaults: hold off, canvas props on, wire and delete on, code font 14');
   const codeFs = () => pg.evaluate(() => ({ pm: document.body.classList.contains('pm'), fs: getComputedStyle(document.querySelector('#code')).fontSize, ui: __sim.ui.codeFont }));
   let cfs = await codeFs();
   ok(!cfs.pm && cfs.ui === 14 && cfs.fs === '14px', 'desktop #code computed size is 14px');
@@ -65,7 +65,7 @@ const URL = process.argv[2] || 'http://localhost:8765/';
   await pg.evaluate(() => localStorage.setItem('circuitsim.ui', JSON.stringify({ holdMenu: 'yes', canvasProps: 0, labelFont: 'xxl', evil: '<img>', font: 'large' })));
   await pg.reload(); await pg.waitForTimeout(300);
   const dropped = await pg.evaluate(() => JSON.parse(localStorage.getItem('circuitsim.ui')));
-  ok(dropped.holdMenu === false && dropped.canvasProps === true && dropped.labelFont === 'normal' && dropped.showWireBtn === true && dropped.showDelBtn === true && dropped.codeFont === 14 && Object.keys(dropped).length === 6, 'invalid values and unknown keys dropped');
+  ok(dropped.holdMenu === false && dropped.canvasProps === true && dropped.labelFont === 'normal' && dropped.showWireBtn === true && dropped.showDelBtn === true && dropped.codeFont === 14 && Object.keys(dropped).length === 7, 'invalid values and unknown keys dropped');
 
   await pg.evaluate(() => localStorage.setItem('circuitsim.ui', JSON.stringify({ holdMenu: true, canvasProps: false, labelFont: 'small', extra: true })));
   await pg.reload(); await pg.waitForTimeout(300);

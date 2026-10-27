@@ -19,6 +19,7 @@
       for (const [k, def] of Object.entries(d.props || {})) {
         const v = p.props && typeof p.props === 'object' ? p.props[k] : undefined;
         if (k === 'color') props.color = typeof v === 'string' && Object.prototype.hasOwnProperty.call(window.LED_COLORS, v) ? v : def;
+        else if (k === 'Vout' && p.type === 'buck') props[k] = num(v, 0.8, 24, def);
         else if (BOOL.has(k)) props[k] = typeof v === 'boolean' ? v : !!def;
         else props[k] = NUM[k] ? num(v, NUM[k][0], NUM[k][1], def) : def;
       }
@@ -101,12 +102,14 @@
      showWireBtn strict boolean, default true. Phone/narrow bar button «Провод» (#mWire).
      showDelBtn  strict boolean, default true. Phone bar button 🗑 (#mDel).
      codeFont    number 14 or 16 only, default 14. Code editor size (was the ⋯ menu's pmFont).
+     portPower   strict boolean, default false. Local «⚡ Питание» toggle: boards need USB/5V/VIN.
+                 Stored only in this UI blob, never in the project file and never sent anywhere.
      Non-booleans ("true", 1, null), any other font string, and codeFont as a string are dropped. */
   const UI_FONTS = ['small', 'normal', 'large'];
   const UI_CODE_FONTS = [14, 16];
   const UI_KEY = 'circuitsim.ui';
   function sanitizeUiSettings(raw) {
-    const out = { holdMenu: false, canvasProps: true, labelFont: 'normal', showWireBtn: true, showDelBtn: true, codeFont: 14 };
+    const out = { holdMenu: false, canvasProps: true, labelFont: 'normal', showWireBtn: true, showDelBtn: true, codeFont: 14, portPower: false };
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return out;
     if (raw.holdMenu === true || raw.holdMenu === false) out.holdMenu = raw.holdMenu;
     if (raw.canvasProps === true || raw.canvasProps === false) out.canvasProps = raw.canvasProps;
@@ -114,6 +117,7 @@
     if (raw.showWireBtn === true || raw.showWireBtn === false) out.showWireBtn = raw.showWireBtn;
     if (raw.showDelBtn === true || raw.showDelBtn === false) out.showDelBtn = raw.showDelBtn;
     if (raw.codeFont === 14 || raw.codeFont === 16) out.codeFont = raw.codeFont;
+    if (raw.portPower === true || raw.portPower === false) out.portPower = raw.portPower;
     return out;
   }
   window.sanitizeProject = sanitizeProject; window.parseProjectText = parseProjectText; window.sanitizeWorld3d = sanitizeWorld3d; window.SANITIZE_LIMITS = LIMITS; window.ROBOT_LIMITS = RL; window.WORLD3D_LIMITS = W3L; window.WORLD3D_KINDS = W3_KINDS; window.WORLD3D_TYPES = W3_TYPES; window.PROJECT_KINDS = KINDS; window.esc = esc; window.ID_RE = ID; window.WIRE_COLORS = WIRE_COLORS;

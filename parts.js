@@ -20,6 +20,70 @@
     // solver-native internal resistance + short-circuit limit (sol.shortCircuits)
     p._r = p._v = ctx.add({ type: 'V', p: ctx.n(p, plus), n: ctx.n(p, minus), V, rInt: Rint, iShort: window.SHORT_LIMIT_A || 1 });
   }
+  /* Type-C / Micro-USB / USB-B glyph. Click target is .usbport. dir 'up' cable leaves the top edge, 'down' the bottom. */
+  function usbGlyph(kind, x, y, plugged, dir) {
+    const up = dir !== 'down', name = kind === 'c' ? 'Type-C' : kind === 'b' ? 'USB' : 'Micro';
+    const cable = plugged ? `<path d="M${x} ${y + (up ? -7 : 7)} v${up ? -16 : 16}" stroke="#141414" stroke-width="5" stroke-linecap="round"/>` : '';
+    const body = kind === 'c'
+      ? `<rect x="${x - 13}" y="${y - 6}" width="26" height="12" rx="6" fill="#eef1f6" stroke="#111" stroke-width="1.2"/><rect x="${x - 8}" y="${y - 2}" width="16" height="4" rx="1" fill="#111"/>`
+      : kind === 'b'
+        ? `<rect x="${x - 12}" y="${y - 8}" width="24" height="16" rx="2" fill="#d7dbe3" stroke="#111"/><rect x="${x - 8}" y="${y - 3}" width="16" height="7" fill="#111"/>`
+        : `<path d="M${x - 13} ${y - 5} h20 l6 5 l-6 5 h-20 z" fill="#e7ebf2" stroke="#111"/><rect x="${x - 9}" y="${y - 1.6}" width="14" height="3.2" fill="#111"/>`;
+    return `<g class="usbport">${body}${cable}<circle cx="${x + 18}" cy="${y}" r="2.4" fill="${plugged ? '#3e3' : '#3a1010'}"/><text x="${x}" y="${y + 15}" text-anchor="middle" class="tiny" fill="#111">${name}</text><rect class="usbport" x="${x - 16}" y="${y - 12}" width="40" height="24" fill="transparent"/></g>`;
+  }
+  /* Real-power plan. Rails we sourced ourselves last frame are ignored, so a board does not keep itself alive. */
+  function powerPlan(p, spec, rails) {
+    const r = rails || (p._pwr && p._pwr.rails) || {}, sourced = new Set(p._sourced || []), src = [];
+    let hot = false, load = null;
+    if (p.usb && spec.usb) {
+      hot = true;
+      for (const s of spec.usb) src.push(s);
+      if (spec.usbI) load = { pin: spec.usb[0].pin, I: spec.usbI };
+    } else {
+      for (const inn of spec.inputs || []) {
+        if (sourced.has(inn.pin)) continue;
+        if ((+r[inn.pin] || 0) >= inn.min) {
+          hot = true;
+          for (const o of inn.out || []) src.push(o);
+          if (inn.I) load = { pin: inn.pin, I: inn.I };
+          break;
+        }
+      }
+      if (!hot) for (const d of spec.direct || []) { if (!sourced.has(d.pin) && (+r[d.pin] || 0) >= d.min) { hot = true; break; } }
+    }
+    return { hot, src, load };
+  }
+  function stampPlan(p, ctx, spec, gnd) {
+    const plan = powerPlan(p, spec);
+    p._hot = plan.hot; p._sourced = plan.src.map(s => s.pin); p._els = p._els || {}; p._load = null;
+    for (const s of plan.src) { source(p, ctx, s.pin, gnd, s.V, 0.12); p._els[s.pin] = p._r; }
+    if (plan.load) {
+      const a = ctx.n(p, plan.load.pin), b = ctx.n(p, gnd);
+      if (a != null && b != null && a !== b) p._load = { pin: plan.load.pin, el: ctx.add({ type: 'I', a, b, I: plan.load.I }) };
+    }
+    for (const [a, b] of spec.tie || []) {
+      const na = ctx.n(p, a), nb = ctx.n(p, b);
+      if (na != null && nb != null && na !== nb) ctx.add({ type: 'R', a: na, b: nb, R: 0.05 });
+    }
+    return plan.hot;
+  }
+  function noteRails(p, ctx, spec) {
+    if (!ctx || !ctx.portPower || !spec) return !!p._hot;
+    const rails = {}, g = spec.gnd || 'GND';
+    for (const pin of spec.sense) {
+      const vp = ctx.v(p, pin), vg = ctx.v(p, g);
+      rails[pin] = (Number.isFinite(vp) ? vp : 0) - (Number.isFinite(vg) ? vg : 0);
+    }
+    const next = powerPlan(p, spec, rails);
+    if (!!p._hot !== !!next.hot && ctx.dirty) ctx.dirty();
+    p._pwr = { rails, hot: next.hot };
+    return !!p._hot;
+  }
+  function applyLoad(pinI, p, sol) {
+    if (!p._load) return;
+    const i = sol.currents[p._load.el] || 0;
+    pinI[p._load.pin] = (pinI[p._load.pin] || 0) - i;
+  }
 
   function board(kind) {
     const L = kind === 'esp32' ? ESP32_L : ESP8266_L, R = kind === 'esp32' ? ESP32_R : ESP8266_R;
@@ -28,8 +92,18 @@
     const lab = id => id.replace(/^GND2$/, 'GND').replace('3V3b', '3V3');
     const pins = [...L.map((id, i) => ({ id, x: -80, y: -H / 2 + 30 + i * 20, label: lab(id), hint: hintOf(id) })), ...R.map((id, i) => ({ id, x: 80, y: -H / 2 + 30 + i * 20, label: lab(id), hint: hintOf(id) }))];
     const gpioOf = id => kind === 'esp32' ? (/^\d+$/.test(id) ? +id : null) : (NODEMCU[id] ?? null);
+    const spec = kind === 'esp32'
+      ? { gnd: 'GND', sense: ['VIN', '3V3'], usbI: 0.04, deadMsg: 'ESP32 без питания: нажми Micro-USB или подай ≥ 4,4 В на VIN либо ≥ 2,9 В на 3V3',
+          usb: [{ pin: 'VIN', V: 5 }, { pin: '3V3', V: 3.3 }],
+          inputs: [{ pin: 'VIN', min: 4.4, I: 0.06, out: [{ pin: '3V3', V: 3.3 }] }],
+          direct: [{ pin: '3V3', min: 2.9 }] }
+      : { gnd: 'GND', sense: ['VIN', '3V3', '3V3b'], usbI: 0.04, tie: [['3V3', '3V3b']], deadMsg: 'ESP8266 без питания: нажми Micro-USB или подай ≥ 4,4 В на VIN либо ≥ 2,9 В на 3V3',
+          usb: [{ pin: 'VIN', V: 5 }, { pin: '3V3', V: 3.3 }, { pin: '3V3b', V: 3.3 }],
+          inputs: [{ pin: 'VIN', min: 4.4, I: 0.06, out: [{ pin: '3V3', V: 3.3 }, { pin: '3V3b', V: 3.3 }] }],
+          direct: [{ pin: '3V3', min: 2.9 }] };
     return {
       name: kind === 'esp32' ? 'ESP32 DevKit' : 'ESP8266 NodeMCU', group: 'Платы', mcu: kind, vio: 3.3, builtin: 2, pins, gpioOf,
+      usbKind: 'micro', usbName: 'Micro-USB', power: spec,
       ground: id => id.startsWith('GND'),
       box: kind === 'esp32' ? [-84, -H / 2 - 6, 168, H + 12] : [-84, -H / 2 - 6, 168, H + 12],
       draw: (p, st) => { const T = -H / 2, B = H / 2, e32 = kind === 'esp32';
@@ -45,26 +119,42 @@
         ${pins.map(q => `<rect x="${q.x < 0 ? -78 : 70}" y="${q.y - 4}" width="8" height="8" fill="#0c0c0c" stroke="#444"/><circle cx="${q.x < 0 ? -74 : 74}" cy="${q.y}" r="2.2" fill="#d4b13a"/><line x1="${q.x}" y1="${q.y}" x2="${q.x < 0 ? -78 : 78}" y2="${q.y}" class="lead"/><text x="${q.x < 0 ? -66 : 66}" y="${q.y + 3.5}" class="plabel blbl" text-anchor="${q.x < 0 ? 'start' : 'end'}">${q.label}</text>`).join('')}
         <rect x="-38" y="${B - 30}" width="14" height="10" rx="2" fill="#bbb" stroke="#777"/><circle cx="-31" cy="${B - 25}" r="3" fill="#333"/><text x="-31" y="${B - 34}" class="tiny lightt">EN</text>
         <rect x="24" y="${B - 30}" width="14" height="10" rx="2" fill="#bbb" stroke="#777"/><circle cx="31" cy="${B - 25}" r="3" fill="#333"/><text x="31" y="${B - 34}" class="tiny lightt">BOOT</text>
-        <rect x="-14" y="${B - 16}" width="28" height="18" rx="2" fill="#c0c4c9" stroke="#80868d"/><rect x="-9" y="${B - 10}" width="18" height="6" rx="1" fill="#555"/>
-        <rect x="-16" y="${B - 40}" width="8" height="5" rx="1" fill="#d22"/><text x="-12" y="${B - 44}" class="tiny lightt">PWR</text>
+        ${usbGlyph('micro', 0, B - 12, !!p.usb, 'down')}
+        <rect x="-16" y="${B - 40}" width="8" height="5" rx="1" fill="${st.powered === false ? '#400' : '#d22'}"/><text x="-12" y="${B - 44}" class="tiny lightt">PWR</text>
         ${st.led2 && e32 ? `<circle cx="12" cy="${B - 38}" r="9" fill="#3af" opacity=".5" filter="url(#glow)"/>` : ''}<rect x="8" y="${B - 40}" width="8" height="5" rx="1" fill="${st.led2 && e32 ? '#6cf' : '#1a3550'}"/><text x="12" y="${B - 44}" class="tiny lightt">IO2</text>`; },
       stamp(p, ctx) {
-        p._els = {};
-        for (const q of pins) {
-          if (q.id.startsWith('3V3')) { source(p, ctx, q.id, 'GND', 3.3, 0.1); p._els[q.id] = p._r; }
-          else if (q.id === 'VIN') { source(p, ctx, 'VIN', 'GND', 5, 0.1); p._els[q.id] = p._r; }
-          else { const g = gpioOf(q.id); if (g == null) continue;
-            const s = ctx.gpio(g) || { mode: 'INPUT' };
-            if (s.mode === 'OUTPUT') { const m = ctx.node(); p._els[q.id] = ctx.add({ type: 'R', a: m, b: ctx.n(p, q.id), R: 25 }); ctx.add({ type: 'V', p: m, n: 0, V: 3.3 * (s.val || 0) }); }
-            else if (s.mode === 'INPUT_PULLUP') { const m = ctx.node(); p._els[q.id] = ctx.add({ type: 'R', a: m, b: ctx.n(p, q.id), R: 45000 }); ctx.add({ type: 'V', p: m, n: 0, V: 3.3 }); }
+        p._els = {}; p._load = null;
+        const port = !!(ctx && ctx.portPower);
+        const drive = q => { const g = gpioOf(q.id); if (g == null) return;
+          const s = ctx.gpio(g) || { mode: 'INPUT' };
+          if (s.mode === 'OUTPUT') { const m = ctx.node(); p._els[q.id] = ctx.add({ type: 'R', a: m, b: ctx.n(p, q.id), R: 25 }); ctx.add({ type: 'V', p: m, n: 0, V: 3.3 * (s.val || 0) }); }
+          else if (s.mode === 'INPUT_PULLUP') { const m = ctx.node(); p._els[q.id] = ctx.add({ type: 'R', a: m, b: ctx.n(p, q.id), R: 45000 }); ctx.add({ type: 'V', p: m, n: 0, V: 3.3 }); } };
+        if (!port) {
+          p._hot = true; p._sourced = null; p._pwr = null;
+          for (const q of pins) {
+            if (q.id.startsWith('3V3')) { source(p, ctx, q.id, 'GND', 3.3, 0.1); p._els[q.id] = p._r; }
+            else if (q.id === 'VIN') { source(p, ctx, 'VIN', 'GND', 5, 0.1); p._els[q.id] = p._r; }
+            else drive(q);
           }
+          return;
         }
+        const hot = stampPlan(p, ctx, spec, 'GND');
+        if (!hot) return;
+        for (const q of pins) { if (q.id.startsWith('3V3') || q.id === 'VIN') continue; drive(q); }
       },
       measure(p, sol, ctx) {
-        const pinI = {}; let P = 0;
-        for (const id in p._els) { const i = sol.currents[p._els[id]]; pinI[id] = i; P += Math.abs(ctx.v(p, id) * i); }
-        const srcI = Math.max(0, ...Object.keys(pinI).filter(k => /^(3V3|VIN)/.test(k)).map(k => Math.abs(pinI[k])));
-        return { U: 3.3, I: Object.values(pinI).reduce((a, b) => a + Math.max(0, -b), 0), P, pinI, out: true, srcI };
+        const pinI = {}; let Pw = 0;
+        for (const id in p._els) { const i = sol.currents[p._els[id]] || 0; pinI[id] = i; Pw += Math.abs((ctx.v(p, id) || 0) * i); }
+        applyLoad(pinI, p, sol);
+        const port = !!(ctx && ctx.portPower);
+        const alive = port ? noteRails(p, ctx, spec) : true;
+        let srcI = 0; for (const k in pinI) if (/^(3V3|VIN)/.test(k)) srcI = Math.max(srcI, Math.abs(pinI[k]));
+        const out = { U: alive ? 3.3 : 0, I: alive ? Object.values(pinI).reduce((a, b) => a + Math.max(0, -b), 0) : 0, P: Pw, pinI, out: alive, srcI, powered: !!alive };
+        if (port) out.extra = { 'Питание': alive ? (p.usb ? 'USB подключен' : 'от схемы') : 'нет' };
+        return out;
+      },
+      check(p, m, ctx) {
+        if (ctx && ctx.portPower && m && m.powered === false) return { level: 'warn', msg: spec.deadMsg };
       }
     };
   }
@@ -192,6 +282,6 @@
       return full;
     });
   }
-  window.PartsLib = { two, lead, r2, meas2, source, bands, LED_COLORS, stripPinTexts };
+  window.PartsLib = { two, lead, r2, meas2, source, bands, LED_COLORS, stripPinTexts, usbGlyph, powerPlan, stampPlan, noteRails, applyLoad };
   window.PARTS = PARTS; window.resistorBands = bands; window.LED_COLORS = LED_COLORS; window.fmtUnit = fmtUnit; window.fmtNum = fmtNum; window.e12up = e12up; window.stripPinTexts = stripPinTexts;
 })();
