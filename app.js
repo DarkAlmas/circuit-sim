@@ -13,7 +13,7 @@
   function clone(o) { return JSON.parse(JSON.stringify(o)); }
   function syncHist() { const u = $('#undo'), r = $('#redo'); if (u) u.disabled = !hist.length; if (r) r.disabled = !redoSt.length; }
   function autosave() { const j = JSON.stringify(strip(proj)); if (lastJ !== null && j !== lastJ) { hist.push(lastJ); if (hist.length > 100) hist.shift(); redoSt.length = 0; } lastJ = j; localStorage.setItem(AUTO, j); syncHist(); }
-  function applySnap(j) { lastJ = j; proj = sanitizeProject(JSON.parse(j)); proj.code = proj.code || $('#code').value; sel = null; prevV = null; localStorage.setItem(AUTO, j); render(); props(); calc(); syncHist(); if (window.World3D) World3D.onOpen(); }
+  function applySnap(j) { lastJ = j; proj = sanitizeProject(JSON.parse(j)); codeTarget = null; codeForSig = ''; const codeEl = $('#code'); if (codeEl) codeEl.value = proj.code || ''; sel = null; prevV = null; localStorage.setItem(AUTO, j); render(); props(); calc(); syncHist(); if (window.World3D) World3D.onOpen(); }
   function undo() { if (!hist.length) return; const cur = lastJ != null ? lastJ : JSON.stringify(strip(proj)); redoSt.push(cur); if (redoSt.length > 100) redoSt.shift(); applySnap(hist.pop()); }
   function redo() { if (!redoSt.length) return; const cur = lastJ != null ? lastJ : JSON.stringify(strip(proj)); hist.push(cur); if (hist.length > 100) hist.shift(); applySnap(redoSt.pop()); }
   const locked = () => running && !shorts.length;
@@ -543,7 +543,7 @@
   /* sketch worker lifecycle: a crashed/hung worker (exception, OOM, infinite loop) is torn down, a fresh idle
    * worker is created right away, the console explains what happened, and the next Run uses the fresh worker. */
   let spare = null, crashes = 0;
-  const newWorker = () => new Worker('worker.js?v=14.6.5');
+  const newWorker = () => new Worker('worker.js?v=14.6.6');
   function takeWorker() { const w = spare || newWorker(); spare = null; return w; }
   function crash(msg) { if (!worker) return; worker.onmessage = worker.onerror = null; try { worker.terminate(); } catch (e) {} worker = null; gpio = {}; prevV = null; crashes++;
     try { spare = newWorker(); } catch (e) { spare = null; }

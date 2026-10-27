@@ -305,6 +305,9 @@ body.pm .w3hint{display:none}
 .amsg.user{background:#1a2436;border-color:#3a4a6e}
 .amsg.err{border-color:#a33;color:#ffb4b4}
 .amsg .apply{margin-top:8px;background:#1f6b3a;border-color:#2c8a4c}
+#assistApply{flex:1;background:#1f6b3a;border-color:#2c8a4c;color:#fff}
+#assistApply:disabled{background:#2c3344;border-color:#3d465c;color:#b7c2d4;opacity:1}
+#assistCompose .row{align-items:stretch}
 #assistInput{width:100%;min-height:72px;resize:vertical}
 #assistInput:disabled{opacity:.45;cursor:not-allowed}
 #assistSend{flex:1;background:#1f6b3a;border-color:#2c8a4c;color:#fff}
@@ -331,7 +334,7 @@ body.pm.assist-open #right{height:var(--h-right,78vh)}
   /* Empty history must not keep a 120px flex base, or the API fields collapse under the composer. */
   body.assist-open #assistLog{flex:0 0 auto;min-height:0;max-height:140px}
 }
-/* v14.6.5: phone «Помощник». Mode is a short segment, settings use the sheet scroll, opted-out send is grey. */
+/* v14.6.6: phone «Помощник». Mode is a short segment, settings use the sheet scroll, opted-out send is grey. */
 #assistMode{flex:0 0 auto;width:100%;align-items:stretch}
 #assistMode button{flex:1 1 0;height:36px;min-height:36px;max-height:36px;padding:4px 10px}
 #assistSend:disabled{background:#2c3344;border-color:#3d465c;color:#b7c2d4;opacity:1}
@@ -343,7 +346,9 @@ body.pm.assist-open #right{height:var(--h-right,78vh)}
   #assistMode button{height:100%;min-height:0;max-height:none;padding:0 12px;line-height:1.2}
   #assistPresets{flex-direction:column;flex-wrap:nowrap;align-items:stretch}
   #assistPresets button{flex:0 0 auto;width:100%;min-height:44px;white-space:normal;text-align:center}
-  #assistSend,#assistForget,#sideAssistPane .prop input{min-height:44px}
+  #assistCompose .row{flex-direction:column}
+  #assistApply,#assistSend{width:100%;flex:0 0 auto}
+  #assistSend,#assistApply,#assistForget,#sideAssistPane .prop input{min-height:44px}
   #sideAssistPane .prop input{font-size:16px}
   #sideAssistPane .prop{min-width:0}
   /* The sheet is the only scroller. A nested flex child was collapsing the API fields to ~25px. */

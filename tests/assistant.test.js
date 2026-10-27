@@ -14,12 +14,12 @@ test('page CSP stays connect-src none and scripts are versioned', () => {
   assert.ok(m, 'csp meta');
   assert.ok(m[1].includes("connect-src 'none'"));
   assert.ok(!/connect-src\s+https?:/.test(m[1]));
-  assert.ok(html.includes('assistant-core.js?v=14.6.5') && html.includes('assistant.js?v=14.6.5'));
-  assert.ok(html.includes('style.css?v=14.6.5'));
-  assert.equal(A.VERSION, '14.6.5');
-  assert.ok(read('sw-assistant.js').includes('assistant-core.js?v=14.6.5'));
-  assert.ok(read('assistant-net.js').includes("VERSION = '14.6.5'"));
-  assert.ok(read('app.js').includes("new Worker('worker.js?v=14.6.5')"));
+  assert.ok(html.includes('assistant-core.js?v=14.6.6') && html.includes('assistant.js?v=14.6.6'));
+  assert.ok(html.includes('style.css?v=14.6.6'));
+  assert.equal(A.VERSION, '14.6.6');
+  assert.ok(read('sw-assistant.js').includes('assistant-core.js?v=14.6.6'));
+  assert.ok(read('assistant-net.js').includes("VERSION = '14.6.6'"));
+  assert.ok(read('app.js').includes("new Worker('worker.js?v=14.6.6')"));
 });
 
 test('assistant sources do not eval, inject HTML, or call a CDN', () => {
@@ -122,7 +122,7 @@ test('frame CSP names only the chosen origin', () => {
   assert.ok(doc.csp.includes('connect-src https://api.openai.com;'));
   assert.ok(doc.csp.includes("frame-ancestors 'self'"));
   assert.ok(!/unsafe-inline|unsafe-eval|\*/.test(doc.csp));
-  assert.ok(doc.html.includes('assistant-net.js?v=14.6.5'));
+  assert.ok(doc.html.includes('assistant-net.js?v=14.6.6'));
   assert.ok(!doc.html.includes('/v1'));
   assert.equal(A.frameDocument('https://evil.com"; script-src \'unsafe-inline\''), null);
   assert.equal(A.frameDocument('http://8.8.8.8'), null);
@@ -166,8 +166,23 @@ test('prompt carries context and never the API key', () => {
   assert.ok(blob.includes('резистор') === false);
   assert.ok(blob.includes('resistor(a,b)'));
   assert.ok(blob.includes('Режим: код'));
+  assert.ok(blob.includes('Нужен только полный sketch'));
   assert.ok(blob.includes('мигни ••••'));
   assert.equal(req.body.stream, false);
+  assert.equal(req.body.max_tokens, 8192);
+  const schemaReq = A.buildRequest({
+    settings: { enabled: true, baseUrl: 'https://api.openai.com/v1', model: 'gpt-4o-mini' },
+    key: 'sk-testkey',
+    mode: 'schema',
+    catalog: 'resistor(a,b)',
+    question: 'мигни'
+  });
+  const sys = schemaReq.body.messages[0].content;
+  assert.ok(sys.includes('заменяет холст'));
+  assert.ok(sys.includes('"sketch"'));
+  assert.ok(sys.includes('полный список'));
+  assert.ok(schemaReq.body.messages[schemaReq.body.messages.length - 1].content.includes('Применить заменит холст'));
+  assert.ok(!JSON.stringify(schemaReq.body).includes('резистор'));
   assert.throws(() => A.buildRequest({ settings: { enabled: true, baseUrl: 'https://api.openai.com/v1' }, key: 'sk-testkey', mode: 'nope', question: 'x' }));
 });
 
@@ -189,8 +204,13 @@ test('parse keeps Russian text and a fenced proposal', () => {
   const code = A.parseReply('Вот скетч.\n```\n{"sketch":"void setup(){}\\nvoid loop(){}"}\n```', 'code');
   assert.equal(code.text, 'Вот скетч.');
   assert.ok(code.proposal.sketch.includes('void setup'));
-  const wrong = A.parseReply('```json\n{"sketch":"void setup(){}"}\n```', 'schema');
-  assert.equal(wrong.proposal, null);
+  const schemaSketch = A.parseReply('```json\n{"sketch":"void setup(){}"}\n```', 'schema');
+  assert.equal(schemaSketch.proposal.mode, 'schema');
+  assert.ok(schemaSketch.proposal.sketch.includes('void setup'));
+  assert.equal(schemaSketch.proposal.parts.length, 0);
+  const prefixed = A.parseReply('json\n{"sketch":"#define LED1 4\\nvoid setup(){ pinMode(LED1, OUTPUT); }\\nvoid loop(){}"}', 'schema');
+  assert.ok(prefixed.proposal && prefixed.proposal.sketch.includes('pinMode(LED1'));
+  assert.ok(!prefixed.text.includes('sketch'));
   const bare = A.parseReply('{"sketch":"void loop(){}"}', 'code');
   assert.equal(bare.text, '');
   assert.equal(bare.proposal.sketch, 'void loop(){}');
@@ -202,25 +222,17 @@ test('parse keeps Russian text and a fenced proposal', () => {
   assert.ok(!sketch.includes('\0'));
 });
 
-test('apply keeps the circuit, whitelists parts, and does not run the sketch', () => {
+test('apply replaces the canvas, whitelists parts, and writes a schema sketch', () => {
   const project = {
     name: 'лампа', kind: 'analog', code: 'void setup(){ /* keep */ }',
     parts: [
       { id: 'R1', type: 'resistor', x: 10, y: 20, rot: 0, props: { R: 220, Pmax: 0.25 } },
       { id: 'D1', type: 'led', x: 80, y: 20, rot: 0, props: { color: 'красный', Vf: 1.8, Imax: 0.02 } }
     ],
-    wires: []
+    wires: [{ id: 'wOld', a: { part: 'R1', pin: 'a' }, b: { part: 'D1', pin: 'a' } }]
   };
   const snapshot = JSON.parse(JSON.stringify(project));
-  const linked = A.mergePatch(project, { parts: [], wires: [{ id: 'w9', a: { part: 'R1', pin: 'a' }, b: { part: 'D1', pin: 'a' }, evil: true }] });
-  assert.deepEqual(project, snapshot);
-  assert.deepEqual(linked.addedParts, []);
-  assert.deepEqual(linked.addedWires, ['w9']);
-  assert.equal(linked.project.code, project.code);
-  assert.equal(linked.project.kind, 'analog');
-  assert.ok(!('evil' in linked.project.wires[0]));
-
-  const bad = A.mergePatch(project, {
+  const bad = A.replacePatch(project, {
     parts: [
       { id: 'R1', type: 'resistor', props: { R: 1000, evil: '<script>', onclick: 'alert(1)' }, onclick: 'alert(1)' },
       { id: 'ZZ', type: '<script>', props: {} },
@@ -230,39 +242,95 @@ test('apply keeps the circuit, whitelists parts, and does not run the sketch', (
       { id: 'w1', a: { part: 'R1', pin: 'a' }, b: { part: 'D2', pin: 'a' }, hack: 1 },
       { id: 'wBad', a: { part: 'R1', pin: 'nope' }, b: { part: 'D2', pin: 'a' } }
     ],
-    sketch: 'ignored in schema mode',
     code: 'pwned'
   });
   assert.deepEqual(project, snapshot);
-  assert.ok(bad.addedParts.includes('D2'));
-  assert.ok(!bad.addedParts.includes('R1'));
-  assert.ok(!bad.project.parts.some(p => p.type === '<script>' || p.id === 'ZZ'));
-  const neu = bad.project.parts.find(p => p.id !== 'R1' && p.type === 'resistor');
-  assert.ok(neu && neu.id !== 'R1');
+  assert.equal(bad.replaced, true);
+  assert.deepEqual(bad.project.parts.map(p => p.id).sort(), ['D2', 'R1']);
+  assert.ok(!bad.project.parts.some(p => p.id === 'D1' || p.type === '<script>' || p.id === 'ZZ'));
+  assert.ok(!bad.project.wires.some(w => w.id === 'wOld'));
+  const neu = bad.project.parts.find(p => p.id === 'R1');
   assert.equal(neu.props.R, 1000);
   assert.deepEqual(Object.keys(neu.props).sort(), ['Pmax', 'R']);
   assert.deepEqual(Object.keys(neu).sort(), ['id', 'props', 'rot', 'type', 'x', 'y']);
-  assert.equal(neu.x, 240);
+  assert.equal(neu.x, 80);
   const led = bad.project.parts.find(p => p.id === 'D2');
   assert.equal(led.props.color, 'синий');
   assert.equal(led.props.Vf, 10);
   assert.equal(led.x, 300);
   assert.ok(!('onclick' in led) && !('nope' in led.props));
-  const old = bad.project.parts.find(p => p.id === 'R1');
-  assert.equal(old.props.R, 220);
   assert.equal(bad.project.code, 'void setup(){ /* keep */ }');
-  assert.ok(bad.addedWires.includes('w1'));
-  assert.ok(!bad.addedWires.includes('wBad'));
+  assert.equal(bad.project.kind, 'analog');
+  assert.equal(bad.project.name, 'лампа');
+  assert.deepEqual(bad.wireIds, ['w1']);
   const wire = bad.project.wires.find(w => w.id === 'w1');
-  assert.equal(wire.a.part, neu.id);
+  assert.equal(wire.a.part, 'R1');
   assert.equal(wire.b.part, 'D2');
   assert.ok(!('hack' in wire));
   const dumped = JSON.stringify(bad.project);
   assert.ok(!dumped.includes('<script>') && !dumped.includes('onclick') && !dumped.includes('pwned') && !dumped.includes('evil'));
   assert.equal({}.polluted, undefined);
 
+  const same = A.replacePatch(project, {
+    parts: [
+      { id: 'U1', type: 'esp32', x: 0, y: 0 },
+      { id: 'R1', type: 'resistor', x: 180, y: 40, props: { R: 470 } },
+      { id: 'D1', type: 'led', x: 300, y: 40, props: { color: 'красный' } }
+    ],
+    wires: [{ id: 'w1', a: { part: 'U1', pin: 'GPIO2' }, b: { part: 'R1', pin: 'a' } }],
+    nets: [{ pins: ['R1.b', 'D1.a'] }, { pins: [{ part: 'D1', pin: 'K' }, { part: 'U1', pin: 'GND' }] }],
+    sketch: 'void setup(){ pinMode(2, OUTPUT); }\nvoid loop(){}',
+    sketches: { U9: 'ignored', U1: 'void setup(){ pinMode(2, OUTPUT); }\nvoid loop(){ digitalWrite(2, HIGH); }' }
+  });
+  assert.equal(same.project.parts.length, 3);
+  assert.equal(same.project.parts.filter(p => p.id === 'R1').length, 1);
+  assert.equal(same.project.parts.find(p => p.id === 'R1').props.R, 470);
+  assert.equal(same.project.wires.length, 3);
+  assert.equal(same.project.wires[0].a.pin, '2');
+  assert.ok(same.project.code.includes('digitalWrite'));
+  assert.equal(same.sketchApplied, true);
+  assert.equal(same.editorBoard, 'U1');
+  assert.ok(!same.project.parts.some(p => p.id === 'D1' && p.x === 80));
+
   const poisoned = JSON.parse('{"parts":[{"id":"R8","type":"resistor","props":{"R":10}}],"__proto__":{"polluted":true}}');
-  A.mergePatch(project, poisoned);
+  A.replacePatch(project, poisoned);
   assert.equal(Object.prototype.polluted, undefined);
   assert.equal({}.polluted, undefined);
+});
+
+test('replace keeps a long wire list and repairs a truncated schema', () => {
+  const parts = [];
+  const wires = [];
+  for (let i = 1; i <= 91; i++) parts.push({ id: 'R' + i, type: 'resistor', x: (i % 10) * 40, y: Math.floor(i / 10) * 40, props: { R: 220 } });
+  for (let i = 1; i <= 90; i++) wires.push({ id: 'w' + i, a: { part: 'R' + i, pin: 'b' }, b: { part: 'R' + (i + 1), pin: 'a' } });
+  const out = A.replacePatch({ parts: [{ id: 'OLD', type: 'led', x: 0, y: 0 }], wires: [{ id: 'wOld', a: { part: 'OLD', pin: 'a' }, b: { part: 'OLD', pin: 'b' } }], code: 'keep' }, { parts, wires });
+  assert.equal(out.project.parts.length, 91);
+  assert.equal(out.project.wires.length, 90);
+  assert.ok(!out.project.parts.some(p => p.id === 'OLD'));
+  assert.ok(!out.notes.some(n => /отброшен/.test(n)));
+
+  const truncated = '{"parts":[{"id":"R1","type":"resistor","x":0,"y":0,"props":{"R":220}},{"id":"R2","type":"resistor","x":40,"y":0,"props":{"R":220}},{"id":"R3","type":"resistor","x":80,"y":0,"props":{"R":220}}],"wires":[{"id":"w1","a":{"part":"R1","pin":"b"},"b":{"part":"R2","pin":"a"}},{"id":"w2","a":{"part":"R2","pin":"b"},"b":{"part":"R3","pin":"a"}},{"id":"w3","a":{"part":"R3","pin":';
+  const parsed = A.parseReply('Схема большая.\n```json\n' + truncated, 'schema');
+  assert.ok(parsed.proposal);
+  assert.equal(parsed.proposal.repaired, true);
+  assert.equal(parsed.proposal.parts.length, 3);
+  assert.equal(parsed.proposal.wires.filter(w => w && w.b && w.b.part).length, 2);
+  const fixed = A.replacePatch({ parts: [{ id: 'OLD', type: 'led', x: 0, y: 0 }], wires: [], code: 'keep' }, parsed.proposal);
+  assert.deepEqual(fixed.project.parts.map(p => p.id), ['R1', 'R2', 'R3']);
+  assert.equal(fixed.project.wires.length, 2);
+  assert.equal(fixed.project.code, 'keep');
+});
+
+test('apply control sits with Send and schema copy says replace', () => {
+  const html = read('index.html');
+  const ui = read('assistant.js');
+  const css = read('style.css');
+  assert.ok(html.includes('id="assistApply"'));
+  assert.ok(html.indexOf('id="assistApply"') < html.indexOf('id="assistSend"'));
+  assert.ok(html.includes('заменяет холст'));
+  assert.ok(!html.includes('добавляет детали'));
+  assert.ok(ui.includes('assistApply') && ui.includes('replacePatch') && !ui.includes('mergePatch'));
+  assert.ok(ui.includes('syncApply'));
+  assert.ok(css.includes('#assistApply'));
+  assert.ok(css.includes('#assistCompose .row{flex-direction:column}'));
 });

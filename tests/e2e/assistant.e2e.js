@@ -1,4 +1,4 @@
-// Assistant panel: offline by default, Apply does not eval, opt-in CSP is one origin. ?v=14.6.5.
+// Assistant panel: offline by default, Apply does not eval, opt-in CSP is one origin. ?v=14.6.6.
 const { chromium } = require('playwright-core');
 const assert = require('assert');
 const URL = process.argv[2] || 'http://127.0.0.1:8765/';
@@ -25,7 +25,7 @@ const URL = process.argv[2] || 'http://127.0.0.1:8765/';
 
   const meta = await page.evaluate(() => document.querySelector('meta[http-equiv="Content-Security-Policy"]').content);
   ok(meta.includes("connect-src 'none'") && !/unsafe-inline|unsafe-eval/.test(meta), 'main CSP still connect-src none');
-  ok(await page.evaluate(() => [...document.scripts].filter(s => s.src).every(s => /\?v=14\.6\.5$/.test(s.src))), 'scripts ?v=14.6.5');
+  ok(await page.evaluate(() => [...document.scripts].filter(s => s.src).every(s => /\?v=14\.6\.6$/.test(s.src))), 'scripts ?v=14.6.6');
   await page.evaluate(() => fetch('https://example.com/leak').catch(() => {}));
   await page.waitForTimeout(200);
   ok(csp.some(t => /example\.com/.test(t)), 'main page fetch is refused by CSP: ' + csp.join(' | '));
@@ -103,11 +103,14 @@ const URL = process.argv[2] || 'http://127.0.0.1:8765/';
   const applies = await page.$$('#assistLog button.apply:not([disabled])');
   await applies[applies.length - 1].click();
   await page.waitForTimeout(200);
-  const added = await page.evaluate(() => __sim.proj.parts.filter(p => !window.__before.includes(p.id)).map(p => ({ id: p.id, type: p.type, keys: Object.keys(p).sort(), props: p.props, propKeys: Object.keys(p.props || {}).sort() })));
-  ok(added.length === 1 && added[0].type === 'resistor' && added[0].props.R === 470, 'one whitelisted resistor was added ' + JSON.stringify(added));
-  ok(added[0].propKeys.join() === 'Pmax,R' && added[0].keys.join() === 'id,props,rot,type,x,y', 'extra keys dropped');
-  ok(await page.evaluate(() => !__sim.proj.parts.some(p => p.type === '<script>' || p.id === 'ZZ') && !__sim.proj.wires.some(w => w.id === 'wH')), 'unknown part and dangling wire dropped');
-  ok((await page.inputValue('#code')).includes('alert(1)'), 'schematic apply keeps the editor sketch');
+  const replaced = await page.evaluate(() => __sim.proj.parts.map(p => ({ id: p.id, type: p.type, keys: Object.keys(p).sort(), props: p.props, propKeys: Object.keys(p.props || {}).sort() })));
+  ok(replaced.length === 1 && replaced[0].type === 'resistor' && replaced[0].props.R === 470, 'Apply replaces the canvas with one whitelisted resistor ' + JSON.stringify(replaced));
+  ok(replaced[0].propKeys.join() === 'Pmax,R' && replaced[0].keys.join() === 'id,props,rot,type,x,y', 'extra keys dropped');
+  ok(await page.evaluate(() => !__sim.proj.parts.some(p => p.id === 'U1' || p.id === 'D1' || p.type === '<script>' || p.id === 'ZZ') && !__sim.proj.wires.some(w => w.id === 'wH' || w.id === 'w1')), 'old circuit is gone and junk is dropped');
+  ok((await page.inputValue('#code')).includes('alert(1)'), 'schematic apply without sketch keeps the editor sketch');
+  ok(await page.evaluate(() => !document.querySelector('#assistApply').hidden && document.querySelector('#assistApply').textContent === 'Применено'), 'sticky Apply mirrors the result');
+  await page.evaluate(() => __sim.undo());
+  ok(await page.evaluate(() => __sim.proj.parts.some(p => p.id === 'U1') && __sim.proj.parts.some(p => p.id === 'D1') && document.querySelector('#code').value.includes('alert(1)')), 'undo restores the canvas and the sketch');
   ok(await page.evaluate(() => !__sim.running), 'Apply does not start the simulation');
   ok(dialogs.length === 0, 'no dialogs after apply');
 
@@ -232,6 +235,28 @@ const URL = process.argv[2] || 'http://127.0.0.1:8765/';
   ok(await phone.evaluate(() => document.querySelector('#assistKeyRow').hidden && Assistant.settings.baseUrl === 'https://circuit-sim-ai-proxy.vercel.app/v1' && Assistant.settings.model === 'openai/gpt-oss-20b'), 'phone Groq stays the keyless proxy');
   await phone.fill('#assistInput', 'привет');
   ok(await phone.inputValue('#assistInput') === 'привет', 'phone chat accepts text after opt-in');
+  await phone.evaluate(() => {
+    Assistant.presentReply('schema', 'json\n{"sketch":"#define LED1 4\\nvoid setup(){ pinMode(LED1, OUTPUT); }\\nvoid loop(){ digitalWrite(LED1, HIGH); delay(500); digitalWrite(LED1, LOW); delay(500); }"}');
+  });
+  await phone.evaluate(() => { const r = document.querySelector('#right'); r.scrollTop = r.scrollHeight; });
+  const phoneApply = await phone.evaluate(() => {
+    const a = document.querySelector('#assistApply');
+    const s = document.querySelector('#assistSend');
+    const right = document.querySelector('#right').getBoundingClientRect();
+    const ar = a.getBoundingClientRect();
+    const sr = s.getBoundingClientRect();
+    return {
+      text: a.textContent,
+      hidden: a.hidden,
+      h: Math.round(ar.height),
+      w: Math.round(ar.width),
+      above: ar.bottom <= sr.top + 2,
+      inSheet: ar.top >= right.top - 1 && sr.bottom <= right.bottom + 2 && ar.height >= 44
+    };
+  });
+  ok(!phoneApply.hidden && phoneApply.text === 'Применить' && phoneApply.above && phoneApply.inSheet && phoneApply.w >= 200, 'phone Apply is above Send ' + JSON.stringify(phoneApply));
+  await phone.click('#assistApply');
+  ok(await phone.evaluate(() => document.querySelector('#code').value.includes('pinMode(LED1') && __sim.proj.parts.some(p => p.id === 'U1')), 'phone Apply writes the sketch and does not wipe the canvas');
   ok(phoneErr.length === 0, 'no phone page errors: ' + phoneErr.join(' | '));
   console.log('assistant e2e OK');
   await browser.close();
