@@ -222,7 +222,8 @@ body.pm #mbar #undo,body.pm #mbar #redo{flex:0 0 44px;padding:0;font-size:20px}
 @media (max-width:899px){
   #simSettings{align-items:flex-end}
   #simSettings .sbox{width:100%;max-width:none;border-radius:16px 16px 0 0;padding-bottom:calc(16px + env(safe-area-inset-bottom))}
-  .seg{flex:1 1 100%}
+  /* Only the settings rows grow. #assistMode is also .seg; flex-basis 100% there ate the phone sheet. */
+  .srow .seg{flex:1 1 100%}
   .seg button{flex:1;min-height:44px}
   .setsw{width:64px;height:36px}
   .setsw::after{width:28px;height:28px;top:3px}
@@ -325,4 +326,36 @@ body.assist-open #assistLog{flex:0 1 120px;min-height:0;max-height:140px}
 body.assist-open #assistEmpty{flex:0 0 auto}
 body.assist-open #assistCompose{flex:0 0 auto}
 body.pm.assist-open #right{height:var(--h-right,78vh)}
-@media (min-width:900px){body.assist-open #right{width:340px}}
+@media (min-width:900px){
+  body.assist-open #right{width:340px}
+  /* Empty history must not keep a 120px flex base, or the API fields collapse under the composer. */
+  body.assist-open #assistLog{flex:0 0 auto;min-height:0;max-height:140px}
+}
+/* v14.6.5: phone «Помощник». Mode is a short segment, settings use the sheet scroll, opted-out send is grey. */
+#assistMode{flex:0 0 auto;width:100%;align-items:stretch}
+#assistMode button{flex:1 1 0;height:36px;min-height:36px;max-height:36px;padding:4px 10px}
+#assistSend:disabled{background:#2c3344;border-color:#3d465c;color:#b7c2d4;opacity:1}
+#assistInput:disabled{background:#1a2030;color:#9aa6bb;border-color:#2c3344;opacity:1}
+#sideAssistPane .muted,#sideAssistPane .hint,#assistKeyNote{color:#d5deea}
+#sideAssistPane.keyless #assistKeyRow,#sideAssistPane.keyless #assistRememberRow,#sideAssistPane.keyless #assistForget{display:none}
+@media (max-width:899px){
+  #assistMode{box-sizing:border-box;height:40px;min-height:40px;max-height:40px}
+  #assistMode button{height:100%;min-height:0;max-height:none;padding:0 12px;line-height:1.2}
+  #assistPresets{flex-direction:column;flex-wrap:nowrap;align-items:stretch}
+  #assistPresets button{flex:0 0 auto;width:100%;min-height:44px;white-space:normal;text-align:center}
+  #assistSend,#assistForget,#sideAssistPane .prop input{min-height:44px}
+  #sideAssistPane .prop input{font-size:16px}
+  #sideAssistPane .prop{min-width:0}
+  /* The sheet is the only scroller. A nested flex child was collapsing the API fields to ~25px. */
+  body.assist-open #right{overflow-x:hidden;overflow-y:auto}
+  body.assist-open #sideAssistPane{flex:0 0 auto;overflow:visible;min-height:0}
+  body.assist-open #assistCfg{display:block;flex:none;height:auto;min-height:0;overflow:visible}
+  body.assist-open #assistCfgBody{display:block;flex:none;height:auto;min-height:0;max-height:none;overflow:visible}
+  body.assist-open #assistLog{flex:none;height:auto;min-height:0;max-height:160px;overflow:auto}
+  body.assist-open #assistEmpty{margin:4px 0;line-height:1.35}
+  body.assist-open #assistCompose{flex:none}
+  body.assist-open #assistCompose .muted{margin:2px 0;line-height:1.35}
+  body.assist-open #assistCompose .row{margin:6px 0}
+  body.assist-open #assistInput{min-height:52px}
+  #assistCfg .srow{min-height:44px}
+}
