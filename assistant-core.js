@@ -3,11 +3,13 @@
    and a sketch is only text until the existing worker transpiles it. */
 (function () {
   'use strict';
-  var VERSION = '14.6.3';
+  var VERSION = '14.6.4';
   var SETTINGS_KEY = 'circuitsim.assistant';
   var KEY_KEY = 'circuitsim.assistant.key';
   var DEFAULT_BASE = 'http://127.0.0.1:11434/v1';
   var DEFAULT_MODEL = 'llama3.2';
+  /* Free cloud path. The browser sends no key; the proxy holds its own. */
+  var GROQ_PROXY = 'https://circuit-sim-ai-proxy.vercel.app/v1';
   var HTTPS_ORIGIN = /^https:\/\/[A-Za-z0-9.-]{1,253}(?::[0-9]{1,5})?$/;
   var HTTP_ORIGIN = /^http:\/\/(?:localhost|\[::1\]|127(?:\.\d{1,3}){3}|10(?:\.\d{1,3}){3}|192\.168(?:\.\d{1,3}){2}|172\.(?:1[6-9]|2\d|3[0-1])(?:\.\d{1,3}){2})(?::[0-9]{1,5})?$/;
   var MODEL_RE = /^[A-Za-z0-9._:@+/-]{1,64}$/;
@@ -72,8 +74,10 @@
     return u.href;
   }
 
-  /* https always needs a key. http is already limited to loopback and private LAN. */
+  /* Loopback and private http need no key. The free Groq proxy needs no browser key.
+     Every other https address still does. */
   function keyRequired(input) {
+    if (normalizeBase(typeof input === 'string' ? input : '') === GROQ_PROXY) return false;
     var origin = endpointOrigin(typeof input === 'string' ? input : '');
     if (!origin) return true;
     return origin.indexOf('http://') !== 0;
@@ -82,7 +86,7 @@
   function preset(name) {
     switch (name) {
       case 'ollama': return { baseUrl: DEFAULT_BASE, model: DEFAULT_MODEL };
-      case 'groq': return { baseUrl: 'https://api.groq.com/openai/v1', model: 'llama-3.1-8b-instant' };
+      case 'groq': return { baseUrl: GROQ_PROXY, model: 'openai/gpt-oss-20b' };
       default: {
         var unknown = name;
         throw new Error('неизвестный пресет: ' + unknown);
