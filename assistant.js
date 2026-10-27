@@ -112,6 +112,15 @@
     var sendBtn = $('#assistSend');
     if (input) input.disabled = !settings.enabled;
     if (sendBtn) sendBtn.disabled = !settings.enabled || busy;
+    var keyless = !!(settings.baseUrl && !A.keyRequired(settings.baseUrl));
+    var pane = $('#sideAssistPane');
+    if (pane) pane.classList.toggle('keyless', keyless);
+    var keyRow = $('#assistKeyRow');
+    if (keyRow) keyRow.hidden = keyless;
+    var rememberRow = $('#assistRememberRow');
+    if (rememberRow) rememberRow.hidden = keyless;
+    var forget = $('#assistForget');
+    if (forget) forget.hidden = keyless;
     syncKeyNote();
     syncHint();
   }
