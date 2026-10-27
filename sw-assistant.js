@@ -1,6 +1,6 @@
 /* Serves the assistant frame with connect-src locked to the origin in ?o=.
    Every other request is left to the network. The main page CSP stays connect-src 'none'. */
-importScripts('assistant-core.js?v=14.6.0');
+importScripts('assistant-core.js?v=14.6.1');
 self.addEventListener('install', function () { self.skipWaiting(); });
 self.addEventListener('activate', function (event) { event.waitUntil(self.clients.claim()); });
 self.addEventListener('fetch', function (event) {
