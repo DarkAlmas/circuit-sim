@@ -80,7 +80,7 @@
     var local = !!(settings.baseUrl && !A.keyRequired(settings.baseUrl));
     var ollama = settings.baseUrl === A.preset('ollama').baseUrl;
     if (!settings.enabled) {
-      el.textContent = 'Запросы выключены: симулятор в сеть не ходит. Включите «Разрешить запросы к ИИ» — это согласие отправить вопрос. Для Ollama на этом компьютере ключ не нужен: в терминале ' + ollamaPull() + ', если сервер или модель ещё не готовы. Платный OpenAI и совместимые сервисы по https по-прежнему просят ключ.';
+      el.textContent = 'Запросы выключены: симулятор в сеть не ходит. Включите «Разрешить запросы к ИИ» — это согласие отправить вопрос. Без ключа: Ollama на этом компьютере (' + ollamaPull() + ', если сервер или модель ещё не готовы) или кнопка «Groq бесплатно». Платный OpenAI и другие https-адреса по-прежнему просят свой ключ.';
       return;
     }
     if (!settings.baseUrl) {
@@ -104,7 +104,10 @@
     var remember = $('#assistRemember');
     if (remember) remember.checked = settings.remember;
     var keyEl = $('#assistKey');
-    if (keyEl) keyEl.placeholder = readKey() ? 'ключ задан — введите новый, чтобы заменить' : 'не нужен для Ollama на localhost';
+    if (keyEl) {
+      var freeCloud = A.normalizeBase(settings.baseUrl) === A.preset('groq').baseUrl;
+      keyEl.placeholder = freeCloud ? 'не нужен: Groq бесплатно, без ключа' : (readKey() ? 'ключ задан — введите новый, чтобы заменить' : 'не нужен для Ollama на localhost');
+    }
     var input = $('#assistInput');
     var sendBtn = $('#assistSend');
     if (input) input.disabled = !settings.enabled;
@@ -331,9 +334,11 @@
     var S = sim();
     if (!S) { flash('Симулятор ещё не готов.'); return; }
     if (S.flushEditor) S.flushEditor();
+    var storedKey = readKey();
+    var key = A.normalizeBase(settings.baseUrl) === A.preset('groq').baseUrl ? '' : storedKey;
     var req = A.buildRequest({
       settings: settings,
-      key: readKey(),
+      key: storedKey,
       mode: mode,
       catalog: A.partCatalog(window.PARTS),
       netlist: A.briefNetlist(S.proj),
@@ -348,7 +353,6 @@
     thread.push({ role: 'user', text: question });
     bubble({ id: nid(), role: 'user', text: question });
     flash('Жду ответ…');
-    var key = readKey();
     ensureFrame(req.origin).then(function (frame) {
       return ask(frame, req, key);
     }).then(function (raw) {
@@ -358,7 +362,7 @@
       flash('');
     }).catch(function (err) {
       var detail = err && err.text ? A.explainHttp(err.status, err.text) : '';
-      var msg = A.redact((err && err.message ? err.message : 'ошибка') + (detail ? ': ' + detail : ''), key);
+      var msg = A.redact((err && err.message ? err.message : 'ошибка') + (detail ? ': ' + detail : ''), storedKey);
       bubble({ id: nid(), role: 'err', text: msg });
       flash('');
     }).then(function () {
@@ -437,7 +441,7 @@
           flash('Ollama на этом компьютере: ключ не нужен. В терминале: ollama serve. Если модели нет: ollama pull ' + settings.model + '.');
           return;
         case 'groq':
-          flash('Groq бесплатный: вставьте свой ключ с сайта Groq. В программе ключа нет.');
+          flash('Groq бесплатно, без ключа: адрес прокси уже подставлен, свой ключ вставлять не нужно.');
           return;
         default: {
           var unknown = name;
