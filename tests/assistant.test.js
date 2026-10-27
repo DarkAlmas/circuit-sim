@@ -14,12 +14,12 @@ test('page CSP stays connect-src none and scripts are versioned', () => {
   assert.ok(m, 'csp meta');
   assert.ok(m[1].includes("connect-src 'none'"));
   assert.ok(!/connect-src\s+https?:/.test(m[1]));
-  assert.ok(html.includes('assistant-core.js?v=14.6.2') && html.includes('assistant.js?v=14.6.2'));
-  assert.ok(html.includes('style.css?v=14.6.2'));
-  assert.equal(A.VERSION, '14.6.2');
-  assert.ok(read('sw-assistant.js').includes('assistant-core.js?v=14.6.2'));
-  assert.ok(read('assistant-net.js').includes("VERSION = '14.6.2'"));
-  assert.ok(read('app.js').includes("new Worker('worker.js?v=14.6.2')"));
+  assert.ok(html.includes('assistant-core.js?v=14.6.3') && html.includes('assistant.js?v=14.6.3'));
+  assert.ok(html.includes('style.css?v=14.6.3'));
+  assert.equal(A.VERSION, '14.6.3');
+  assert.ok(read('sw-assistant.js').includes('assistant-core.js?v=14.6.3'));
+  assert.ok(read('assistant-net.js').includes("VERSION = '14.6.3'"));
+  assert.ok(read('app.js').includes("new Worker('worker.js?v=14.6.3')"));
 });
 
 test('assistant sources do not eval, inject HTML, or call a CDN', () => {
@@ -45,9 +45,60 @@ test('endpoint allow-list: https anywhere, http only loopback and private', () =
   for (const bad of ['http://8.8.8.8/v1', 'http://1.2.3.4', 'javascript:alert(1)', 'data:text/html,hi', 'file:///etc/passwd', 'https://user:pass@api.openai.com/v1', 'https://evil.com/"><script>', 'ws://127.0.0.1/', '', null, 'https://', 'http://localhost.evil.com/v1'])
     assert.equal(A.endpointOrigin(bad), '', String(bad));
   assert.equal(A.chatUrl('https://api.openai.com/v1'), 'https://api.openai.com/v1/chat/completions');
+  assert.equal(A.chatUrl('http://127.0.0.1:11434/v1'), 'http://127.0.0.1:11434/v1/chat/completions');
   assert.equal(A.chatUrl('https://api.openai.com/v1/chat/completions'), 'https://api.openai.com/v1/chat/completions');
   assert.equal(A.chatUrl('https://api.openai.com/v1?token=secret#x'), 'https://api.openai.com/v1/chat/completions');
   assert.equal(A.normalizeBase('http://8.8.8.8/v1'), '');
+});
+
+test('local Ollama needs no key; https OpenAI-style still does', () => {
+  const fresh = A.sanitizeSettings(undefined);
+  assert.equal(fresh.enabled, false);
+  assert.equal(fresh.baseUrl, 'http://127.0.0.1:11434/v1');
+  assert.equal(fresh.model, 'llama3.2');
+  assert.equal(fresh.key, undefined);
+  assert.equal(A.sanitizeSettings({ baseUrl: '' }).baseUrl, '');
+  assert.equal(A.keyRequired('http://127.0.0.1:11434/v1'), false);
+  assert.equal(A.keyRequired('http://localhost:11434/v1'), false);
+  assert.equal(A.keyRequired('http://[::1]:11434/v1'), false);
+  assert.equal(A.keyRequired('http://192.168.1.20:11434/v1'), false);
+  assert.equal(A.keyRequired('http://10.0.0.8/v1'), false);
+  assert.equal(A.keyRequired('http://172.16.0.4:1234/v1'), false);
+  assert.equal(A.keyRequired('https://api.openai.com/v1'), true);
+  assert.equal(A.keyRequired('https://api.groq.com/openai/v1'), true);
+  assert.equal(A.keyRequired('http://8.8.8.8/v1'), true);
+  assert.equal(A.keyRequired(''), true);
+  const ollama = A.preset('ollama');
+  const groq = A.preset('groq');
+  assert.deepEqual(ollama, { baseUrl: 'http://127.0.0.1:11434/v1', model: 'llama3.2' });
+  assert.deepEqual(groq, { baseUrl: 'https://api.groq.com/openai/v1', model: 'llama-3.1-8b-instant' });
+  assert.ok(ollama.model.length <= 64 && groq.model.length <= 64);
+  assert.equal(A.keyRequired(ollama.baseUrl), false);
+  assert.equal(A.keyRequired(groq.baseUrl), true);
+  const localSettings = A.sanitizeSettings({ enabled: true, baseUrl: ollama.baseUrl, model: ollama.model });
+  const local = A.buildRequest({ settings: localSettings, mode: 'schema', catalog: 'resistor(a,b)', question: 'мигни' });
+  assert.ok(local);
+  assert.equal(local.url, 'http://127.0.0.1:11434/v1/chat/completions');
+  assert.equal(local.origin, 'http://127.0.0.1:11434');
+  assert.equal(local.body.model, 'llama3.2');
+  assert.ok(!('key' in local));
+  assert.equal(A.buildRequest({ settings: { enabled: true, baseUrl: 'https://api.openai.com/v1', model: 'gpt-4o-mini' }, mode: 'schema', question: 'мигни' }), null);
+  const paid = A.buildRequest({ settings: { enabled: true, baseUrl: groq.baseUrl, model: groq.model }, key: 'gsk-user-pasted', mode: 'code', question: 'мигни' });
+  assert.equal(paid.url, 'https://api.groq.com/openai/v1/chat/completions');
+  assert.equal(paid.body.model, 'llama-3.1-8b-instant');
+  assert.ok(!('key' in paid));
+  assert.ok(!JSON.stringify(paid).includes('gsk-user-pasted'));
+  assert.throws(() => A.preset('nope'));
+  const ui = read('assistant.js');
+  const html = read('index.html');
+  assert.ok(ui.includes('keyRequired') && ui.includes('без ключа запросы не уйдут') && ui.includes('ключ не нужен'));
+  assert.ok(ui.includes('ollama serve') && ui.includes('ollama pull'));
+  assert.ok(html.includes('не нужен для Ollama на localhost'));
+  assert.ok(html.includes('Адрес API (OpenAI-совместимый)') && html.includes('Настройки ИИ'));
+  assert.ok(html.includes('data-preset="ollama"') && html.includes('data-preset="groq"'));
+  assert.ok(html.includes('id="assistKeyNote"') && html.includes('class="ghost"'));
+  assert.ok(!/gsk_[A-Za-z0-9]{8,}|sk-[A-Za-z0-9]{20,}/.test(read('assistant-core.js') + ui + html));
+  assert.ok(read('assistant-net.js').includes("if (typeof m.key === 'string' && m.key) headers.Authorization"));
 });
 
 test('frame CSP names only the chosen origin', () => {
@@ -55,7 +106,7 @@ test('frame CSP names only the chosen origin', () => {
   assert.ok(doc.csp.includes('connect-src https://api.openai.com;'));
   assert.ok(doc.csp.includes("frame-ancestors 'self'"));
   assert.ok(!/unsafe-inline|unsafe-eval|\*/.test(doc.csp));
-  assert.ok(doc.html.includes('assistant-net.js?v=14.6.2'));
+  assert.ok(doc.html.includes('assistant-net.js?v=14.6.3'));
   assert.ok(!doc.html.includes('/v1'));
   assert.equal(A.frameDocument('https://evil.com"; script-src \'unsafe-inline\''), null);
   assert.equal(A.frameDocument('http://8.8.8.8'), null);
@@ -64,7 +115,7 @@ test('frame CSP names only the chosen origin', () => {
 
 test('settings keep a strict opt-in and drop the key', () => {
   const d = A.sanitizeSettings(undefined);
-  assert.deepEqual(d, { enabled: false, baseUrl: '', model: 'gpt-4o-mini', remember: false });
+  assert.deepEqual(d, { enabled: false, baseUrl: 'http://127.0.0.1:11434/v1', model: 'llama3.2', remember: false });
   assert.deepEqual(Object.keys(A.sanitizeSettings({ enabled: 'true', remember: 1, baseUrl: 'http://8.8.8.8/v1', key: 'sk-SECRETVALUE', model: 'bad model' })).sort(), ['baseUrl', 'enabled', 'model', 'remember']);
   const ok = A.sanitizeSettings({ enabled: true, remember: true, baseUrl: 'https://proxy.example/openai/v1/', model: 'llama3.2' });
   assert.equal(ok.enabled, true);
@@ -101,7 +152,7 @@ test('prompt carries context and never the API key', () => {
   assert.ok(blob.includes('Режим: код'));
   assert.ok(blob.includes('мигни ••••'));
   assert.equal(req.body.stream, false);
-  assert.throws(() => A.buildRequest({ settings: { enabled: true, baseUrl: 'https://api.openai.com/v1' }, mode: 'nope', question: 'x' }));
+  assert.throws(() => A.buildRequest({ settings: { enabled: true, baseUrl: 'https://api.openai.com/v1' }, key: 'sk-testkey', mode: 'nope', question: 'x' }));
 });
 
 test('catalog lists part ids and pin ids, and truncates the breadboard', () => {

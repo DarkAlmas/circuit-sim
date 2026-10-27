@@ -57,22 +57,46 @@
   }
 
   function flash(text) { var el = $('#assistStatus'); if (el) el.textContent = text || ''; }
+  function ollamaPull() {
+    return 'ollama serve, затем ollama pull ' + A.preset('ollama').model;
+  }
+  function syncKeyNote() {
+    var el = $('#assistKeyNote');
+    if (!el) return;
+    if (settings.baseUrl && !A.keyRequired(settings.baseUrl)) {
+      el.textContent = 'ключ не нужен';
+      return;
+    }
+    if (settings.baseUrl && !readKey()) {
+      el.textContent = 'без ключа запросы не уйдут';
+      return;
+    }
+    el.textContent = '';
+  }
   function syncHint() {
     var el = $('#assistHint');
     if (!el) return;
+    var origin = settings.baseUrl ? A.endpointOrigin(settings.baseUrl) : '';
+    var local = !!(settings.baseUrl && !A.keyRequired(settings.baseUrl));
+    var ollama = settings.baseUrl === A.preset('ollama').baseUrl;
     if (!settings.enabled) {
-      el.textContent = 'Запросы выключены: симулятор в сеть не ходит. Включите тумблер и укажите свой адрес — это согласие отправить вопрос на ваш прокси.';
+      el.textContent = 'Запросы выключены: симулятор в сеть не ходит. Включите «Разрешить запросы к ИИ» — это согласие отправить вопрос. Для Ollama на этом компьютере ключ не нужен: в терминале ' + ollamaPull() + ', если сервер или модель ещё не готовы. Платный OpenAI и совместимые сервисы по https по-прежнему просят ключ.';
       return;
     }
     if (!settings.baseUrl) {
-      el.textContent = 'Укажите OpenAI-совместимый адрес: https://… или http:// на localhost, 127.0.0.1 либо частную сеть.';
+      el.textContent = 'Укажите OpenAI-совместимый адрес: https://… или http:// на localhost, 127.0.0.1 либо частную сеть. Локальный Ollama — http://127.0.0.1:11434/v1, ключ не нужен.';
       return;
     }
-    if (!readKey()) {
-      el.textContent = 'Введите API-ключ. Он останется только в этом браузере и не попадёт в проект.';
+    if (!local && !readKey()) {
+      el.textContent = 'Для этого https-адреса нужен API-ключ. Он останется только в этом браузере и не попадёт в проект. У Ollama на localhost ключ не нужен.';
       return;
     }
-    el.textContent = 'Запросы пойдут только на ' + A.endpointOrigin(settings.baseUrl) + '. Прокси должен разрешать CORS. «Применить» добавит детали или заменит скетч — кнопка ▶ сама не нажмётся.';
+    if (local) {
+      var extra = ollama ? ' Если Ollama не отвечает, в терминале: ' + ollamaPull() + '.' : '';
+      el.textContent = 'Ключ не нужен. Запросы пойдут только на ' + origin + ' без заголовка Authorization.' + extra + ' «Применить» добавит детали или заменит скетч — кнопка ▶ сама не нажмётся.';
+      return;
+    }
+    el.textContent = 'Запросы пойдут только на ' + origin + '. Прокси должен разрешать CORS. «Применить» добавит детали или заменит скетч — кнопка ▶ сама не нажмётся.';
   }
   function paint() {
     var sw = $('#assistOn');
@@ -80,7 +104,12 @@
     var remember = $('#assistRemember');
     if (remember) remember.checked = settings.remember;
     var keyEl = $('#assistKey');
-    if (keyEl) keyEl.placeholder = readKey() ? 'ключ задан — введите новый, чтобы заменить' : 'только в этом браузере';
+    if (keyEl) keyEl.placeholder = readKey() ? 'ключ задан — введите новый, чтобы заменить' : 'не нужен для Ollama на localhost';
+    var input = $('#assistInput');
+    var sendBtn = $('#assistSend');
+    if (input) input.disabled = !settings.enabled;
+    if (sendBtn) sendBtn.disabled = !settings.enabled || busy;
+    syncKeyNote();
     syncHint();
   }
   function fill() {
@@ -93,6 +122,7 @@
 
   function showTab(which) {
     var assist = which === 'assist';
+    document.body.classList.toggle('assist-open', assist);
     var paneA = $('#sideAssistPane'), paneP = $('#sidePropsPane');
     if (paneA) paneA.hidden = !assist;
     if (paneP) paneP.hidden = assist;
@@ -127,8 +157,8 @@
 
   function gate() {
     if (!settings.enabled) return 'Запросы выключены. Включите «Разрешить запросы к ИИ».';
-    if (!settings.baseUrl) return 'Укажите адрес своего прокси.';
-    if (!readKey()) return 'Введите API-ключ — без него запрос не уйдёт.';
+    if (!settings.baseUrl) return 'Укажите адрес API.';
+    if (A.keyRequired(settings.baseUrl) && !readKey()) return 'Введите API-ключ — без него запрос не уйдёт.';
     return '';
   }
 
@@ -313,9 +343,8 @@
     });
     if (!req) { flash('Запрос не собран. Проверьте адрес.'); return; }
     busy = true;
-    var sendBtn = $('#assistSend');
-    if (sendBtn) sendBtn.disabled = true;
     if (input) input.value = '';
+    paint();
     thread.push({ role: 'user', text: question });
     bubble({ id: nid(), role: 'user', text: question });
     flash('Жду ответ…');
@@ -334,7 +363,7 @@
       flash('');
     }).then(function () {
       busy = false;
-      if (sendBtn) sendBtn.disabled = false;
+      paint();
     });
   }
 
@@ -393,6 +422,29 @@
     });
     var forget = $('#assistForget');
     if (forget) forget.addEventListener('click', function () { forgetKey(); paint(); flash('Ключ удалён из браузера.'); });
+    var presets = $('#assistPresets');
+    if (presets) presets.addEventListener('click', function (e) {
+      var b = e.target.closest('button[data-preset]');
+      if (!b) return;
+      var name = b.dataset.preset;
+      var p;
+      try { p = A.preset(name); } catch (err) { return; }
+      settings = A.sanitizeSettings({ enabled: settings.enabled, baseUrl: p.baseUrl, model: p.model, remember: settings.remember });
+      persist();
+      fill();
+      switch (name) {
+        case 'ollama':
+          flash('Ollama на этом компьютере: ключ не нужен. В терминале: ollama serve. Если модели нет: ollama pull ' + settings.model + '.');
+          return;
+        case 'groq':
+          flash('Groq бесплатный: вставьте свой ключ с сайта Groq. В программе ключа нет.');
+          return;
+        default: {
+          var unknown = name;
+          flash('Неизвестный пресет: ' + unknown);
+        }
+      }
+    });
     var sendBtn = $('#assistSend');
     if (sendBtn) sendBtn.addEventListener('click', send);
     var input = $('#assistInput');
