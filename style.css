@@ -292,7 +292,7 @@ body.pm .w3hint{display:none}
 #sideTabs{width:100%;margin:0 0 8px}
 #sideTabs button{flex:1}
 #assistMode{margin-bottom:6px}
-#assistLog{display:flex;flex-direction:column;gap:6px;overflow:auto;max-height:32vh}
+#assistLog{display:flex;flex-direction:column;gap:6px;overflow:auto;max-height:220px}
 .amsg{white-space:pre-wrap;word-break:break-word;background:#1f2636;border:1px solid #2a3242;border-radius:8px;padding:8px}
 .amsg.user{background:#1a2436;border-color:#3a4a6e}
 .amsg.err{border-color:#a33;color:#ffb4b4}
@@ -303,6 +303,3 @@ body.pm .w3hint{display:none}
 #assistRemember{width:18px;height:18px;padding:0;flex:0 0 auto;cursor:pointer}
 #assistCfg{margin-top:8px;border-top:1px solid #2a3242;padding-top:4px}
 #assistCfg .hint{margin:8px 0}
-#right.assist{display:flex;flex-direction:column;overflow:hidden}
-#right.assist #sideAssistPane{display:flex;flex-direction:column;gap:6px;flex:1;min-height:0;overflow:auto}
-#right.assist #assistLog{max-height:none;flex:1;min-height:80px}

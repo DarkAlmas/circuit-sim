@@ -93,10 +93,9 @@
 
   function showTab(which) {
     var assist = which === 'assist';
-    var paneA = $('#sideAssistPane'), paneP = $('#sidePropsPane'), right = $('#right');
+    var paneA = $('#sideAssistPane'), paneP = $('#sidePropsPane');
     if (paneA) paneA.hidden = !assist;
     if (paneP) paneP.hidden = assist;
-    if (right) right.classList.toggle('assist', assist);
     var tabA = $('#sideAssist'), tabP = $('#sideProps');
     if (tabA) { tabA.classList.toggle('on', assist); tabA.setAttribute('aria-selected', assist ? 'true' : 'false'); }
     if (tabP) { tabP.classList.toggle('on', !assist); tabP.setAttribute('aria-selected', assist ? 'false' : 'true'); }
