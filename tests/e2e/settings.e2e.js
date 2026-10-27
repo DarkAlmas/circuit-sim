@@ -1,4 +1,4 @@
-// Settings UI: hold menu defaults off, three controls, prefs persist, junk localStorage is dropped. ?v=14.6.2.
+// Settings UI: hold menu defaults off, three controls, prefs persist, junk localStorage is dropped. ?v=14.6.3.
 const { chromium } = require('playwright-core'); const assert = require('assert');
 const URL = process.argv[2] || 'http://localhost:8765/';
 (async () => {
@@ -10,7 +10,7 @@ const URL = process.argv[2] || 'http://localhost:8765/';
   await pg.goto(URL); await pg.evaluate(() => localStorage.clear()); await pg.reload(); await pg.waitForTimeout(300);
   const ok = (c, m) => { assert.ok(c, m); console.log('✓', m); };
 
-  ok(await pg.evaluate(() => [...document.scripts].every(s => !s.src || /\?v=14\.6\.2$/.test(s.src)) && /style\.css\?v=14\.6\.2$/.test(document.querySelector('link[rel=stylesheet]').href)), 'cache stays ?v=14.6.2');
+  ok(await pg.evaluate(() => [...document.scripts].every(s => !s.src || /\?v=14\.6\.3$/.test(s.src)) && /style\.css\?v=14\.6\.3$/.test(document.querySelector('link[rel=stylesheet]').href)), 'cache stays ?v=14.6.3');
   const csp = await pg.evaluate(() => document.querySelector('meta[http-equiv="Content-Security-Policy"]').content);
   ok(csp.startsWith("default-src 'self'") && csp.includes("script-src 'self'") && !/unsafe-inline/.test(csp), 'CSP unchanged');
   const UI_KEYS = 'canvasProps,codeFont,holdMenu,labelFont,portPower,showDelBtn,showWireBtn';

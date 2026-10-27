@@ -3,9 +3,11 @@
    and a sketch is only text until the existing worker transpiles it. */
 (function () {
   'use strict';
-  var VERSION = '14.6.2';
+  var VERSION = '14.6.3';
   var SETTINGS_KEY = 'circuitsim.assistant';
   var KEY_KEY = 'circuitsim.assistant.key';
+  var DEFAULT_BASE = 'http://127.0.0.1:11434/v1';
+  var DEFAULT_MODEL = 'llama3.2';
   var HTTPS_ORIGIN = /^https:\/\/[A-Za-z0-9.-]{1,253}(?::[0-9]{1,5})?$/;
   var HTTP_ORIGIN = /^http:\/\/(?:localhost|\[::1\]|127(?:\.\d{1,3}){3}|10(?:\.\d{1,3}){3}|192\.168(?:\.\d{1,3}){2}|172\.(?:1[6-9]|2\d|3[0-1])(?:\.\d{1,3}){2})(?::[0-9]{1,5})?$/;
   var MODEL_RE = /^[A-Za-z0-9._:@+/-]{1,64}$/;
@@ -70,6 +72,24 @@
     return u.href;
   }
 
+  /* https always needs a key. http is already limited to loopback and private LAN. */
+  function keyRequired(input) {
+    var origin = endpointOrigin(typeof input === 'string' ? input : '');
+    if (!origin) return true;
+    return origin.indexOf('http://') !== 0;
+  }
+
+  function preset(name) {
+    switch (name) {
+      case 'ollama': return { baseUrl: DEFAULT_BASE, model: DEFAULT_MODEL };
+      case 'groq': return { baseUrl: 'https://api.groq.com/openai/v1', model: 'llama-3.1-8b-instant' };
+      default: {
+        var unknown = name;
+        throw new Error('неизвестный пресет: ' + unknown);
+      }
+    }
+  }
+
   function frameCsp(origin) {
     var safe = endpointOrigin(origin);
     if (!safe) return '';
@@ -87,7 +107,7 @@
   }
 
   function sanitizeSettings(raw) {
-    var out = { enabled: false, baseUrl: '', model: 'gpt-4o-mini', remember: false };
+    var out = { enabled: false, baseUrl: DEFAULT_BASE, model: DEFAULT_MODEL, remember: false };
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return out;
     if (raw.enabled === true) out.enabled = true;
     if (raw.remember === true) out.remember = true;
@@ -331,20 +351,22 @@
     var url = chatUrl(settings.baseUrl);
     var origin = endpointOrigin(settings.baseUrl);
     if (!url || !origin) return null;
-    var question = redact(String(o.question || '').slice(0, 4000), o.key);
+    var key = sanitizeKey(o.key);
+    if (keyRequired(settings.baseUrl) && !key) return null;
+    var question = redact(String(o.question || '').slice(0, 4000), key);
     if (!question.trim()) return null;
     var history = Array.isArray(o.history) ? o.history.slice(-6) : [];
     var messages = [{ role: 'system', content: SYSTEM }];
     for (var i = 0; i < history.length; i++) {
       var h = history[i];
       if (!h || (h.role !== 'user' && h.role !== 'assistant') || typeof h.text !== 'string') continue;
-      messages.push({ role: h.role, content: redact(h.text.slice(0, 1500), o.key) });
+      messages.push({ role: h.role, content: redact(h.text.slice(0, 1500), key) });
     }
     var user = [
       'Режим: ' + modeLabel(o.mode),
-      'Детали (type(пины)): ' + redact(String(o.catalog || '').slice(0, 7000), o.key),
-      'Схема: ' + redact(String(o.netlist || '').slice(0, 2500), o.key),
-      'Скетч: ' + redact(String(o.sketch || '').slice(0, 4000), o.key),
+      'Детали (type(пины)): ' + redact(String(o.catalog || '').slice(0, 7000), key),
+      'Схема: ' + redact(String(o.netlist || '').slice(0, 2500), key),
+      'Скетч: ' + redact(String(o.sketch || '').slice(0, 4000), key),
       'Вопрос: ' + question
     ].join('\n');
     messages.push({ role: 'user', content: user });
@@ -380,7 +402,9 @@
 
   var api = {
     VERSION: VERSION, SETTINGS_KEY: SETTINGS_KEY, KEY_KEY: KEY_KEY,
+    DEFAULT_BASE: DEFAULT_BASE, DEFAULT_MODEL: DEFAULT_MODEL,
     endpointOrigin: endpointOrigin, normalizeBase: normalizeBase, chatUrl: chatUrl, httpHostOk: httpHostOk,
+    keyRequired: keyRequired, preset: preset,
     frameCsp: frameCsp, frameDocument: frameDocument,
     sanitizeSettings: sanitizeSettings, sanitizeKey: sanitizeKey, redact: redact,
     parseReply: parseReply, sanitizeSketch: sanitizeSketch, mergePatch: mergePatch,

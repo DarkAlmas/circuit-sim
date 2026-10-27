@@ -1,4 +1,4 @@
-// Assistant panel: offline by default, Apply does not eval, opt-in CSP is one origin. ?v=14.6.2.
+// Assistant panel: offline by default, Apply does not eval, opt-in CSP is one origin. ?v=14.6.3.
 const { chromium } = require('playwright-core');
 const assert = require('assert');
 const URL = process.argv[2] || 'http://127.0.0.1:8765/';
@@ -25,7 +25,7 @@ const URL = process.argv[2] || 'http://127.0.0.1:8765/';
 
   const meta = await page.evaluate(() => document.querySelector('meta[http-equiv="Content-Security-Policy"]').content);
   ok(meta.includes("connect-src 'none'") && !/unsafe-inline|unsafe-eval/.test(meta), 'main CSP still connect-src none');
-  ok(await page.evaluate(() => [...document.scripts].filter(s => s.src).every(s => /\?v=14\.6\.2$/.test(s.src))), 'scripts ?v=14.6.2');
+  ok(await page.evaluate(() => [...document.scripts].filter(s => s.src).every(s => /\?v=14\.6\.3$/.test(s.src))), 'scripts ?v=14.6.3');
   await page.evaluate(() => fetch('https://example.com/leak').catch(() => {}));
   await page.waitForTimeout(200);
   ok(csp.some(t => /example\.com/.test(t)), 'main page fetch is refused by CSP: ' + csp.join(' | '));
@@ -44,16 +44,42 @@ const URL = process.argv[2] || 'http://127.0.0.1:8765/';
   }));
   ok(labels.tab.includes('Помощник') && labels.schema === 'Схема' && labels.code === 'Код' && labels.send === 'Отправить', 'Russian panel labels');
   ok(labels.opt === 'Разрешить запросы к ИИ' && labels.on === 'false' && labels.hidden, 'opt-in off, properties hidden while the assistant is open');
+  ok(await page.evaluate(() => Assistant.settings.baseUrl === 'http://127.0.0.1:11434/v1' && Assistant.settings.model === 'llama3.2' && !Assistant.settings.enabled), 'default endpoint is local Ollama and still opted out');
+  ok((await page.textContent('#assistKeyNote')).trim() === 'ключ не нужен', 'ollama localhost does not need a key');
+  ok((await page.getAttribute('#assistKey', 'placeholder')).includes('не нужен для Ollama'), 'key placeholder names Ollama');
+  ok((await page.textContent('#assistCfg')).includes('Адрес API (OpenAI-совместимый)') && (await page.textContent('#assistCfg')).includes('Настройки ИИ'), 'settings heading and API label');
+  ok(/выключен/i.test(await page.textContent('#assistHint')) && /ollama serve/.test(await page.textContent('#assistHint')), 'hint explains the switch and ollama serve');
+  const gated = await page.evaluate(() => ({ input: document.querySelector('#assistInput').disabled, send: document.querySelector('#assistSend').disabled, w: document.querySelector('#right').offsetWidth }));
+  ok(gated.input && gated.send, 'chat and send are disabled until opt-in');
+  ok(gated.w >= 320 && gated.w <= 400, 'assist pane is wide enough: ' + gated.w);
+  ok(await page.evaluate(() => document.querySelector('#assistCfg .srow > span').getClientRects().length === 1), 'opt-in label stays on one line');
+  ok(await page.evaluate(() => {
+    const pane = document.querySelector('#right').getBoundingClientRect();
+    const inside = sel => { const r = document.querySelector(sel).getBoundingClientRect(); return r.top >= pane.top - 1 && r.bottom <= pane.bottom + 2 && r.height > 0; };
+    return inside('#assistOn') && inside('#assistSend') && inside('#assistInput');
+  }), 'opt-in and the composer stay inside the pane');
+  const look = await page.evaluate(() => ({
+    box: getComputedStyle(document.querySelector('#assistRemember')).backgroundColor,
+    forget: getComputedStyle(document.querySelector('#assistForget')).backgroundColor,
+    send: getComputedStyle(document.querySelector('#assistSend')).backgroundColor
+  }));
+  ok(look.box === 'rgb(15, 19, 27)', 'remember checkbox stays dark: ' + look.box);
+  ok(look.forget === 'rgba(0, 0, 0, 0)', 'forget key is a ghost button: ' + look.forget);
+  ok(look.send === 'rgb(31, 107, 58)', 'send stays the primary button: ' + look.send);
+  const beforePresets = external.length;
+  await page.click('#assistPresetGroq');
+  ok(await page.evaluate(() => Assistant.settings.baseUrl === 'https://api.groq.com/openai/v1' && Assistant.settings.model === 'llama-3.1-8b-instant'), 'Groq preset fills url and model');
+  ok((await page.textContent('#assistKeyNote')).trim() === 'без ключа запросы не уйдут', 'Groq still needs a pasted key');
+  await page.click('#assistPresetOllama');
+  ok(await page.evaluate(() => Assistant.settings.baseUrl === 'http://127.0.0.1:11434/v1' && Assistant.settings.model === 'llama3.2'), 'Ollama preset restores the local endpoint');
+  ok((await page.textContent('#assistKeyNote')).trim() === 'ключ не нужен', 'Ollama preset clears the key requirement');
+  ok(external.length === beforePresets, 'presets do not touch the network: ' + external.slice(beforePresets).join(' '));
   await page.click('#assistMode [data-mode=code]');
   ok(await page.evaluate(() => Assistant.mode === 'code'), 'mode switches to code');
   await page.click('#assistMode [data-mode=schema]');
   ok(await page.evaluate(() => Assistant.mode === 'schema'), 'mode switches back to schema');
 
-  const beforeNet = external.length;
-  await page.fill('#assistInput', 'нарисуй светодиод');
-  await page.click('#assistSend');
-  ok(/выключен/i.test(await page.textContent('#assistStatus')), 'send explains that requests are off');
-  ok(external.length === beforeNet, 'no network while opt-in is off: ' + external.slice(beforeNet).join(' '));
+  ok(external.length === beforePresets, 'no network while opt-in is off: ' + external.slice(beforePresets).join(' '));
 
   const codeBefore = await page.inputValue('#code');
   await page.evaluate(() => {
@@ -100,6 +126,7 @@ const URL = process.argv[2] || 'http://127.0.0.1:8765/';
   await page.dispatchEvent('#assistUrl', 'change');
   await page.click('#assistOn');
   ok(await page.evaluate(() => Assistant.settings.enabled && Assistant.settings.baseUrl === 'https://assistant-test.invalid/v1'), 'opt-in stores only the validated base URL');
+  ok(await page.evaluate(() => !document.querySelector('#assistInput').disabled && !document.querySelector('#assistSend').disabled), 'chat enables with the opt-in switch');
 
   const mid = external.length;
   await page.fill('#assistInput', 'привет');
@@ -120,6 +147,41 @@ const URL = process.argv[2] || 'http://127.0.0.1:8765/';
   const metaAfter = await page.evaluate(() => document.querySelector('meta[http-equiv="Content-Security-Policy"]').content);
   ok(metaAfter.includes("connect-src 'none'"), 'main document CSP did not widen');
   ok(errors.length === 0, 'no page errors: ' + errors.join(' | '));
+
+  const phone = await browser.newPage({ viewport: { width: 390, height: 844 } });
+  const phoneErr = [];
+  phone.on('pageerror', e => phoneErr.push(e.message));
+  await phone.goto(URL);
+  await phone.evaluate(() => { localStorage.clear(); sessionStorage.clear(); });
+  await phone.reload();
+  await phone.waitForTimeout(400);
+  ok(await phone.evaluate(() => document.body.classList.contains('pm')), 'phone layout is on');
+  await phone.click('#pmMore');
+  await phone.click('#pmAssist');
+  await phone.waitForTimeout(300);
+  const phoneUi = await phone.evaluate(() => {
+    const span = document.querySelector('#assistCfg .srow > span');
+    const right = document.querySelector('#right').getBoundingClientRect();
+    const meta = document.querySelector('meta[http-equiv="Content-Security-Policy"]').content;
+    return {
+      open: document.body.dataset.sheet === 'props' && document.querySelector('#sideAssistPane').hidden === false,
+      note: document.querySelector('#assistKeyNote').textContent.trim(),
+      disabled: document.querySelector('#assistInput').disabled && document.querySelector('#assistSend').disabled,
+      lines: span.getClientRects().length,
+      rightW: Math.round(right.width),
+      sendIn: (() => { const s = document.querySelector('#assistSend').getBoundingClientRect(); return s.height > 0 && s.bottom <= right.bottom + 2; })(),
+      csp: meta.includes("connect-src 'none'")
+    };
+  });
+  ok(phoneUi.open && phoneUi.note === 'ключ не нужен' && phoneUi.disabled, 'phone assistant is opted out without a key: ' + JSON.stringify(phoneUi));
+  ok(phoneUi.lines === 1 && phoneUi.rightW >= 360 && phoneUi.sendIn && phoneUi.csp, 'phone labels fit, send is on screen, CSP stays closed: ' + JSON.stringify(phoneUi));
+  await phone.click('#assistOn');
+  ok(await phone.evaluate(() => !document.querySelector('#assistSend').disabled && Assistant.settings.enabled), 'phone opt-in enables send');
+  await phone.click('#assistPresetGroq');
+  ok((await phone.textContent('#assistKeyNote')).trim() === 'без ключа запросы не уйдут', 'phone Groq preset still asks for a key');
+  await phone.fill('#assistInput', 'привет');
+  ok(await phone.inputValue('#assistInput') === 'привет', 'phone chat accepts text after opt-in');
+  ok(phoneErr.length === 0, 'no phone page errors: ' + phoneErr.join(' | '));
   console.log('assistant e2e OK');
   await browser.close();
 })().catch(e => { console.error('FAIL', e); process.exit(1); });

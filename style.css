@@ -290,16 +290,39 @@ body.pm #w3pal .w3act{margin-top:0}
 body.pm .w3hint{display:none}
 /* v14.6: «Помощник» — вкладка справа. Сеть только после тумблера, через отдельное окно. */
 #sideTabs{width:100%;margin:0 0 8px}
-#sideTabs button{flex:1}
+#sideTabs button{flex:1;white-space:nowrap}
 #assistMode{margin-bottom:6px}
-#assistLog{display:flex;flex-direction:column;gap:6px;overflow:auto;max-height:220px}
+#assistCfg{margin:0 0 8px;border-bottom:1px solid #2a3242;padding-bottom:8px}
+#assistCfg h3{margin:0 0 4px}
+#assistCfgBody{min-height:0}
+#assistCfg .srow{min-height:40px;padding:4px 0}
+#assistCfg .srow>span{font-size:13px;line-height:1.25;white-space:nowrap}
+#assistPresets{display:flex;flex-wrap:wrap;gap:6px;margin:6px 0}
+#assistPresets button{flex:1;font-size:12px;padding:4px 8px;white-space:nowrap}
+#assistLog{display:flex;flex-direction:column;gap:6px;overflow:auto;max-height:180px}
 .amsg{white-space:pre-wrap;word-break:break-word;background:#1f2636;border:1px solid #2a3242;border-radius:8px;padding:8px}
 .amsg.user{background:#1a2436;border-color:#3a4a6e}
 .amsg.err{border-color:#a33;color:#ffb4b4}
 .amsg .apply{margin-top:8px;background:#1f6b3a;border-color:#2c8a4c}
 #assistInput{width:100%;min-height:72px;resize:vertical}
+#assistInput:disabled{opacity:.45;cursor:not-allowed}
+#assistSend{flex:1;background:#1f6b3a;border-color:#2c8a4c;color:#fff}
 #sideAssistPane .prop input{width:100%}
 #assistRememberRow{display:flex;align-items:center;gap:8px;font-size:12px;color:#8a94a8;margin:6px 0}
-#assistRemember{width:18px;height:18px;padding:0;flex:0 0 auto;cursor:pointer}
-#assistCfg{margin-top:8px;border-top:1px solid #2a3242;padding-top:4px}
+#assistRemember{appearance:none;-webkit-appearance:none;width:18px;height:18px;margin:0;padding:0;flex:0 0 auto;cursor:pointer;border:1px solid #6c768a;border-radius:4px;background:#0f131b}
+#assistRemember:checked{border-color:#2c8a4c;background:#1f6b3a url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath fill='none' stroke='%23fff' stroke-width='2' d='M3 8.5 6.5 12 13 4'/%3E%3C/svg%3E") center/14px no-repeat}
+#assistRemember:focus-visible{outline:2px solid #4a9eff;outline-offset:2px}
+#assistKeyNote{margin:2px 0 0}
+#assistForget.ghost{background:transparent;color:#8a94a8;border-color:#39435a}
+#assistForget.ghost:hover{background:#252d3f;color:#d8dee9}
 #assistCfg .hint{margin:8px 0}
+body.assist-open #right{display:flex;flex-direction:column;overflow:hidden}
+body.assist-open #sideTabs{flex:0 0 auto}
+body.assist-open #sideAssistPane{display:flex;flex-direction:column;flex:1;min-height:0;overflow:hidden}
+body.assist-open #assistCfg{display:flex;flex-direction:column;flex:1 1 auto;min-height:0;overflow:hidden;margin-bottom:6px}
+body.assist-open #assistCfgBody{flex:1 1 auto;min-height:0;overflow:auto}
+body.assist-open #assistLog{flex:0 1 120px;min-height:0;max-height:140px}
+body.assist-open #assistEmpty{flex:0 0 auto}
+body.assist-open #assistCompose{flex:0 0 auto}
+body.pm.assist-open #right{height:var(--h-right,78vh)}
+@media (min-width:900px){body.assist-open #right{width:340px}}

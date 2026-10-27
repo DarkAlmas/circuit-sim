@@ -2,7 +2,7 @@
    The API key arrives only in a same-origin postMessage and is not read from storage. */
 (function () {
   'use strict';
-  var VERSION = '14.6.2';
+  var VERSION = '14.6.3';
   var here = location.origin;
   var allowed = '';
   try { allowed = new URL(new URLSearchParams(location.search).get('o') || '').origin; } catch (e) { allowed = ''; }
@@ -26,6 +26,7 @@
       return;
     }
     var headers = { 'Content-Type': 'application/json' };
+    /* Empty key (local Ollama) sends no Authorization. A pasted key is Bearer only. */
     if (typeof m.key === 'string' && m.key) headers.Authorization = 'Bearer ' + m.key;
     fetch(url.href, {
       method: 'POST',
