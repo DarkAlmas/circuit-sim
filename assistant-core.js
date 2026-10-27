@@ -3,7 +3,7 @@
    and a sketch is only text until the existing worker transpiles it. */
 (function () {
   'use strict';
-  var VERSION = '14.6.6';
+  var VERSION = '14.6.7';
   var SETTINGS_KEY = 'circuitsim.assistant';
   var KEY_KEY = 'circuitsim.assistant.key';
   var DEFAULT_BASE = 'http://127.0.0.1:11434/v1';
@@ -278,6 +278,19 @@
     if (typeof raw !== 'string') return null;
     var s = raw.replace(/\u0000/g, '').slice(0, deps().LIMITS.code || 100000);
     if (!s.trim()) return null;
+    /* Model sometimes leaves JSON escapes as text (one line with literal \n). Unfold once. */
+    var realNl = (s.match(/\n/g) || []).length;
+    var escNl = (s.match(/\\n/g) || []).length;
+    if (escNl && realNl < 2) {
+      s = s.replace(/\\([nrt"'\\])/g, function (_, c) {
+        if (c === 'n') return '\n';
+        if (c === 'r') return '\r';
+        if (c === 't') return '\t';
+        if (c === '"') return '"';
+        if (c === "'") return "'";
+        return '\\';
+      });
+    }
     return s;
   }
 
@@ -429,7 +442,8 @@
     if (skipped) notes.push('провод без своих выводов');
     var mcus = fresh.filter(function (q) { return !!(D.PARTS[q.type] && D.PARTS[q.type].mcu); });
     var primary = mcus.length ? mcus[0].id : '';
-    var code = typeof base.code === 'string' ? base.code : '';
+    /* Full replace: never keep the previous sketch or codes (no append / leftover FastLED). */
+    var code = '';
     var codes = {};
     var wrote = false;
     var editorBoard = '';
@@ -508,9 +522,9 @@
     '«Применить» в режиме схемы заменяет холст целиком этим JSON (старые детали удаляются, отмена — кнопка Отменить) и записывает sketch в редактор кода платы.',
     'После текста один блок ```json и ничего после него. JSON должен быть закончен: не обрывай массивы.',
     'Режим «схема»: {"parts":[{"id":"R1","type":"resistor","x":120,"y":80,"rot":0,"props":{"R":220}},{"id":"D1","type":"led","x":240,"y":80,"rot":0,"props":{"color":"красный"}},{"id":"U1","type":"esp32","x":0,"y":0}],"wires":[{"id":"w1","a":{"part":"U1","pin":"2"},"b":{"part":"R1","pin":"a"}},{"id":"w2","a":{"part":"R1","pin":"b"},"b":{"part":"D1","pin":"a"}},{"id":"w3","a":{"part":"D1","pin":"b"},"b":{"part":"U1","pin":"GND"}}],"nets":[{"pins":[{"part":"U1","pin":"GND"},{"part":"D1","pin":"b"}]}],"sketch":"void setup(){ pinMode(2, OUTPUT); }\\nvoid loop(){ digitalWrite(2, HIGH); delay(500); digitalWrite(2, LOW); delay(500); }"}',
-    'parts — полная схема, не дополнение к уже стоящим деталям. type — только id из списка. pin — id в скобках, не подпись на корпусе. У платы числовой вывод пиши как id, например "2", не "GPIO2".',
-    'wires — полный список. Каждый нужный контакт — отдельный провод между двумя выводами. Не пиши «и так далее», не пропускай землю, питание и сигнал, даже если схема большая. nets дублирует те же узлы короче: все выводы одной сети в pins. Достаточно полного wires или полного nets.',
-    'sketch в режиме схемы обязателен: полный текст скетча этой схемы (Arduino C или Python для Orange Pi). Для второй платы добавь "sketches":{"U2":"полный текст"} с id платы из parts.',
+    'parts — полная новая схема с нуля. Не копируй детали из блока «Схема» и не оставляй старые (ленту WS2812 и прочие), если пользователь не просил их сохранить. type — только id из списка. pin — id в скобках, не подпись на корпусе. У платы числовой вывод пиши как id, например "2", не "GPIO2".',
+    'wires — полный список только для новой схемы. Каждый нужный контакт — отдельный провод между двумя выводами. Не пиши «и так далее», не пропускай землю, питание и сигнал, даже если схема большая. nets дублирует те же узлы короче: все выводы одной сети в pins. Достаточно полного wires или полного nets.',
+    'sketch обязателен и с нуля: полный новый текст, не дописывай к текущему скетчу из блока «Скетч». Arduino C или Python для Orange Pi. Для второй платы — "sketches":{"U2":"полный текст"} с id из parts.',
     'Режим «код»: только {"sketch":"полный текст скетча"}, без parts и wires. Схему не предлагай.',
     'Не вставляй HTML и не проси выполнить код на странице.'
   ].join('\n');

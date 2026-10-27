@@ -334,7 +334,7 @@ body.pm.assist-open #right{height:var(--h-right,78vh)}
   /* Empty history must not keep a 120px flex base, or the API fields collapse under the composer. */
   body.assist-open #assistLog{flex:0 0 auto;min-height:0;max-height:140px}
 }
-/* v14.6.6: phone «Помощник». Mode is a short segment, settings use the sheet scroll, opted-out send is grey. */
+/* v14.6.7: phone «Помощник». Mode is a short segment, settings use the sheet scroll, opted-out send is grey. */
 #assistMode{flex:0 0 auto;width:100%;align-items:stretch}
 #assistMode button{flex:1 1 0;height:36px;min-height:36px;max-height:36px;padding:4px 10px}
 #assistSend:disabled{background:#2c3344;border-color:#3d465c;color:#b7c2d4;opacity:1}

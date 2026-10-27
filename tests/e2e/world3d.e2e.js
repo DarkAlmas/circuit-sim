@@ -16,7 +16,7 @@ const SHOT = process.argv[3] || '/tmp';
   ok(csp.includes("connect-src 'none'") && csp.includes("script-src 'self'") && !/unsafe-inline|unsafe-eval/.test(csp), 'CSP unchanged');
   const scripts = await pg.evaluate(() => [...document.scripts].filter(s => s.src).map(s => s.src));
   const origin = new globalThis.URL(URL).origin;
-  ok(scripts.every(s => s.startsWith(origin) && /\?v=14\.6\.6$/.test(s)), 'scripts are same-origin ?v=14.6.6');
+  ok(scripts.every(s => s.startsWith(origin) && /\?v=14\.6\.7$/.test(s)), 'scripts are same-origin ?v=14.6.7');
   ok(scripts.some(s => s.includes('/schematic3d.js')) && scripts.some(s => s.includes('/vendor/three/three.min.js')), 'schematic3d and vendored Three.js');
   ok(await pg.evaluate(() => [...document.querySelectorAll('#rtabs button')].map(b => b.textContent).join() === 'Схема,Шасси,Трасса'), 'robot tabs unchanged');
   ok(await pg.evaluate(() => !!document.querySelector('#undo') && !!document.querySelector('#redo') && !!document.querySelector('#simMore') && !!document.querySelector('#setHold')), 'undo and hold-menu chrome still present');

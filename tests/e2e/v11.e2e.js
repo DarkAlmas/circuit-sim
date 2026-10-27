@@ -8,7 +8,7 @@ const PID = 'ex:Пример: Плавная езда (ПИД)', SIMPLE = 'ex:П
   const drive = async (pg, ex, secs) => { await pg.selectOption('#projects', ex); await pg.waitForTimeout(300); await pg.click('#rtabs [data-rtab="track"]'); await pg.click('#rPlay'); await pg.waitForTimeout(secs * 1000);
     return pg.evaluate(() => { const r = RobotUI.run; return { jit: +Robot.jitter(r.hd, 2).toFixed(3), offs: r.offs, laps: r.laps.map(l => +l.time.toFixed(1)), dist: Math.round(r.dist) }; }); };
   const [p1, p2] = [await page(), await page()];
-  assert.ok(await p1.evaluate(() => [...document.scripts].filter(s => s.src).every(s => /\?v=(11|12|13|14|14\.1|14\.2|14\.3|14\.4|14\.5|14\.5\.1|14\.5\.2|14\.5\.3|14\.5\.5|14\.5\.6|14\.5\.7|14\.5\.9|14\.6\.0|14\.6\.1|14\.6\.5|14\.6\.6)$/.test(s.src))));
+  assert.ok(await p1.evaluate(() => [...document.scripts].filter(s => s.src).every(s => /\?v=(11|12|13|14|14\.1|14\.2|14\.3|14\.4|14\.5|14\.5\.1|14\.5\.2|14\.5\.3|14\.5\.5|14\.5\.6|14\.5\.7|14\.5\.9|14\.6\.0|14\.6\.1|14\.6\.5|14\.6\.7)$/.test(s.src))));
   const [pid, simple] = await Promise.all([drive(p1, PID, 20), drive(p2, SIMPLE, 20)]);
   console.log('oval 20 s  PID', JSON.stringify(pid), ' simple', JSON.stringify(simple));
   assert.equal(pid.offs, 0, 'PID: no off-line'); assert.ok(pid.laps.length >= 1 && pid.laps.every(t => t < 14.6), 'PID lap faster than v9 (14.6 s)');
