@@ -1,11 +1,22 @@
 /* Simplified Arduino C -> async JS transpiler. Used inside the worker and by tests. */
 (function (root) {
   const TYPES = '(?:unsigned\\s+)?(?:long\\s+long|int|float|double|long|bool|boolean|byte|String|char|uint8_t|uint16_t|uint32_t|int8_t|int16_t|int32_t|size_t|word|short|uint64_t)';
-  const LIBS = 'Servo|Adafruit_NeoPixel|LiquidCrystal_I2C|Adafruit_SSD1306|DHT|LedControl|NewPing|RF24|VL53L0X|Adafruit_VL53L0X|MPU6050|Adafruit_MPU6050';
+  const LIBS = 'Servo|Adafruit_NeoPixel|LiquidCrystal_I2C|Adafruit_SSD1306|DHT|LedControl|NewPing|RF24|VL53L0X|Adafruit_VL53L0X|MPU6050|Adafruit_MPU6050|FastLED';
+  // FastLED template type-names. Quoted so they are not extra globals (a sketch may use int RGB).
+  const FAST_TOK = /^(?:WS2812B|WS2812|WS2811|WS2813|NEOPIXEL|SK6812|GRB|RGB|RBG|BRG|GBR|BGR)$/;
   function transpile(src) {
     let s = src.replace(/^\s*#include.*$/gm, '')
-      .replace(/^\s*#define\s+(\w+)\s+(.+)$/gm, 'const $1 = $2;')
+      .replace(/^\s*#define\s+(\w+)\s+(.+)$/gm, (m, name, val) => {
+        const tok = /^\s*([A-Za-z_]\w*)\s*(\/\/.*)?$/.exec(val);
+        if (tok && FAST_TOK.test(tok[1])) return `const ${name} = ${JSON.stringify(tok[1])};${tok[2] ? ' ' + tok[2] : ''}`;
+        return `const ${name} = ${val};`;
+      })
       .replace(new RegExp('^(\\s*)(' + LIBS + ')\\s+(\\w+)\\s*(?:=\\s*\\w+\\s*)?(?:\\(([^;]*)\\))?\\s*;', 'gm'), (m, ind, cls, name, args) => `${ind}var ${name} = __lib('${cls}'${args ? ', ' + args : ''});`);
+    // FastLED: CRGB::Red, CRGB leds[N], addLeds<CHIP, PIN, ORDER>.
+    s = s.replace(/\bCRGB\s*::\s*(\w+)/g, 'CRGB.$1');
+    s = s.replace(/\bFastLED\s*\.\s*addLeds\s*<\s*([^<>]+)\s*>\s*\(/g, (m, inner) => 'FastLED.addLeds(' + inner.split(',').map(p => { p = p.trim(); return p && FAST_TOK.test(p) ? JSON.stringify(p) : p; }).filter(p => p !== '').join(', ') + ', ');
+    s = s.replace(/\bCRGB\s+(\w+)\s*\[\s*([^\]]+?)\s*\]\s*=\s*\{([^{}]*)\}\s*;/g, 'let $1 = [$3];');
+    s = s.replace(/\bCRGB\s+(\w+)\s*\[\s*([^\]]+?)\s*\]\s*;/g, 'let $1 = __crgb($2);');
     // v7: struct-like result holders, pointer args, sizeof, 64-bit literal suffixes
     s = s.replace(/^(\s*)(?:VL53L0X_RangingMeasurementData_t|sensors_event_t)\s+([\w\s,]+);/gm, (m, ind, list) => ind + 'var ' + list.split(',').map(x => x.trim() + ' = {}').join(', ') + ';');
     s = s.replace(/(\w+)\.(getAcceleration|getRotation|getMotion6)\s*\(([^)]*)\)/g, (m, o, fn, args) => `[${args.replace(/&/g, '')}] = ${o}.${fn}()`);

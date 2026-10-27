@@ -6,7 +6,7 @@ const EX = 'ex:Пример: Робот-машинка на трассе (про
   const pg = await (await b.newContext({ viewport: { width: 1920, height: 1080 } })).newPage();
   pg.on('console', m => { if (m.type() === 'error') errs.push(m.text()); }); pg.on('pageerror', e => errs.push(e.message));
   await pg.goto(URL); await pg.waitForTimeout(300);
-  assert.ok(await pg.evaluate(() => [...document.scripts].filter(s => s.src).every(s => /\?v=(10|11|12|13|14|14\.1|14\.2|14\.3|14\.4|14\.5|14\.5\.1|14\.5\.2|14\.5\.3|14\.5\.5|14\.5\.6|14\.5\.7|14\.5\.9|14\.6\.0)$/.test(s.src))));
+  assert.ok(await pg.evaluate(() => [...document.scripts].filter(s => s.src).every(s => /\?v=(10|11|12|13|14|14\.1|14\.2|14\.3|14\.4|14\.5|14\.5\.1|14\.5\.2|14\.5\.3|14\.5\.5|14\.5\.6|14\.5\.7|14\.5\.9|14\.6\.0|14\.6\.1)$/.test(s.src))));
   await pg.selectOption('#projects', EX); await pg.waitForTimeout(300);
   // add a VL53L0X mounted at the nose, looking forward
   await pg.evaluate(() => { const p = __sim.proj; p.parts.push({ id: 'L1', type: 'vl53l0x', x: -320, y: 300, rot: 0, props: {} }); p.robot.mounts.push({ part: 'L1', x: 90, y: 0 }); __sim.changed(); __sim.select('L1'); });

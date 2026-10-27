@@ -1,5 +1,5 @@
 /* Runs the user's sketch in isolation. Network APIs are removed before user code runs. */
-importScripts('transpile.js?v=8', 'memcap.js?v=8');
+importScripts('transpile.js?v=9', 'memcap.js?v=9');
 /* Whitelist sandbox: capture what we need, then strip every other global from self and its prototype chain,
  * so even (()=>{}).constructor('return this')() sees no network, storage, workers or navigator. */
 const transpile = Transpile.transpile, pyT = Transpile.py, memInstall = MemCap.install;
@@ -118,6 +118,42 @@ const makeDisplays = function (mods) {
   return { strip, matrix, lcd, oled, screen, flush, dirty };
 };
 
+/* FastLED subset (WS2812 / NeoPixel / WS2811). Pixels are copied into the same strip buffer — no second renderer. */
+const makeFastLED = function (strip) {
+  const ctls = [];
+  const crgbBuf = n => { n |= 0; if (n < 0) n = 0; if (n > 256) n = 256; return new _Array(n).fill(0); };
+  const asColor = c => (c && typeof c === 'object') ? strip.Color(c.r, c.g, c.b) : ((c >>> 0) & 0xffffff);
+  function CRGB(r, g, b) { return g === undefined ? asColor(r) : strip.Color(r, g, b); }
+  // HTML names, as in FastLED: Green is 0x008000, full green is Lime.
+  Object.assign(CRGB, {
+    Black: 0x000000, White: 0xFFFFFF, Red: 0xFF0000, Green: 0x008000, Lime: 0x00FF00, Blue: 0x0000FF,
+    Yellow: 0xFFFF00, Cyan: 0x00FFFF, Magenta: 0xFF00FF, Orange: 0xFFA500, Purple: 0x800080, Pink: 0xFFC0CB,
+    Aqua: 0x00FFFF, Navy: 0x000080, Teal: 0x008080, Maroon: 0x800000, Gray: 0x808080, Grey: 0x808080, Silver: 0xC0C0C0, Gold: 0xFFD700,
+  });
+  function CHSV(h, s, v) { return strip.ColorHSV((h & 255) * 256, s === undefined ? 255 : s, v === undefined ? 255 : v); }
+  const FastLED = {
+    addLeds(...args) {
+      let leds = null, n = 0;
+      for (let i = 0; i < args.length; i++) if (_Array.isArray(args[i])) { leds = args[i]; const c = args[i + 1]; n = (typeof c === 'number' ? c : leds.length) | 0; break; }
+      if (leds) ctls.push({ leds, n: n < 0 ? 0 : n });
+      return this;
+    },
+    setCorrection() { return this; },
+    show() {
+      const limit = strip.numPixels();
+      for (const c of ctls) { const n = Math.min(c.leds.length | 0, c.n, limit); for (let i = 0; i < n; i++) strip.setPixelColor(i, asColor(c.leds[i])); }
+      strip.show();
+    },
+    setBrightness(b) { strip.setBrightness(b); },
+    clear(write) {
+      for (const c of ctls) for (let i = 0; i < c.leds.length; i++) c.leds[i] = 0;
+      strip.clear();
+      if (write) strip.show();
+    },
+  };
+  return { FastLED, CRGB, CHSV, __crgb: crgbBuf };
+};
+
 const start = function (code, board, mods) {
   const B = BOARDS[board] || BOARDS.esp32;
   const out = s => post({ t: 'log', s: String(s).slice(0, 2000) });
@@ -159,13 +195,15 @@ const start = function (code, board, mods) {
     write(d) { if (!sensors.nrf || this.wr == null) return false; post({ t: 'rf', addr: this.wr, ch: this.ch, data: pkt(d) }); return !!sensors.rfPeer; },
     available() { return this.q.length > 0; }, read() { const x = this.q.shift(); return x === undefined ? 0 : x; } };
   rfIn = m => { if (!sensors.nrf || !radio.listening || (m.ch | 0) !== radio.ch || !Object.values(radio.rd).includes(String(m.addr))) return; if (radio.q.length < 32) radio.q.push(m.data); };
-  const LIB = { RF24: () => radio, VL53L0X: () => vl53, Adafruit_VL53L0X: () => vl53, MPU6050: () => mpu, Adafruit_MPU6050: () => mpu, Servo: () => servo, Adafruit_NeoPixel: () => D.strip, LiquidCrystal_I2C: () => D.lcd, Adafruit_SSD1306: () => D.oled, DHT: () => dht, LedControl: () => D.matrix, NewPing: () => sonar };
+  const fast = makeFastLED(D.strip);
+  const LIB = { RF24: () => radio, VL53L0X: () => vl53, Adafruit_VL53L0X: () => vl53, MPU6050: () => mpu, Adafruit_MPU6050: () => mpu, Servo: () => servo, Adafruit_NeoPixel: () => D.strip, FastLED: () => fast.FastLED, LiquidCrystal_I2C: () => D.lcd, Adafruit_SSD1306: () => D.oled, DHT: () => dht, LedControl: () => D.matrix, NewPing: () => sonar };
   const rt = {
     HIGH: 1, LOW: 0, INPUT: 'INPUT', OUTPUT: 'OUTPUT', INPUT_PULLUP: 'INPUT_PULLUP', true: true,
     LED_BUILTIN: B.LED, ...B.A,
     RF24_PA_MIN: 0, RF24_PA_LOW: 1, RF24_PA_HIGH: 2, RF24_PA_MAX: 3, RF24_250KBPS: 2, RF24_1MBPS: 0, RF24_2MBPS: 1, MPU6050_RANGE_2_G: 0, MPU6050_RANGE_8_G: 2, MPU6050_RANGE_500_DEG: 1, MPU6050_BAND_21_HZ: 4,
     Wire: { begin() {}, setClock() {} }, __sizeof: x => typeof x === 'string' ? x.length + 1 : Array.isArray(x) ? x.length : 4,
     NEO_GRB: 0, NEO_RGB: 0, NEO_KHZ800: 0, DHT22: 22, DHT11: 11, SSD1306_SWITCHCAPVCC: 2, WHITE: 1, BLACK: 0, SSD1306_WHITE: 1, SSD1306_BLACK: 0,
+    TypicalLEDStrip: 0,
     pinMode: (p, m) => pinOut(p, m, null),
     digitalWrite: (p, v) => pinOut(p, null, v ? 1 : 0),
     analogWrite: (p, v) => pinOut(p, null, Math.max(0, Math.min(255, v)) / 255),
@@ -182,6 +220,7 @@ const start = function (code, board, mods) {
     min: Math.min, max: Math.max, abs: Math.abs, sqrt: Math.sqrt, pow: Math.pow, round: Math.round,
     Serial: { begin() {}, print: s => out(s), println: (s = '') => out(String(s) + '\n') },
     matrix: D.matrix, strip: D.strip, setPixel: D.strip.setPixelColor, show: () => { D.strip.show(); D.matrix.show(); },
+    FastLED: fast.FastLED, CRGB: fast.CRGB, CHSV: fast.CHSV, __crgb: fast.__crgb,
     oled: D.oled, lcd: D.lcd, screen: D.screen, servo, dht, sonar,
     __lib: (cls) => LIB[cls] ? LIB[cls]() : (() => { throw new Error('неизвестная библиотека ' + cls); })(),
     Array: SafeArray,
