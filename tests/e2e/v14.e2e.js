@@ -16,7 +16,7 @@ const SHOT = process.argv[3] || '/tmp';
     const html = items.map(it => { const s = it.querySelector('svg.thumb'); return s ? s.outerHTML : ''; });
     const names = items.map(it => it.querySelector('.nm') && it.querySelector('.nm').textContent);
     return { n: items.length, parts: Object.keys(PARTS).length, ico: document.querySelectorAll('#palette .ico').length,
-      emoji: items.some(it => /[\u{1F300}-\u{1FAFF}]/u.test(it.textContent)), missing: html.filter(h => !h).length,
+      emoji: items.some(it => { const c = it.cloneNode(true); const nm = c.querySelector('.nm'); if (nm) nm.remove(); return /[\u{1F300}-\u{1FAFF}]/u.test(c.textContent); }), missing: html.filter(h => !h).length,
       unique: new Set(html).size, beside: items.every(it => it.querySelector('svg.thumb') && it.querySelector('.nm')),
       w: items[0] && items[0].querySelector('svg.thumb').getBoundingClientRect().width,
       hcsr: (document.querySelector('#palette .item[data-type="hcsr04"] svg.thumb') || {}).textContent || '',

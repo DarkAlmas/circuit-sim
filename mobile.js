@@ -63,7 +63,7 @@
     h.addEventListener('pointerdown', e => { if (!body.classList.contains('pm')) return; on = true; moved = false; y0 = e.clientY; const box = key === 'bside' ? $('#bottom') : host; h0 = box.getBoundingClientRect().height; h.setPointerCapture(e.pointerId); e.preventDefault(); });
     h.addEventListener('pointermove', e => { if (!on) return; const d = y0 - e.clientY; if (Math.abs(d) > 6) moved = true; setH(key, Math.max(30, h0 + d) / vh()); });
     const up = e => { if (!on) return; on = false;
-      if (moved) { const stopClick = ev => { ev.preventDefault(); ev.stopPropagation(); document.removeEventListener('click', stopClick, true); }; document.addEventListener('click', stopClick, true); }
+      if (moved) { const stopClick = ev => { if (!ev.isTrusted) return; ev.preventDefault(); ev.stopPropagation(); }; document.addEventListener('click', stopClick, true); setTimeout(() => document.removeEventListener('click', stopClick, true), 0); }
       const box = key === 'bside' ? $('#bottom') : host, f = box.getBoundingClientRect().height / vh(), sn = SNAP[key];
       if (!moved) { if (key === 'bside') { const open = body.dataset.ser !== 'open'; body.dataset.ser = open ? 'open' : ''; setH(key, null); } return; }
       if (key === 'bside') { const open = f > 0.2; body.dataset.ser = open ? 'open' : ''; setH(key, open ? nearest(f, sn.slice(1)) : null); return; }
