@@ -23,6 +23,7 @@
   mi('pmImport', '⬆ Импорт', () => $('#import').click());
   mi('pmSettings', '⚙ Настройки', () => { const s = window.__sim; if (s) s.openSettings(); });
   const pmPower = mi('pmPower', '⚡ Питание: выкл', () => { const s = sim(); if (s && s.togglePortPower) s.togglePortPower(); });
+  mi('pmAssist', '✦ Помощник', () => { if (window.Assistant) window.Assistant.open(); });
   body.append(menu);
   bMore.onclick = e => { e.stopPropagation(); menu.hidden = !menu.hidden; };
   document.addEventListener('pointerdown', e => { if (!menu.hidden && !menu.contains(e.target) && e.target !== bMore) menu.hidden = true; });

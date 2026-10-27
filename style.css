@@ -288,3 +288,21 @@ body.pm #w3pal .w3sec{flex:0 0 auto;margin:0 0 0 8px;white-space:nowrap}
 body.pm #w3pal button{flex:0 0 auto;min-height:44px;font-size:13px;padding:4px 10px;text-align:center;white-space:nowrap;margin-top:0}
 body.pm #w3pal .w3act{margin-top:0}
 body.pm .w3hint{display:none}
+/* v14.6: «Помощник» — вкладка справа. Сеть только после тумблера, через отдельное окно. */
+#sideTabs{width:100%;margin:0 0 8px}
+#sideTabs button{flex:1}
+#assistMode{margin-bottom:6px}
+#assistLog{display:flex;flex-direction:column;gap:6px;overflow:auto;max-height:32vh}
+.amsg{white-space:pre-wrap;word-break:break-word;background:#1f2636;border:1px solid #2a3242;border-radius:8px;padding:8px}
+.amsg.user{background:#1a2436;border-color:#3a4a6e}
+.amsg.err{border-color:#a33;color:#ffb4b4}
+.amsg .apply{margin-top:8px;background:#1f6b3a;border-color:#2c8a4c}
+#assistInput{width:100%;min-height:72px;resize:vertical}
+#sideAssistPane .prop input{width:100%}
+#assistRememberRow{display:flex;align-items:center;gap:8px;font-size:12px;color:#8a94a8;margin:6px 0}
+#assistRemember{width:18px;height:18px;padding:0;flex:0 0 auto;cursor:pointer}
+#assistCfg{margin-top:8px;border-top:1px solid #2a3242;padding-top:4px}
+#assistCfg .hint{margin:8px 0}
+#right.assist{display:flex;flex-direction:column;overflow:hidden}
+#right.assist #sideAssistPane{display:flex;flex-direction:column;gap:6px;flex:1;min-height:0;overflow:auto}
+#right.assist #assistLog{max-height:none;flex:1;min-height:80px}
