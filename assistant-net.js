@@ -2,7 +2,7 @@
    The API key arrives only in a same-origin postMessage and is not read from storage. */
 (function () {
   'use strict';
-  var VERSION = '14.6.8';
+  var VERSION = '14.6.9';
   var here = location.origin;
   var allowed = '';
   try { allowed = new URL(new URLSearchParams(location.search).get('o') || '').origin; } catch (e) { allowed = ''; }
