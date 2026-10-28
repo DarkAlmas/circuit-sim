@@ -3,7 +3,7 @@
    and a sketch is only text until the existing worker transpiles it. */
 (function () {
   'use strict';
-  var VERSION = '14.6.7';
+  var VERSION = '14.6.8';
   var SETTINGS_KEY = 'circuitsim.assistant';
   var KEY_KEY = 'circuitsim.assistant.key';
   var DEFAULT_BASE = 'http://127.0.0.1:11434/v1';

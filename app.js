@@ -1,7 +1,7 @@
 (function () {
   'use strict';
   const P = window.PARTS, $ = s => document.querySelector(s);
-  const svg = $('#svg'), view = $('#view'), wiresL = $('#wires'), partsL = $('#partsL'), temp = $('#temp'), tip = $('#tip');
+  const svg = $('#svg'), view = $('#view'), wiresL = $('#wires'), partsL = $('#partsL'), boardsL = $('#boardsL'), temp = $('#temp'), tip = $('#tip');
   const LS = 'circuitsim.projects', AUTO = 'circuitsim.autosave', UI_KEY = window.UI_SETTINGS_KEY || 'circuitsim.ui';
   let ui = loadUi();
   const DEFAULT_CODE = window.EXAMPLES[Object.keys(window.EXAMPLES)[0]].code;
@@ -100,7 +100,7 @@
         `<path d="${d}" class="whit" data-wire="${esc(w.id)}"/>` +
         (isSel && !locked() ? (w.pts || []).map((q, i) => `<circle class="bend" data-wire="${esc(w.id)}" data-i="${i}" cx="${q[0]}" cy="${q[1]}" r="5"/>`).join('') +
           ['a', 'b'].map(k => { const q = pinPos(part(w[k].part), w[k].pin); return `<circle class="wend" data-wire="${esc(w.id)}" data-end="${k}" cx="${q[0]}" cy="${q[1]}" r="${(9 / cam.s).toFixed(2)}"/>`; }).join('') : ''); }).join('');
-    partsL.innerHTML = [...proj.parts].sort((a, b) => !!P[b.type].strips - !!P[a.type].strips).map(p => { const d = P[p.type], [bx, by, bw, bh] = bbox(p.type), c = checks[p.id];
+    const partHtml = p => { const d = P[p.type], [bx, by, bw, bh] = bbox(p.type), c = checks[p.id];
       const bi = d.builtin ?? 2, dk = d.display, link = links[p.id];
       const boardMcu = !!(d.mcu && !d.chip);
       const poweredNow = !!(meas[p.id] && meas[p.id].powered);
@@ -112,7 +112,10 @@
       const smoke = p.burned ? [0, 1, 2].map(k => { const f = ((t * 0.6 + k / 3) % 1); return `<circle class="smoke" cx="${Math.sin((t + k) * 2) * 6 * f}" cy="${by - 4 - f * 40}" r="${4 + f * 10}" opacity="${(0.55 * (1 - f)).toFixed(2)}"/>`; }).join('') : '';
       return `<g class="part${sel && sel.part === p.id ? ' sel' : ''}${c ? ' ' + c.level : ''}${p.burned ? ' burned' : ''}${dead ? ' dead' : ''}${sh ? ' short' + (blink ? ' on' : '') : ''}" data-part="${esc(p.id)}" transform="translate(${p.x} ${p.y}) rotate(${(p.rot || 0) * 90})">
         <rect class="hit" x="${bx}" y="${by}" width="${bw}" height="${bh}" rx="6"/><g class="art">${d.draw(p, st)}</g>${smoke}
-        ${d.pins.map(q => `<circle class="pin${d.strips ? ' hole' : ''}${armed && armed.part === p.id && armed.pin === q.id ? ' armed' : ''}" data-pin="${q.id}" cx="${q.x}" cy="${q.y}" r="${d.strips ? 3 : 4}"/>`).join('')}</g>`; }).join('');
+        ${d.pins.map(q => `<circle class="pin${d.strips ? ' hole' : ''}${armed && armed.part === p.id && armed.pin === q.id ? ' armed' : ''}" data-pin="${q.id}" cx="${q.x}" cy="${q.y}" r="${d.strips ? 3 : 4}"/>`).join('')}</g>`; };
+    // Breadboards go to a layer under wires so jumper wires are drawn on top of the board.
+    boardsL.innerHTML = proj.parts.filter(p => P[p.type].strips).map(partHtml).join('');
+    partsL.innerHTML = proj.parts.filter(p => !P[p.type].strips).map(partHtml).join('');
     $('#simbar').hidden = !running; $('#simbar').classList.toggle('bad', !!shorts.length); $('#svg').classList.toggle('locked', locked());
     syncCodeFor(); placeFloat();
     $('#boardName').textContent = (proj.parts.find(p => P[p.type].mcu) && P[proj.parts.find(p => P[p.type].mcu).type].name) || 'нет платы';
@@ -361,7 +364,7 @@
     return best; }
   function wireNear(cx, cy, rad) { let best = null, bd = rad; for (const el of document.elementsFromPoint(cx, cy)) { if (!el.classList || !el.classList.contains('whit')) continue;
       const L = el.getTotalLength(), m = el.getScreenCTM(); if (!m) continue; for (let i = 0; i <= 64; i++) { const q = el.getPointAtLength(L * i / 64), d = Math.hypot(q.x * m.a + m.e - cx, q.y * m.d + m.f - cy); if (d < bd) { bd = d; best = el; } } } return best; }
-  function nearestPin(cx, cy, rad) { let best = null, bd = rad; for (const el of partsL.querySelectorAll('.pin')) { const r = el.getBoundingClientRect(), d = Math.hypot(r.x + r.width / 2 - cx, r.y + r.height / 2 - cy);
+  function nearestPin(cx, cy, rad) { let best = null, bd = rad; for (const el of view.querySelectorAll('#boardsL .pin, #partsL .pin')) { const r = el.getBoundingClientRect(), d = Math.hypot(r.x + r.width / 2 - cx, r.y + r.height / 2 - cy);
     if (d < bd) { bd = d; best = el; } } return best ? { pinEl: best, partEl: best.closest('.part') } : null; }
   function pinUnder(cx, cy) { const tg = document.elementFromPoint(cx, cy); let pe = tg && tg.closest && tg.closest('.pin'); if (!pe) { const n = nearestPin(cx, cy, 22); pe = n && n.pinEl; }
     return pe ? { part: pe.closest('.part').dataset.part, pin: pe.dataset.pin } : null; }
@@ -543,7 +546,7 @@
   /* sketch worker lifecycle: a crashed/hung worker (exception, OOM, infinite loop) is torn down, a fresh idle
    * worker is created right away, the console explains what happened, and the next Run uses the fresh worker. */
   let spare = null, crashes = 0;
-  const newWorker = () => new Worker('worker.js?v=14.6.7');
+  const newWorker = () => new Worker('worker.js?v=14.6.8');
   function takeWorker() { const w = spare || newWorker(); spare = null; return w; }
   function crash(msg) { if (!worker) return; worker.onmessage = worker.onerror = null; try { worker.terminate(); } catch (e) {} worker = null; gpio = {}; prevV = null; crashes++;
     try { spare = newWorker(); } catch (e) { spare = null; }
