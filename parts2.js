@@ -116,7 +116,7 @@
     hint: id => /^GND/.test(id) ? 'GND (земля)' : id === 'VBUS' ? 'VBUS (5 В от USB)' : id === 'VSYS' ? 'VSYS (≈4,8 В)' : id === '3V3' ? '3V3 (выход 3,3 В)' : /^GP2[678]$/.test(id) ? id + ' (ADC' + (picoGpio(id) - 26) + ', A' + (picoGpio(id) - 26) + ')' : /^GP/.test(id) ? 'GPIO' + picoGpio(id) : id });
   const OPI_L = ['3V3', '5V', 'GND', 'G0', 'G1', 'G2', 'G3', 'G4', 'G5', 'G6', 'G7'];
   const OPI_R = ['HDMI', '5Vb', 'GND2', 'G8', 'G9', 'G10', 'G11', 'G12', 'G13', 'G14', 'G15'];
-  P.opi = mcu({ kind: 'opi', lang: 'python', name: 'Orange Pi (Python + HDMI)', short: 'Orange Pi', group: 'Платы', vio: 3.3, builtin: null, pinMax: 0.016, w: 90, L: OPI_L, R: OPI_R,
+  P.opi = mcu({ kind: 'opi', lang: 'python', name: 'Orange Pi (конфиг + образ → QEMU)', short: 'Orange Pi', group: 'Платы', vio: 3.3, builtin: null, pinMax: 0.016, w: 90, L: OPI_L, R: OPI_R,
     supplies: { '3V3': 3.3, '5V': 5, '5Vb': 5 }, gpio: id => { const m = /^G(\d+)$/.exec(id); return m ? +m[1] : null; }, pcb: '#1b1b1b', chipName: 'Allwinner H3', sub: 'Linux · Python', ledName: 'ACT',
     usbKind: 'micro', usbName: 'Micro-USB',
     power: { gnd: 'GND', sense: ['5V', '5Vb', '3V3'], usbI: 0.3,
@@ -129,7 +129,7 @@
     hint: id => id === 'HDMI' ? 'HDMI-выход: соедини с монитором' : /^GND/.test(id) ? 'GND (земля)' : /^5V/.test(id) ? '5V' : id === '3V3' ? '3V3' : 'GPIO' + id.slice(1) + ' (номер для GPIO.setup)',
     extra: (T, B, W) => `<rect x="${W - 40}" y="${T + 6}" width="30" height="14" rx="2" fill="#aaa" stroke="#555"/><text x="${W - 25}" y="${T + 30}" class="tiny lightt">HDMI</text><rect x="${-W + 8}" y="${T + 6}" width="30" height="22" fill="#9aa" stroke="#555"/><text x="${-W + 23}" y="${T + 36}" class="tiny lightt">LAN</text>` });
   // v14.7: hardware specs (config only; real OS boots on desktop QEMU)
-  P.opi.props = Object.assign({}, P.opi.props || {}, { cpuModel: 'Allwinner H3', cpuCores: 4, cpuMhz: 1300, ramMb: 1024, diskGb: 8, osImageName: '', osImageSize: 0, osImageId: '' });
+  P.opi.props = Object.assign({}, P.opi.props || {}, { cpuModel: 'Allwinner H3', cpuCores: 4, cpuMhz: 1300, ramMb: 1024, diskGb: 8, osImageName: '', osImageSize: 0, osImageId: '', osHintId: '' });
   P.opi.measure = (base => (p, sol, ctx) => { const m = base(p, sol, ctx); delete m.pinI.HDMI; return m; })(P.opi.measure);
   // DIP chips: pins straddle the breadboard gap (rows e/f)
   P.atmega328 = mcu({ kind: 'atmega', name: 'ATmega328P (DIP-28)', short: 'ATmega328P', group: 'Микросхемы', vio: 5, builtin: 13, pinMax: 0.04, dip: true, vcc: 'VCC', chipName: 'ATMEGA328P',
