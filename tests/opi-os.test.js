@@ -1,4 +1,4 @@
-// v14.7.0: Orange Pi specs + OS image meta (no in-browser boot).
+// v14.7.1: Orange Pi specs + OS image meta (no in-browser boot).
 const test = require('node:test'), assert = require('node:assert');
 global.window = { Solver: require('../solver.js') };
 require('../parts.js'); require('../parts2.js'); window.Devices = require('../devices.js'); require('../parts3.js'); require('../sanitize.js');
@@ -21,3 +21,10 @@ test('image check: ext, 2 GB hard cap, 256 MB warn', () => {
   assert.ok(!O.check({ name: 'a.exe', size: 10 }).ok); assert.ok(!O.check({ name: 'a.img', size: O.HARD + 1 }).ok);
   assert.ok(O.check({ name: 'a.img', size: O.SOFT + 1 }).warn);
 });
+
+// v14.7.1: phone hooks
+{ const fs = require('fs'), path = require('path'), assert = require('assert');
+  const app = fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8'), css = fs.readFileSync(path.join(__dirname, '..', 'style.css'), 'utf8');
+  assert.ok(/dz\.onclick = \(\) => \$\('#opiFile'\)\.click\(\)/.test(app), 'tap drop zone opens picker');
+  assert.ok(app.includes('Прикрепи .img/.iso. Бут ОС — на ПК.'), 'short phone copy');
+  assert.ok(css.includes('body.pm .opidrop') && css.includes('body.pm #opiPick'), 'phone css'); }
