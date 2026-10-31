@@ -128,6 +128,8 @@
     lab: id => id === 'HDMI' ? 'HDMI' : /^G\d/.test(id) ? 'GPIO' + id.slice(1) : glab(id).replace('5Vb', '5V'),
     hint: id => id === 'HDMI' ? 'HDMI-выход: соедини с монитором' : /^GND/.test(id) ? 'GND (земля)' : /^5V/.test(id) ? '5V' : id === '3V3' ? '3V3' : 'GPIO' + id.slice(1) + ' (номер для GPIO.setup)',
     extra: (T, B, W) => `<rect x="${W - 40}" y="${T + 6}" width="30" height="14" rx="2" fill="#aaa" stroke="#555"/><text x="${W - 25}" y="${T + 30}" class="tiny lightt">HDMI</text><rect x="${-W + 8}" y="${T + 6}" width="30" height="22" fill="#9aa" stroke="#555"/><text x="${-W + 23}" y="${T + 36}" class="tiny lightt">LAN</text>` });
+  // v14.7: hardware specs (config only; real OS boots on desktop QEMU)
+  P.opi.props = Object.assign({}, P.opi.props || {}, { cpuModel: 'Allwinner H3', cpuCores: 4, cpuMhz: 1300, ramMb: 1024, diskGb: 8, osImageName: '', osImageSize: 0, osImageId: '' });
   P.opi.measure = (base => (p, sol, ctx) => { const m = base(p, sol, ctx); delete m.pinI.HDMI; return m; })(P.opi.measure);
   // DIP chips: pins straddle the breadboard gap (rows e/f)
   P.atmega328 = mcu({ kind: 'atmega', name: 'ATmega328P (DIP-28)', short: 'ATmega328P', group: 'Микросхемы', vio: 5, builtin: 13, pinMax: 0.04, dip: true, vcc: 'VCC', chipName: 'ATMEGA328P',

@@ -3,7 +3,9 @@
   const ID = /^[A-Za-z0-9_-]{1,32}$/;
   const NUM = { V: [0, 1000], R: [0.001, 1e9], Pmax: [0.001, 1000], pos: [0, 1], Vf: [0.1, 10], Imax: [0.0001, 10], beta: [1, 2000], rInt: [0.001, 100],
     C: [1e-12, 1], L: [1e-9, 10], lux: [0, 100000], temp: [-40, 125], hum: [0, 100], dist: [2, 400], K: [0.001, 100], Vth: [0.1, 10], lambda: [0, 1],
-    /* v7 */ refl: [0, 1], thr: [0, 1], mm: [30, 2000], pitch: [-90, 90], roll: [-180, 180], acc: [-2, 2], gz: [-250, 250], soc: [0, 100], Vout: [5, 32] };
+    /* v7 */ refl: [0, 1], thr: [0, 1], mm: [30, 2000], pitch: [-90, 90], roll: [-180, 180], acc: [-2, 2], gz: [-250, 250], soc: [0, 100], Vout: [5, 32],
+    /* v14.7 opi */ cpuCores: [1, 8], cpuMhz: [100, 4000], ramMb: [256, 16384], diskGb: [1, 1024], osImageSize: [0, 2147483648] };
+  const OPI_STR = { cpuModel: /^(Allwinner H[356]|Rockchip RK3566)$/, osImageName: /^[^<>"'`\\/\u0000-\u001f]{0,120}\.(img|iso|xz|gz|zip)$/i, osImageId: /^opi-sd-[A-Za-z0-9_-]{1,32}$/ };
   const BOOL = new Set(['p', 'motion']);
   const KINDS = ['esp32', 'esp8266', 'uno', 'attiny', 'pico', 'opi', 'analog', 'empty', 'esp32c3', 'line', 'car'];
   const LIMITS = { parts: 500, wires: 2000, pts: 50, code: 100000, importBytes: 2 * 1024 * 1024 };
@@ -20,6 +22,7 @@
         const v = p.props && typeof p.props === 'object' ? p.props[k] : undefined;
         if (k === 'color') props.color = typeof v === 'string' && Object.prototype.hasOwnProperty.call(window.LED_COLORS, v) ? v : def;
         else if (k === 'Vout' && p.type === 'buck') props[k] = num(v, 0.8, 24, def);
+        else if (OPI_STR[k]) props[k] = typeof v === 'string' && OPI_STR[k].test(v) ? v : (k === 'cpuModel' ? def : '');
         else if (BOOL.has(k)) props[k] = typeof v === 'boolean' ? v : !!def;
         else props[k] = NUM[k] ? num(v, NUM[k][0], NUM[k][1], def) : def;
       }

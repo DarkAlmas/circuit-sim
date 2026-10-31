@@ -164,6 +164,7 @@
     const keys = Object.keys(pr);
     if (keys.length) { h += '<h4>Параметры</h4>';
       for (const k of keys) {
+        if (p.type === 'opi' && /^(cpu|ram|disk|osImage)/.test(k)) continue;
         if (k === 'color') h += `<div class="prop">Цвет<div class="swatches">${Object.entries(LED_COLORS).map(([n, c]) => `<button class="sw${n === pr.color ? ' on' : ''}" data-color="${esc(n)}" title="${esc(n)}"><svg viewBox="0 0 20 20"><circle cx="10" cy="10" r="8" fill="${c[0]}"/></svg></button>`).join('')}</div></div>`;
         else if (k === 'R' && p.type === 'resistor') { const u = RUNITS.filter(x => pr.R >= x[1]).pop() || RUNITS[0];
           h += `<label class="prop">Сопротивление<span class="rrow"><input data-k="R" type="number" min="0" step="any" value="${esc(+(pr.R / u[1]).toPrecision(6))}"><select id="runit">${RUNITS.map(x => `<option value="${x[1]}"${x === u ? ' selected' : ''}>${x[0]}</option>`).join('')}</select>
@@ -175,6 +176,17 @@
         else { const ui = PROP_UI[k] || [k, '', 'any']; h += `<label class="prop">${ui[0]}${ui[1] ? ', ' + ui[1] : ''}<input data-k="${k}" type="${k === 'pos' ? 'range' : 'number'}" step="${ui[2]}" ${k === 'pos' ? 'min="0" max="1"' : 'min="0"'} value="${esc(pr[k])}"></label>`; }
       } }
     if (d.mcu && !d.chip && d.usbKind) h += `<div class="row"><button type="button" id="usbToggle">${p.usb ? d.usbName + ' подключен' : d.usbName + ' не подключен'}</button></div><p class="muted">Порт на плате. Учитывается, когда включено «⚡ Питание».</p>`;
+    if (p.type === 'opi' && window.OpiOs) { const O = window.OpiOs;
+      h += `<h4>Железо</h4><p class="muted" id="opiSum">${esc(O.summary(pr))}</p>
+        <label class="prop">Процессор<select id="opiCpu">${Object.keys(O.PRESETS).map(n => `<option${n === pr.cpuModel ? ' selected' : ''}>${esc(n)}</option>`).join('')}</select></label>
+        <label class="prop">Ядра CPU<input data-ok="cpuCores" type="number" min="1" max="8" step="1" value="${esc(pr.cpuCores)}"></label>
+        <label class="prop">Частота, МГц<input data-ok="cpuMhz" type="number" min="100" max="4000" step="100" value="${esc(pr.cpuMhz)}"></label>
+        <label class="prop">ОЗУ, МБ<select data-ok="ramMb">${O.RAM.map(n => `<option value="${n}"${n === pr.ramMb ? ' selected' : ''}>${n}</option>`).join('')}</select></label>
+        <label class="prop">Диск, ГБ<select data-ok="diskGb">${O.DISK.map(n => `<option value="${n}"${n === pr.diskGb ? ' selected' : ''}>${n}</option>`).join('')}</select></label>
+        <h4>Образ ОС (SD)</h4><div id="opiDrop" class="opidrop">${pr.osImageName ? `Образ прикреплён: <b>${esc(pr.osImageName)}</b> · ${esc(O.fmtSize(pr.osImageSize))}` : 'Перетащи сюда .img / .iso или выбери файл'}</div>
+        <input id="opiFile" type="file" accept=".img,.iso,.xz,.gz,.zip" hidden>
+        <div class="row"><button type="button" id="opiPick">${pr.osImageName ? 'Сменить' : 'Выбрать образ'}</button>${pr.osImageName ? '<button type="button" id="opiEject">Извлечь</button><button type="button" id="opiRun">Открыть для QEMU</button>' : ''}</div>
+        <p class="muted" id="opiMsg">${pr.osImageName ? 'Образ готов — бут на ПК через QEMU (PC Bot). В симуляторе ОС не запускается; скетч Python + HDMI работает как раньше.' : 'Реальная Orange Pi OS запускается на ПК через QEMU; здесь — конфиг и образ.'}</p>`; }
     if (p.type === 'ip5306') h += `<div class="row"><button type="button" id="keyToggle">${p.keyLatch ? 'KEY: вкл' : 'KEY: выкл'}</button></div>`;
     h += '<h4>Сейчас</h4>';
     if (p.burned) h += `<div class="burnt">🔥 Сгорела<button id="fix">Заменить</button></div>`;
@@ -192,6 +204,18 @@
     if ($('#e12')) $('#e12').onchange = e => { if (!e.target.value) return; p.props.R = +e.target.value; commitProp(); props(); };
     el.querySelectorAll('[data-color]').forEach(b => b.onclick = () => { const n = b.dataset.color; if (!Object.prototype.hasOwnProperty.call(LED_COLORS, n)) return; p.props.color = n; p.props.Vf = LED_COLORS[n][1]; commitProp(); props(); });
     $('#rot').onclick = rotate; $('#del').onclick = del; $('#showCalc').onclick = e => { e.preventDefault(); showTab('calc'); };
+    if (p.type === 'opi' && window.OpiOs) { const O = window.OpiOs, msg = t => { const m = $('#opiMsg'); if (m) m.textContent = t; };
+      const sum = () => { const e = $('#opiSum'); if (e) e.textContent = O.summary(p.props); };
+      el.querySelectorAll('[data-ok]').forEach(i => { i.onchange = i.oninput = () => { const k = i.dataset.ok, v = Math.round(+i.value); if (!Number.isFinite(v)) return;
+        p.props[k] = Math.min(k === 'cpuCores' ? 8 : 1e5, Math.max(1, v)); sum(); autosave(); }; });
+      $('#opiCpu').onchange = e => { const n = e.target.value; if (!O.PRESETS[n]) return; p.props.cpuModel = n; Object.assign(p.props, O.PRESETS[n]); autosave(); props(); };
+      const take = async f => { if (!f) return; const c = O.check(f); if (!c.ok) { msg(c.msg); return; }
+        try { const r = await O.attach(p.id, f); p.props.osImageName = r.meta.name; p.props.osImageSize = r.meta.size; p.props.osImageId = r.meta.id; autosave(); props(); if (r.warn) msg(r.warn); } catch (e) { msg(e.message); } };
+      $('#opiPick').onclick = () => $('#opiFile').click(); $('#opiFile').onchange = e => take(e.target.files[0]);
+      const dz = $('#opiDrop'); dz.ondragover = e => { e.preventDefault(); dz.classList.add('on'); }; dz.ondragleave = () => dz.classList.remove('on');
+      dz.ondrop = e => { e.preventDefault(); dz.classList.remove('on'); take(e.dataTransfer.files[0]); };
+      if ($('#opiEject')) $('#opiEject').onclick = async () => { await O.eject(p.id); p.props.osImageName = ''; p.props.osImageSize = 0; p.props.osImageId = ''; autosave(); props(); };
+      if ($('#opiRun')) $('#opiRun').onclick = async () => { msg(await O.exportImage(p.id) ? 'Образ готов — бут на ПК через QEMU (PC Bot). Файл сохранён.' : 'Образ не найден в этой вкладке — прикрепи заново (метаданные сохранены).'); }; }
     if ($('#usbToggle')) $('#usbToggle').onclick = () => { p.usb = !p.usb; p._pwr = null; p._sourced = null; p._hot = null; prevV = null; props(); render(); };
     if ($('#keyToggle')) $('#keyToggle').onclick = () => { p.keyLatch = !p.keyLatch; prevV = null; props(); render(); };
     if ($('#fix')) $('#fix').onclick = () => { delete p.burned; delete checks[p.id]; lastAlert = null; changed(); };
@@ -546,7 +570,7 @@
   /* sketch worker lifecycle: a crashed/hung worker (exception, OOM, infinite loop) is torn down, a fresh idle
    * worker is created right away, the console explains what happened, and the next Run uses the fresh worker. */
   let spare = null, crashes = 0;
-  const newWorker = () => new Worker('worker.js?v=14.6.9');
+  const newWorker = () => new Worker('worker.js?v=14.7.0');
   function takeWorker() { const w = spare || newWorker(); spare = null; return w; }
   function crash(msg) { if (!worker) return; worker.onmessage = worker.onerror = null; try { worker.terminate(); } catch (e) {} worker = null; gpio = {}; prevV = null; crashes++;
     try { spare = newWorker(); } catch (e) { spare = null; }
