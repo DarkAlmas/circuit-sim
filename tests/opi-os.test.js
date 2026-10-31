@@ -1,4 +1,4 @@
-// v14.7.1: Orange Pi specs + OS image meta (no in-browser boot).
+// v14.7.2: Orange Pi specs + OS image meta (no in-browser boot).
 const test = require('node:test'), assert = require('node:assert');
 global.window = { Solver: require('../solver.js') };
 require('../parts.js'); require('../parts2.js'); window.Devices = require('../devices.js'); require('../parts3.js'); require('../sanitize.js');
