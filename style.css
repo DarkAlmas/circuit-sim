@@ -334,7 +334,7 @@ body.pm.assist-open #right{height:var(--h-right,78vh)}
   /* Empty history must not keep a 120px flex base, or the API fields collapse under the composer. */
   body.assist-open #assistLog{flex:0 0 auto;min-height:0;max-height:140px}
 }
-/* v14.7.1: phone «Помощник». Mode is a short segment, settings use the sheet scroll, opted-out send is grey. */
+/* v14.7.2: phone «Помощник». Mode is a short segment, settings use the sheet scroll, opted-out send is grey. */
 #assistMode{flex:0 0 auto;width:100%;align-items:stretch}
 #assistMode button{flex:1 1 0;height:36px;min-height:36px;max-height:36px;padding:4px 10px}
 #assistSend:disabled{background:#2c3344;border-color:#3d465c;color:#b7c2d4;opacity:1}
@@ -364,15 +364,20 @@ body.pm.assist-open #right{height:var(--h-right,78vh)}
   body.assist-open #assistInput{min-height:52px}
   #assistCfg .srow{min-height:44px}
 }
-/* v14.7.1: Orange Pi OS image drop zone */
+/* v14.7.2: Orange Pi OS image drop zone */
 .opidrop { cursor: pointer; }
 .opidrop { border: 1px dashed #888; border-radius: 6px; padding: 10px; font-size: 12px; text-align: center; margin: 4px 0; }
 .opidrop.on { border-color: #f90; background: rgba(255,153,0,.1); }
 
-/* v14.7.1: Orange Pi inspector on phones — tap drop zone opens picker, fat stacked controls */
+/* v14.7.2: Orange Pi inspector on phones — tap drop zone opens picker, fat stacked controls */
 body.pm .opidrop { min-height: 80px; padding: 16px 12px; font-size: 15px; border: 2px dashed #f90; border-radius: 10px; display: flex; align-items: center; justify-content: center; }
 body.pm #props .row:has(#opiPick) { display: flex; flex-direction: column; gap: 8px; }
 body.pm #opiPick, body.pm #opiEject, body.pm #opiRun { width: 100%; min-height: 48px; font-size: 16px; }
 body.pm #props select, body.pm #props [data-ok] { width: 100%; font-size: 16px; }
 body.pm #opiMsg { line-height: 1.3; font-size: 13px; margin: 6px 0; }
 @media (max-height: 500px) and (orientation: landscape) and (pointer: coarse) { .opidrop { min-height: 56px; padding: 10px; } #opiMsg { line-height: 1.25; } }
+/* v14.7.2 opi quick pick + hints */
+.opilist { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0; }
+.opihint.on { outline: 2px solid #ff9a3c; }
+body.pm .opilist { flex-direction: column; }
+body.pm .opihint, body.pm .opirecent { width: 100%; min-height: 48px; font-size: 16px; }

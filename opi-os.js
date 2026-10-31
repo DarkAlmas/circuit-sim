@@ -29,7 +29,30 @@
     const v = await getImage(partId); if (!v) return false;
     const a = document.createElement('a'), u = URL.createObjectURL(v.blob); a.href = u; a.download = v.meta.name; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(u), 5000); return true;
   }
-  const api = { PRESETS, RAM, DISK, SOFT, HARD, fmtSize, summary, check, attach, getImage, eject, exportImage };
+  /* v14.7.2: quick pick of images already stored in this browser + recommended hints (names only, no network). */
+  const HINTS = [
+    { id: 'armbian-bookworm-pc', title: 'Armbian Bookworm · Orange Pi PC', cpu: 'Allwinner H3', mask: '*armbian*orangepipc*bookworm*.img.xz' },
+    { id: 'armbian-jammy-pc', title: 'Armbian Jammy · Orange Pi PC', cpu: 'Allwinner H3', mask: '*armbian*orangepipc*jammy*.img.xz' },
+    { id: 'opios-ubuntu', title: 'Orange Pi OS (Ubuntu)', cpu: 'Allwinner H3', mask: '*orangepi*ubuntu*.img' },
+    { id: 'armbian-pc2', title: 'Armbian · Orange Pi PC2', cpu: 'Allwinner H5', mask: '*armbian*orangepipc2*.img.xz' },
+    { id: 'armbian-opi3', title: 'Armbian · Orange Pi 3', cpu: 'Allwinner H6', mask: '*armbian*orangepi3*.img.xz' },
+    { id: 'debian-minimal', title: 'Debian minimal (Orange Pi)', cpu: 'Allwinner H3', mask: '*debian*orangepi*.img' }];
+  async function listRecent() {
+    const out = {}; for (const k in mem) out[mem[k].meta.id] = mem[k].meta;
+    try { const d = await db(); await new Promise((res, rej) => { const t = d.transaction('img', 'readonly'), q = t.objectStore('img').openCursor();
+      q.onsuccess = () => { const c = q.result; if (!c) return; if (c.value && c.value.meta && !out[c.key]) out[c.key] = Object.assign({}, c.value.meta, { id: c.key }); c.continue(); };
+      t.oncomplete = res; t.onerror = () => rej(t.error); }); } catch (e) { /* no IDB */ }
+    const seen = {}; return Object.values(out).filter(m => { const k = m.name + '|' + m.size; if (seen[k]) return false; seen[k] = 1; return true; }).sort((a, b) => (b.ts || 0) - (a.ts || 0));
+  }
+  async function attachExisting(partId, storedId) {
+    let v = null; for (const k in mem) if (mem[k].meta.id === storedId) v = mem[k];
+    if (!v) { try { v = await tx('readonly', s => s.get(storedId)); } catch (e) { v = null; } }
+    if (!v || !v.blob) throw new Error('Образ не найден в этом браузере — выбери файл заново');
+    const meta = Object.assign({}, v.meta, { id: 'opi-sd-' + partId, ts: Date.now() }); mem[partId] = { blob: v.blob, meta };
+    if (meta.size <= SOFT) { try { await tx('readwrite', s => s.put({ blob: v.blob, meta }, meta.id)); } catch (e) { /* tab only */ } }
+    return { meta };
+  }
+  const api = { HINTS, listRecent, attachExisting, PRESETS, RAM, DISK, SOFT, HARD, fmtSize, summary, check, attach, getImage, eject, exportImage };
   if (typeof window !== 'undefined') window.OpiOs = api;
   if (typeof module !== 'undefined') module.exports = api;
 })();

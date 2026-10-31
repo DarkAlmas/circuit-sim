@@ -22,9 +22,25 @@ test('image check: ext, 2 GB hard cap, 256 MB warn', () => {
   assert.ok(O.check({ name: 'a.img', size: O.SOFT + 1 }).warn);
 });
 
-// v14.7.1: phone hooks
+// v14.7.2: phone hooks
 { const fs = require('fs'), path = require('path'), assert = require('assert');
   const app = fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8'), css = fs.readFileSync(path.join(__dirname, '..', 'style.css'), 'utf8');
   assert.ok(/dz\.onclick = \(\) => \$\('#opiFile'\)\.click\(\)/.test(app), 'tap drop zone opens picker');
   assert.ok(app.includes('Прикрепи .img/.iso. Бут ОС — на ПК.'), 'short phone copy');
   assert.ok(css.includes('body.pm .opidrop') && css.includes('body.pm #opiPick'), 'phone css'); }
+
+// v14.7.2: hints + quick pick + palette copy + sanitize osHintId
+test('v14.7.2 hints, attachExisting, sanitize', async () => {
+  assert.ok(O.HINTS.length >= 4 && O.HINTS.every(h => /^[a-z0-9-]+$/.test(h.id) && !('url' in h) && O.PRESETS[h.cpu]));
+  await O.attach('A1', { name: 'armbian.img.xz', size: O.SOFT + 5 });
+  const list = await O.listRecent(); assert.ok(list.some(m => m.id === 'opi-sd-A1'));
+  const r = await O.attachExisting('B2', 'opi-sd-A1'); assert.equal(r.meta.id, 'opi-sd-B2'); assert.equal(r.meta.name, 'armbian.img.xz');
+  assert.equal((await O.getImage('B2')).meta.name, 'armbian.img.xz');
+  await assert.rejects(O.attachExisting('C3', 'opi-sd-none'));
+  const ok = W.sanitizeProject({ parts: [{ id: 'U1', type: 'opi', props: { osHintId: 'armbian-jammy-pc' } }] }).parts[0].props;
+  assert.equal(ok.osHintId, 'armbian-jammy-pc');
+  const bad = W.sanitizeProject({ parts: [{ id: 'U1', type: 'opi', props: { osHintId: 'https://x/<a>', osImageUrl: 'https://evil' } }] }).parts[0].props;
+  assert.equal(bad.osHintId, ''); assert.ok(!('osImageUrl' in bad));
+  assert.equal(W.PARTS.opi.name, 'Orange Pi (конфиг + образ → QEMU)');
+  const src = require('fs').readFileSync(require('path').join(__dirname, '..', 'opi-os.js'), 'utf8'); assert.ok(!/fetch\(|XMLHttpRequest|https?:\/\//.test(src));
+});

@@ -185,6 +185,8 @@
         <label class="prop">ОЗУ, МБ<select data-ok="ramMb">${O.RAM.map(n => `<option value="${n}"${n === pr.ramMb ? ' selected' : ''}>${n}</option>`).join('')}</select></label>
         <label class="prop">Диск, ГБ<select data-ok="diskGb">${O.DISK.map(n => `<option value="${n}"${n === pr.diskGb ? ' selected' : ''}>${n}</option>`).join('')}</select></label>
         <h4>Образ ОС (SD)</h4><div id="opiDrop" class="opidrop" role="button" tabindex="0">${pr.osImageName ? `Образ прикреплён: <b>${esc(pr.osImageName)}</b> · ${esc(O.fmtSize(pr.osImageSize))}` : (opiPhone() ? 'Нажми, чтобы выбрать .img / .iso' : 'Перетащи сюда .img / .iso или выбери файл')}</div>
+        <div id="opiRecent" class="opilist"></div>
+        <p class="muted">Рекомендуемые образы (скачай на ПК, затем выбери файл):</p><div class="opilist">${O.HINTS.map(x => `<button type="button" class="opihint${x.id === pr.osHintId ? ' on' : ''}" data-hint="${esc(x.id)}">${esc(x.title)}</button>`).join('')}</div>
         <input id="opiFile" type="file" accept=".img,.iso,.xz,.gz,.zip" hidden>
         <div class="row"><button type="button" id="opiPick">${pr.osImageName ? 'Сменить' : 'Выбрать образ'}</button>${pr.osImageName ? '<button type="button" id="opiEject">Извлечь</button><button type="button" id="opiRun">Открыть для QEMU</button>' : ''}</div>
         <p class="muted" id="opiMsg">${pr.osImageName ? (opiPhone() ? 'Образ на SD. ОС — через QEMU на ПК.' : 'Образ готов — бут на ПК через QEMU (PC Bot). В симуляторе ОС не запускается; скетч Python + HDMI работает как раньше.') : (opiPhone() ? 'Прикрепи .img/.iso. Бут ОС — на ПК.' : 'Реальная Orange Pi OS запускается на ПК через QEMU; здесь — конфиг и образ.')}</p>`; }
@@ -215,6 +217,13 @@
       $('#opiPick').onclick = () => $('#opiFile').click(); $('#opiFile').onchange = e => take(e.target.files[0]);
       const dz = $('#opiDrop'); dz.onclick = () => $('#opiFile').click(); dz.onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); $('#opiFile').click(); } }; dz.ondragover = e => { e.preventDefault(); dz.classList.add('on'); }; dz.ondragleave = () => dz.classList.remove('on');
       dz.ondrop = e => { e.preventDefault(); dz.classList.remove('on'); take(e.dataTransfer.files[0]); };
+      el.querySelectorAll('[data-hint]').forEach(b => b.onclick = () => { const x = O.HINTS.find(h => h.id === b.dataset.hint); if (!x) return; p.props.osHintId = x.id;
+        if (O.PRESETS[x.cpu]) { p.props.cpuModel = x.cpu; Object.assign(p.props, O.PRESETS[x.cpu]); sum(); } autosave();
+        el.querySelectorAll('[data-hint]').forEach(o => o.classList.toggle('on', o === b)); msg(opiPhone() ? `Выбери файл ${x.mask}` : `Ищи файл ${x.mask} — скачай на ПК (браузер сам не качает), затем выбери.`); $('#opiFile').click(); });
+      O.listRecent().then(list => { const box = $('#opiRecent'); if (!box) return; list = list.filter(m => m.id !== 'opi-sd-' + p.id); if (!list.length) return;
+        const t = document.createElement('p'); t.className = 'muted'; t.textContent = 'Быстрый выбор — уже в этом браузере:'; box.appendChild(t);
+        list.slice(0, 6).forEach(m => { const b = document.createElement('button'); b.type = 'button'; b.className = 'opirecent'; b.textContent = `${m.name} · ${O.fmtSize(m.size)}`;
+          b.onclick = async () => { try { const r = await O.attachExisting(p.id, m.id); p.props.osImageName = r.meta.name; p.props.osImageSize = r.meta.size; p.props.osImageId = r.meta.id; autosave(); props(); } catch (e) { msg(e.message); } }; box.appendChild(b); }); });
       if ($('#opiEject')) $('#opiEject').onclick = async () => { await O.eject(p.id); p.props.osImageName = ''; p.props.osImageSize = 0; p.props.osImageId = ''; autosave(); props(); };
       if ($('#opiRun')) $('#opiRun').onclick = async () => { msg(await O.exportImage(p.id) ? (opiPhone() ? 'Файл отдан на скачивание. Бут — на ПК.' : 'Образ готов — бут на ПК через QEMU (PC Bot). Файл сохранён.') : 'Образ не найден в этой вкладке — прикрепи заново (метаданные сохранены).'); }; }
     if ($('#usbToggle')) $('#usbToggle').onclick = () => { p.usb = !p.usb; p._pwr = null; p._sourced = null; p._hot = null; prevV = null; props(); render(); };
@@ -571,7 +580,7 @@
   /* sketch worker lifecycle: a crashed/hung worker (exception, OOM, infinite loop) is torn down, a fresh idle
    * worker is created right away, the console explains what happened, and the next Run uses the fresh worker. */
   let spare = null, crashes = 0;
-  const newWorker = () => new Worker('worker.js?v=14.7.1');
+  const newWorker = () => new Worker('worker.js?v=14.7.2');
   function takeWorker() { const w = spare || newWorker(); spare = null; return w; }
   function crash(msg) { if (!worker) return; worker.onmessage = worker.onerror = null; try { worker.terminate(); } catch (e) {} worker = null; gpio = {}; prevV = null; crashes++;
     try { spare = newWorker(); } catch (e) { spare = null; }
@@ -664,7 +673,7 @@
     const s = saved(); s[n] = { ...strip(proj), name: n }; localStorage.setItem(LS, JSON.stringify(s)); projList(n); $('#status').textContent = 'Сохранено: ' + n; };
   /* new-project chooser (cards built with createElement/textContent only) */
   const NEWP = [['esp32', '📶', 'ESP32', 'Wi-Fi плата, 3,3 В, мигалка'], ['esp8266', '📡', 'ESP8266', 'NodeMCU, кнопка и светодиод'], ['uno', '🟦', 'Arduino Uno', '5 В, матрица 8×8 MAX7219'], ['esp32c3', '🔹', 'ESP32-C3 SuperMini', 'RISC-V, 3,3 В, LED на GPIO8'], ['line', '🤖', 'Робот по линии', 'ESP32-C3, 2×TCRT5000, DRV8833, 2 мотора TT, 103450'], ['car', '🏎', 'Робот-машинка', 'Шасси, колёса, датчики и трасса с чёрной линией'],
-    ['attiny', '🐜', 'ATtiny85 на макетке', 'DIP-8 чип, батарейка, светодиод'], ['pico', '🍓', 'Raspberry Pi Pico', '3,3 В, лента WS2812'], ['opi', '🖥', 'Orange Pi (Python + HDMI)', 'Python, монитор 1920×1080'],
+    ['attiny', '🐜', 'ATtiny85 на макетке', 'DIP-8 чип, батарейка, светодиод'], ['pico', '🍓', 'Raspberry Pi Pico', '3,3 В, лента WS2812'], ['opi', '🖥', 'Orange Pi (конфиг + образ → QEMU)', 'CPU/ОЗУ/диск, образ ОС; Python + HDMI 1920×1080'],
     ['analog', '🔋', 'Чистая электроника', 'Батарейка, резистор, светодиод'], ['empty', '⬜', 'Пустой', 'Чистый лист']];
   function newDialog() { const m = $('#newModal'), g = $('#newCards'); g.textContent = '';
     for (const [k, ic, nm, ln] of NEWP) { const b = document.createElement('button'); b.className = 'ncard'; b.dataset.kind = k;
