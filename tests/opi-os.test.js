@@ -1,4 +1,4 @@
-// v14.7.3: Orange Pi specs + OS image meta (no in-browser boot).
+// v14.7.4: Orange Pi specs + OS image meta (no in-browser boot).
 const test = require('node:test'), assert = require('node:assert');
 global.window = { Solver: require('../solver.js') };
 require('../parts.js'); require('../parts2.js'); window.Devices = require('../devices.js'); require('../parts3.js'); require('../sanitize.js');
@@ -22,15 +22,15 @@ test('image check: ext, 2 GB hard cap, 256 MB warn', () => {
   assert.ok(O.check({ name: 'a.img', size: O.SOFT + 1 }).warn);
 });
 
-// v14.7.3: phone hooks
+// v14.7.4: phone hooks
 { const fs = require('fs'), path = require('path'), assert = require('assert');
   const app = fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8'), css = fs.readFileSync(path.join(__dirname, '..', 'style.css'), 'utf8');
   assert.ok(/dz\.onclick = \(\) => \$\('#opiFile'\)\.click\(\)/.test(app), 'tap drop zone opens picker');
   assert.ok(app.includes('Прикрепи .img/.iso. Бут ОС — на ПК.'), 'short phone copy');
   assert.ok(css.includes('body.pm .opidrop') && css.includes('body.pm #opiPick'), 'phone css'); }
 
-// v14.7.3: hints + quick pick + palette copy + sanitize osHintId
-test('v14.7.3 hints, attachExisting, sanitize', async () => {
+// v14.7.4: hints + quick pick + palette copy + sanitize osHintId
+test('v14.7.4 hints, attachExisting, sanitize', async () => {
   assert.ok(O.HINTS.length >= 4 && O.HINTS.every(h => /^[a-z0-9-]+$/.test(h.id) && !('url' in h) && O.PRESETS[h.cpu]));
   await O.attach('A1', { name: 'armbian.img.xz', size: O.SOFT + 5 });
   const list = await O.listRecent(); assert.ok(list.some(m => m.id === 'opi-sd-A1'));
@@ -45,8 +45,8 @@ test('v14.7.3 hints, attachExisting, sanitize', async () => {
   const src = require('fs').readFileSync(require('path').join(__dirname, '..', 'opi-os.js'), 'utf8'); assert.ok(!/fetch\(|XMLHttpRequest|https?:\/\//.test(src));
 });
 
-// v14.7.3: opi-os-local.json for DESKTOP launcher
-test('v14.7.3 buildLocalJson', () => {
+// v14.7.4: opi-os-local.json for DESKTOP launcher
+test('v14.7.4 buildLocalJson', () => {
   const fs = require('fs'), path = require('path');
   const j = O.buildLocalJson({ cpuModel: 'Allwinner H3', osHintId: 'armbian-jammy-pc' }, { now: new Date(0) });
   assert.deepEqual(Object.keys(j), ['circuitBridge','machine','cpu','guestOnly','virtfs','image','imageName','imageBytes','hintMatch','qemu','launcher','launchedAt']);
@@ -57,4 +57,22 @@ test('v14.7.3 buildLocalJson', () => {
   assert.equal(k.imageBytes, 7); assert.equal(k.hintMatch, 'x.img'); assert.equal(k.cpu, 'cortex-a55');
   const src = fs.readFileSync(path.join(__dirname, '..', 'opi-os.js'), 'utf8');
   assert.ok(!/https?:|fetch\(/.test(src));
+});
+
+// v14.7.4: desktop boots via protocol, phone downloads json
+test('v14.7.4 runQemu desktop vs phone', () => {
+  const O = globalThis.window ? window.OpiOs : require('../opi-os.js');
+  const loc = { href: 'https://x/' };
+  assert.equal(O.runQemu({}, false, loc).mode, 'desktop');
+  assert.equal(loc.href, 'opi-qemu://boot');
+  assert.equal(O.BOOT_URL, 'opi-qemu://boot');
+  assert.ok(!/https?:/.test(O.BOOT_URL));
+  let called = 0; const orig = O.exportLocalJson;
+  const loc2 = { href: 'h' };
+  const src = require('fs').readFileSync(require('path').join(__dirname, '..', 'opi-os.js'), 'utf8');
+  assert.ok(/if \(phone\) \{ exportLocalJson\(pr\)/.test(src));
+  const j = O.buildLocalJson({});
+  assert.equal(j.guestOnly, true); assert.equal(j.virtfs, false);
+  assert.ok(!/fetch\(/.test(src));
+  assert.equal(loc2.href, 'h'); void called; void orig;
 });

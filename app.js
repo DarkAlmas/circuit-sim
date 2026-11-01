@@ -225,7 +225,7 @@
         list.slice(0, 6).forEach(m => { const b = document.createElement('button'); b.type = 'button'; b.className = 'opirecent'; b.textContent = `${m.name} · ${O.fmtSize(m.size)}`;
           b.onclick = async () => { try { const r = await O.attachExisting(p.id, m.id); p.props.osImageName = r.meta.name; p.props.osImageSize = r.meta.size; p.props.osImageId = r.meta.id; autosave(); props(); } catch (e) { msg(e.message); } }; box.appendChild(b); }); });
       if ($('#opiEject')) $('#opiEject').onclick = async () => { await O.eject(p.id); p.props.osImageName = ''; p.props.osImageSize = 0; p.props.osImageId = ''; autosave(); props(); };
-      if ($('#opiRun')) $('#opiRun').onclick = () => { try { O.exportLocalJson(p.props); msg(opiPhone() ? 'json скачан → run-orangepi-pc.cmd' : 'Скачан opi-os-local.json — запусти Apps\\qemu\\run-orangepi-pc.cmd (образ в Downloads\\opi-os).'); } catch (e) { msg(e.message); } }; }
+      if ($('#opiRun')) $('#opiRun').onclick = () => { try { const r = O.runQemu(p.props, opiPhone()); msg(r.mode === 'phone' ? 'json скачан → бут на ПК: run-orangepi-pc.cmd' : 'QEMU запускается (opi-qemu://boot). Если не стартовал — Apps\\qemu\\run-orangepi-pc.cmd'); } catch (e) { msg(e.message); } }; }
     if ($('#usbToggle')) $('#usbToggle').onclick = () => { p.usb = !p.usb; p._pwr = null; p._sourced = null; p._hot = null; prevV = null; props(); render(); };
     if ($('#keyToggle')) $('#keyToggle').onclick = () => { p.keyLatch = !p.keyLatch; prevV = null; props(); render(); };
     if ($('#fix')) $('#fix').onclick = () => { delete p.burned; delete checks[p.id]; lastAlert = null; changed(); };
@@ -580,7 +580,7 @@
   /* sketch worker lifecycle: a crashed/hung worker (exception, OOM, infinite loop) is torn down, a fresh idle
    * worker is created right away, the console explains what happened, and the next Run uses the fresh worker. */
   let spare = null, crashes = 0;
-  const newWorker = () => new Worker('worker.js?v=14.7.3');
+  const newWorker = () => new Worker('worker.js?v=14.7.4');
   function takeWorker() { const w = spare || newWorker(); spare = null; return w; }
   function crash(msg) { if (!worker) return; worker.onmessage = worker.onerror = null; try { worker.terminate(); } catch (e) {} worker = null; gpio = {}; prevV = null; crashes++;
     try { spare = newWorker(); } catch (e) { spare = null; }

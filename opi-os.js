@@ -29,7 +29,7 @@
     const v = await getImage(partId); if (!v) return false;
     const a = document.createElement('a'), u = URL.createObjectURL(v.blob); a.href = u; a.download = v.meta.name; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(u), 5000); return true;
   }
-  /* v14.7.3: quick pick of images already stored in this browser + recommended hints (names only, no network). */
+  /* v14.7.4: quick pick of images already stored in this browser + recommended hints (names only, no network). */
   const HINTS = [
     { id: 'armbian-bookworm-pc', title: 'Armbian Bookworm · Orange Pi PC', cpu: 'Allwinner H3', mask: '*armbian*orangepipc*bookworm*.img.xz' },
     { id: 'armbian-jammy-pc', title: 'Armbian Jammy · Orange Pi PC', cpu: 'Allwinner H3', mask: '*armbian*orangepipc*jammy*.img.xz' },
@@ -37,7 +37,7 @@
     { id: 'armbian-pc2', title: 'Armbian · Orange Pi PC2', cpu: 'Allwinner H5', mask: '*armbian*orangepipc2*.img.xz' },
     { id: 'armbian-opi3', title: 'Armbian · Orange Pi 3', cpu: 'Allwinner H6', mask: '*armbian*orangepi3*.img.xz' },
     { id: 'debian-minimal', title: 'Debian minimal (Orange Pi)', cpu: 'Allwinner H3', mask: '*debian*orangepi*.img' }];
-  /* v14.7.3: opi-os-local.json for DESKTOP launcher (PC Bot schema). Path convention: C:\\Users\\Dark\\… (room). No network. */
+  /* v14.7.4: opi-os-local.json for DESKTOP launcher (PC Bot schema). Path convention: C:\\Users\\Dark\\… (room). No network. */
   const DESK = { dir: 'C:\\Users\\Dark\\Downloads\\opi-os\\', qemu: 'C:\\Users\\Dark\\Apps\\qemu\\qemu-system-arm.exe', launcher: 'C:\\Users\\Dark\\Apps\\qemu\\run-orangepi-pc.cmd', defName: 'Armbian_Orangepipc_trixie_current_minimal.img' };
   function cpuOf(m) { return /RK35/i.test(m || '') ? 'cortex-a55' : 'cortex-a7'; }
   function buildLocalJson(pr, opts) {
@@ -67,7 +67,11 @@
     if (meta.size <= SOFT) { try { await tx('readwrite', s => s.put({ blob: v.blob, meta }, meta.id)); } catch (e) { /* tab only */ } }
     return { meta };
   }
-  const api = { DESK, buildLocalJson, exportLocalJson, HINTS, listRecent, attachExisting, PRESETS, RAM, DISK, SOFT, HARD, fmtSize, summary, check, attach, getImage, eject, exportImage };
+  /* v14.7.4: desktop boot via registered protocol opi-qemu://boot (DESKTOP -> opi-qemu-protocol.cmd -> run-orangepi-pc.ps1, guest-only). Navigation, not fetch. */
+  const BOOT_URL = 'opi-qemu://boot';
+  function bootDesktop(loc) { const l = loc || (typeof location !== 'undefined' ? location : null); if (!l) throw new Error('Нет location'); l.href = BOOT_URL; return BOOT_URL; }
+  function runQemu(pr, phone, loc) { if (phone) { exportLocalJson(pr); return { mode: 'phone', json: true }; } bootDesktop(loc); return { mode: 'desktop', url: BOOT_URL }; }
+  const api = { BOOT_URL, bootDesktop, runQemu, DESK, buildLocalJson, exportLocalJson, HINTS, listRecent, attachExisting, PRESETS, RAM, DISK, SOFT, HARD, fmtSize, summary, check, attach, getImage, eject, exportImage };
   if (typeof window !== 'undefined') window.OpiOs = api;
   if (typeof module !== 'undefined') module.exports = api;
 })();
