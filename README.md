@@ -1,6 +1,6 @@
 # Схемотехник — симулятор схем с ESP32 / ESP8266 в браузере
 
-> v14.7.3 Orange Pi (mobile-friendly инспектор): веб = конфиг (CPU/ОЗУ/диск) + образ ОС (.img/.iso); реальный бут = QEMU на ПК.
+> v14.7.4 Orange Pi (mobile-friendly инспектор): веб = конфиг (CPU/ОЗУ/диск) + образ ОС (.img/.iso); реальный бут = QEMU на ПК.
 
 Статическое веб-приложение без сборки (vanilla JS). Откройте `index.html` через любой HTTP-сервер (`python3 -m http.server`).
 Worker не работает с `file://`.
