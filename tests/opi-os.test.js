@@ -1,4 +1,4 @@
-// v14.7.2: Orange Pi specs + OS image meta (no in-browser boot).
+// v14.7.3: Orange Pi specs + OS image meta (no in-browser boot).
 const test = require('node:test'), assert = require('node:assert');
 global.window = { Solver: require('../solver.js') };
 require('../parts.js'); require('../parts2.js'); window.Devices = require('../devices.js'); require('../parts3.js'); require('../sanitize.js');
@@ -22,15 +22,15 @@ test('image check: ext, 2 GB hard cap, 256 MB warn', () => {
   assert.ok(O.check({ name: 'a.img', size: O.SOFT + 1 }).warn);
 });
 
-// v14.7.2: phone hooks
+// v14.7.3: phone hooks
 { const fs = require('fs'), path = require('path'), assert = require('assert');
   const app = fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8'), css = fs.readFileSync(path.join(__dirname, '..', 'style.css'), 'utf8');
   assert.ok(/dz\.onclick = \(\) => \$\('#opiFile'\)\.click\(\)/.test(app), 'tap drop zone opens picker');
   assert.ok(app.includes('Прикрепи .img/.iso. Бут ОС — на ПК.'), 'short phone copy');
   assert.ok(css.includes('body.pm .opidrop') && css.includes('body.pm #opiPick'), 'phone css'); }
 
-// v14.7.2: hints + quick pick + palette copy + sanitize osHintId
-test('v14.7.2 hints, attachExisting, sanitize', async () => {
+// v14.7.3: hints + quick pick + palette copy + sanitize osHintId
+test('v14.7.3 hints, attachExisting, sanitize', async () => {
   assert.ok(O.HINTS.length >= 4 && O.HINTS.every(h => /^[a-z0-9-]+$/.test(h.id) && !('url' in h) && O.PRESETS[h.cpu]));
   await O.attach('A1', { name: 'armbian.img.xz', size: O.SOFT + 5 });
   const list = await O.listRecent(); assert.ok(list.some(m => m.id === 'opi-sd-A1'));
@@ -43,4 +43,18 @@ test('v14.7.2 hints, attachExisting, sanitize', async () => {
   assert.equal(bad.osHintId, ''); assert.ok(!('osImageUrl' in bad));
   assert.equal(W.PARTS.opi.name, 'Orange Pi (конфиг + образ → QEMU)');
   const src = require('fs').readFileSync(require('path').join(__dirname, '..', 'opi-os.js'), 'utf8'); assert.ok(!/fetch\(|XMLHttpRequest|https?:\/\//.test(src));
+});
+
+// v14.7.3: opi-os-local.json for DESKTOP launcher
+test('v14.7.3 buildLocalJson', () => {
+  const fs = require('fs'), path = require('path');
+  const j = O.buildLocalJson({ cpuModel: 'Allwinner H3', osHintId: 'armbian-jammy-pc' }, { now: new Date(0) });
+  assert.deepEqual(Object.keys(j), ['circuitBridge','machine','cpu','guestOnly','virtfs','image','imageName','imageBytes','hintMatch','qemu','launcher','launchedAt']);
+  assert.equal(j.guestOnly, true); assert.equal(j.virtfs, false); assert.equal(j.machine, 'orangepi-pc'); assert.equal(j.cpu, 'cortex-a7');
+  assert.equal(j.imageName, 'Armbian_Orangepipc_trixie_current_minimal.img'); assert.equal(j.image, 'C:\\Users\\Dark\\Downloads\\opi-os\\' + j.imageName);
+  assert.equal(j.hintMatch, 'Armbian Jammy · Orange Pi PC'); assert.equal(j.launchedAt, '1970-01-01T00:00:00.000Z');
+  const k = O.buildLocalJson({ osImageName: 'x.img', osImageSize: 7, cpuModel: 'Rockchip RK3566' });
+  assert.equal(k.imageBytes, 7); assert.equal(k.hintMatch, 'x.img'); assert.equal(k.cpu, 'cortex-a55');
+  const src = fs.readFileSync(path.join(__dirname, '..', 'opi-os.js'), 'utf8');
+  assert.ok(!/https?:|fetch\(/.test(src));
 });

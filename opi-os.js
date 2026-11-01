@@ -29,7 +29,7 @@
     const v = await getImage(partId); if (!v) return false;
     const a = document.createElement('a'), u = URL.createObjectURL(v.blob); a.href = u; a.download = v.meta.name; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(u), 5000); return true;
   }
-  /* v14.7.2: quick pick of images already stored in this browser + recommended hints (names only, no network). */
+  /* v14.7.3: quick pick of images already stored in this browser + recommended hints (names only, no network). */
   const HINTS = [
     { id: 'armbian-bookworm-pc', title: 'Armbian Bookworm · Orange Pi PC', cpu: 'Allwinner H3', mask: '*armbian*orangepipc*bookworm*.img.xz' },
     { id: 'armbian-jammy-pc', title: 'Armbian Jammy · Orange Pi PC', cpu: 'Allwinner H3', mask: '*armbian*orangepipc*jammy*.img.xz' },
@@ -37,6 +37,21 @@
     { id: 'armbian-pc2', title: 'Armbian · Orange Pi PC2', cpu: 'Allwinner H5', mask: '*armbian*orangepipc2*.img.xz' },
     { id: 'armbian-opi3', title: 'Armbian · Orange Pi 3', cpu: 'Allwinner H6', mask: '*armbian*orangepi3*.img.xz' },
     { id: 'debian-minimal', title: 'Debian minimal (Orange Pi)', cpu: 'Allwinner H3', mask: '*debian*orangepi*.img' }];
+  /* v14.7.3: opi-os-local.json for DESKTOP launcher (PC Bot schema). Path convention: C:\\Users\\Dark\\… (room). No network. */
+  const DESK = { dir: 'C:\\Users\\Dark\\Downloads\\opi-os\\', qemu: 'C:\\Users\\Dark\\Apps\\qemu\\qemu-system-arm.exe', launcher: 'C:\\Users\\Dark\\Apps\\qemu\\run-orangepi-pc.cmd', defName: 'Armbian_Orangepipc_trixie_current_minimal.img' };
+  function cpuOf(m) { return /RK35/i.test(m || '') ? 'cortex-a55' : 'cortex-a7'; }
+  function buildLocalJson(pr, opts) {
+    pr = pr || {}; opts = opts || {};
+    const h = pr.osHintId ? HINTS.find(x => x.id === pr.osHintId) : null;
+    const name = String(pr.osImageName || opts.lastName || DESK.defName).replace(/[\\/:*?"<>|]/g, '_').slice(0, 128);
+    return { circuitBridge: 'window.OpiOs.getImage', machine: 'orangepi-pc', cpu: cpuOf(pr.cpuModel), guestOnly: true, virtfs: false,
+      image: DESK.dir + name, imageName: name, imageBytes: Number(pr.osImageSize) || 0, hintMatch: h ? h.title : (pr.osImageName || ''),
+      qemu: DESK.qemu, launcher: DESK.launcher, launchedAt: (opts.now || new Date()).toISOString() };
+  }
+  function exportLocalJson(pr, opts) {
+    const j = buildLocalJson(pr, opts), b = new Blob([JSON.stringify(j, null, 2)], { type: 'application/json' });
+    const a = document.createElement('a'), u = URL.createObjectURL(b); a.href = u; a.download = 'opi-os-local.json'; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(u), 5000); return j;
+  }
   async function listRecent() {
     const out = {}; for (const k in mem) out[mem[k].meta.id] = mem[k].meta;
     try { const d = await db(); await new Promise((res, rej) => { const t = d.transaction('img', 'readonly'), q = t.objectStore('img').openCursor();
@@ -52,7 +67,7 @@
     if (meta.size <= SOFT) { try { await tx('readwrite', s => s.put({ blob: v.blob, meta }, meta.id)); } catch (e) { /* tab only */ } }
     return { meta };
   }
-  const api = { HINTS, listRecent, attachExisting, PRESETS, RAM, DISK, SOFT, HARD, fmtSize, summary, check, attach, getImage, eject, exportImage };
+  const api = { DESK, buildLocalJson, exportLocalJson, HINTS, listRecent, attachExisting, PRESETS, RAM, DISK, SOFT, HARD, fmtSize, summary, check, attach, getImage, eject, exportImage };
   if (typeof window !== 'undefined') window.OpiOs = api;
   if (typeof module !== 'undefined') module.exports = api;
 })();
