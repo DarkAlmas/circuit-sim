@@ -188,7 +188,7 @@
         <div id="opiRecent" class="opilist"></div>
         <p class="muted">Рекомендуемые образы (скачай на ПК, затем выбери файл):</p><div class="opilist">${O.HINTS.map(x => `<button type="button" class="opihint${x.id === pr.osHintId ? ' on' : ''}" data-hint="${esc(x.id)}">${esc(x.title)}</button>`).join('')}</div>
         <input id="opiFile" type="file" accept=".img,.iso,.xz,.gz,.zip" hidden>
-        <div class="row"><button type="button" id="opiPick">${pr.osImageName ? 'Сменить' : 'Выбрать образ'}</button>${pr.osImageName ? '<button type="button" id="opiEject">Извлечь</button><button type="button" id="opiRun">Открыть для QEMU</button>' : ''}</div>
+        <div class="row"><button type="button" id="opiPick">${pr.osImageName ? 'Сменить' : 'Выбрать образ'}</button>${pr.osImageName ? '<button type="button" id="opiEject">Извлечь</button>' : ''}<button type="button" id="opiRun">Открыть для QEMU</button></div>
         <p class="muted" id="opiMsg">${pr.osImageName ? (opiPhone() ? 'Образ на SD. ОС — через QEMU на ПК.' : 'Образ готов — бут на ПК через QEMU (PC Bot). В симуляторе ОС не запускается; скетч Python + HDMI работает как раньше.') : (opiPhone() ? 'Прикрепи .img/.iso. Бут ОС — на ПК.' : 'Реальная Orange Pi OS запускается на ПК через QEMU; здесь — конфиг и образ.')}</p>`; }
     if (p.type === 'ip5306') h += `<div class="row"><button type="button" id="keyToggle">${p.keyLatch ? 'KEY: вкл' : 'KEY: выкл'}</button></div>`;
     h += '<h4>Сейчас</h4>';
@@ -225,7 +225,7 @@
         list.slice(0, 6).forEach(m => { const b = document.createElement('button'); b.type = 'button'; b.className = 'opirecent'; b.textContent = `${m.name} · ${O.fmtSize(m.size)}`;
           b.onclick = async () => { try { const r = await O.attachExisting(p.id, m.id); p.props.osImageName = r.meta.name; p.props.osImageSize = r.meta.size; p.props.osImageId = r.meta.id; autosave(); props(); } catch (e) { msg(e.message); } }; box.appendChild(b); }); });
       if ($('#opiEject')) $('#opiEject').onclick = async () => { await O.eject(p.id); p.props.osImageName = ''; p.props.osImageSize = 0; p.props.osImageId = ''; autosave(); props(); };
-      if ($('#opiRun')) $('#opiRun').onclick = async () => { msg(await O.exportImage(p.id) ? (opiPhone() ? 'Файл отдан на скачивание. Бут — на ПК.' : 'Образ готов — бут на ПК через QEMU (PC Bot). Файл сохранён.') : 'Образ не найден в этой вкладке — прикрепи заново (метаданные сохранены).'); }; }
+      if ($('#opiRun')) $('#opiRun').onclick = () => { try { O.exportLocalJson(p.props); msg(opiPhone() ? 'json скачан → run-orangepi-pc.cmd' : 'Скачан opi-os-local.json — запусти Apps\\qemu\\run-orangepi-pc.cmd (образ в Downloads\\opi-os).'); } catch (e) { msg(e.message); } }; }
     if ($('#usbToggle')) $('#usbToggle').onclick = () => { p.usb = !p.usb; p._pwr = null; p._sourced = null; p._hot = null; prevV = null; props(); render(); };
     if ($('#keyToggle')) $('#keyToggle').onclick = () => { p.keyLatch = !p.keyLatch; prevV = null; props(); render(); };
     if ($('#fix')) $('#fix').onclick = () => { delete p.burned; delete checks[p.id]; lastAlert = null; changed(); };
@@ -580,7 +580,7 @@
   /* sketch worker lifecycle: a crashed/hung worker (exception, OOM, infinite loop) is torn down, a fresh idle
    * worker is created right away, the console explains what happened, and the next Run uses the fresh worker. */
   let spare = null, crashes = 0;
-  const newWorker = () => new Worker('worker.js?v=14.7.2');
+  const newWorker = () => new Worker('worker.js?v=14.7.3');
   function takeWorker() { const w = spare || newWorker(); spare = null; return w; }
   function crash(msg) { if (!worker) return; worker.onmessage = worker.onerror = null; try { worker.terminate(); } catch (e) {} worker = null; gpio = {}; prevV = null; crashes++;
     try { spare = newWorker(); } catch (e) { spare = null; }
